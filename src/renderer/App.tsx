@@ -41,19 +41,31 @@ export default function App() {
 
   // 处理 Agent 流式事件
   useEffect(() => {
-    let idleTimer: ReturnType<typeof setTimeout>;
+    const zora = window.zora;
+    if (!zora) {
+      return;
+    }
 
-    return window.zora.onStream((streamEvent) => {
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearIdleTimer = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+    };
+
+    const bumpContentActivity = () => {
+      setIsAgentIdle(false);
+      clearIdleTimer();
+      idleTimer = setTimeout(() => setIsAgentIdle(true), 450);
+    };
+
+    const unsubscribe = zora.onStream((streamEvent) => {
       console.log("[renderer event]", JSON.stringify(streamEvent).slice(0, 500));
 
-      setIsAgentIdle(false);
-      clearTimeout(idleTimer);
-
-      const scheduleIdle = () => {
-        idleTimer = setTimeout(() => setIsAgentIdle(true), 500);
-      };
-
       if (streamEvent.type === "agent_error") {
+        clearIdleTimer();
+        setIsAgentIdle(false);
         failConversation(
           getAgentErrorText(isRecord(streamEvent) ? streamEvent.error : undefined)
         );
@@ -61,11 +73,20 @@ export default function App() {
       }
 
       if (streamEvent.type === "agent_status") {
+        if (streamEvent.status === "started") {
+          bumpContentActivity();
+          return;
+        }
+
         if (streamEvent.status === "finished") {
+          clearIdleTimer();
+          setIsAgentIdle(false);
           completeConversation("done");
         }
 
         if (streamEvent.status === "stopped") {
+          clearIdleTimer();
+          setIsAgentIdle(false);
           completeConversation("stopped");
         }
 
@@ -86,21 +107,22 @@ export default function App() {
                 extractToolResultContent(block.content),
                 block.is_error === true
               );
+              bumpContentActivity();
             }
           });
         }
-
-        scheduleIdle();
         return;
       }
 
       if (streamEvent.type === "assistant") {
         hydrateAssistant(extractAssistantPayload(streamEvent.message));
-        scheduleIdle();
+        bumpContentActivity();
         return;
       }
 
       if (streamEvent.type === "result") {
+        clearIdleTimer();
+        setIsAgentIdle(false);
         completeConversation("done");
         return;
       }
@@ -113,21 +135,26 @@ export default function App() {
             chunks.blockStart.toolUseId,
             chunks.blockStart.toolInput
           );
+          bumpContentActivity();
         } else {
           startAssistantMessage(chunks.blockStart);
+          bumpContentActivity();
         }
       }
 
       if (chunks.textDelta) {
         appendAssistantText(chunks.textDelta);
+        bumpContentActivity();
       }
 
       if (chunks.thinkingDelta) {
         appendAssistantThinking(chunks.thinkingDelta);
+        bumpContentActivity();
       }
 
       if (chunks.toolInputDelta) {
         appendToolInput(chunks.toolInputDelta);
+        bumpContentActivity();
       }
 
       if (
@@ -137,9 +164,12 @@ export default function App() {
       ) {
         completeStreamingMessage();
       }
-
-      scheduleIdle();
     });
+
+    return () => {
+      clearIdleTimer();
+      unsubscribe();
+    };
   }, [
     startAssistantMessage,
     appendAssistantText,

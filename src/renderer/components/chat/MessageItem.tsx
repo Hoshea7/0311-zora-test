@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { memo, useState, useEffect } from "react";
 import { useAtom } from "jotai";
 import type { ChatMessage } from "../../types";
 import { cn } from "../../utils/cn";
@@ -243,7 +243,10 @@ function ToolCard({ message }: { message: ChatMessage }) {
  * 单条消息组件
  * 渲染用户或助手的消息，包括思考内容和错误信息
  */
-export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
+export const MessageItem = memo(function MessageItem({
+  message,
+  showAvatar = true
+}: MessageItemProps) {
   const isUser = message.role === "user";
   const isThinkingMessage = message.type === "thinking" || Boolean(message.thinking);
   const isToolUse = message.type === "tool_use";
@@ -320,15 +323,6 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
           </div>
         ) : null}
 
-        {!isThinkingMessage && !hasText && isStreaming ? (
-          <div className="mt-2 flex items-center gap-1.5 text-[15px] text-stone-400">
-            <span className="flex h-1.5 w-1.5 items-center justify-center">
-              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-300 opacity-75"></span>
-              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-400"></span>
-            </span>
-          </div>
-        ) : null}
-
         {message.error ? (
           <div className="mt-3 rounded-xl bg-rose-50/80 px-4 py-3 text-[14px] leading-relaxed text-rose-800 ring-1 ring-rose-200/50">
             {message.error}
@@ -337,4 +331,4 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
       </div>
     </article>
   );
-}
+});

@@ -4,15 +4,50 @@ import { messagesAtom, isAgentIdleAtom, isRunningAtom } from "../../store/chat";
 import { MessageItem } from "./MessageItem";
 import { EmptyState } from "./EmptyState";
 
-// Typing Indicator component
-function TypingIndicator() {
+function PendingAssistantRow({ showDots }: { showDots: boolean }) {
   return (
-    <div className="flex items-start gap-4 mt-1">
-      <div className="w-8 shrink-0 flex justify-center" />
-      <div className="flex items-center gap-1.5 h-6">
-        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
-        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
-        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+    <div className="mr-auto mt-8 flex w-full max-w-[95%] items-start gap-4">
+      <div className="mt-1 flex w-8 shrink-0 justify-center">
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm ring-1 ring-blue-600/50">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
+          </svg>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-hidden">
+        <div className="mb-2 mt-0.5 flex items-center gap-2">
+          <span className="text-[14px] font-semibold tracking-tight text-stone-800">Zora</span>
+          <span className="mt-[2px] text-[11px] font-medium text-stone-400">
+            {new Date().toLocaleTimeString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false
+            })}
+          </span>
+        </div>
+
+        {showDots ? (
+          <div className="mt-1 flex h-6 items-center gap-1.5">
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "0ms", animationDuration: "1s" }}
+            />
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "150ms", animationDuration: "1s" }}
+            />
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "300ms", animationDuration: "1s" }}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -28,13 +63,24 @@ export function MessageList() {
   const [isRunning] = useAtom(isRunningAtom);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
+  const lastUserIndex = messages.reduce((acc, message, index) => {
+    if (message.role === "user") {
+      return index;
+    }
+    return acc;
+  }, -1);
+
+  const hasAssistantInCurrentTurn =
+    lastUserIndex >= 0 &&
+    messages.slice(lastUserIndex + 1).some((message) => message.role === "assistant");
+
   // 自动滚动到底部
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({
-      behavior: "smooth",
+      behavior: isRunning ? "auto" : "smooth",
       block: "end"
     });
-  }, [messages, isAgentIdle]);
+  }, [messages, isAgentIdle, isRunning]);
 
   if (messages.length === 0) {
     return <EmptyState />;
@@ -49,8 +95,30 @@ export function MessageList() {
 
         return <MessageItem key={message.id} message={message} showAvatar={showAvatar} />;
       })}
-      
-      {isRunning && isAgentIdle && <TypingIndicator />}
+
+      {isRunning && !hasAssistantInCurrentTurn ? (
+        <PendingAssistantRow showDots={isAgentIdle} />
+      ) : null}
+
+      {isRunning && hasAssistantInCurrentTurn && isAgentIdle ? (
+        <div className="mr-auto mt-1 flex w-full max-w-[95%] items-start gap-4">
+          <div className="w-8 shrink-0" />
+          <div className="mt-1 flex h-6 items-center gap-1.5">
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "0ms", animationDuration: "1s" }}
+            />
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "150ms", animationDuration: "1s" }}
+            />
+            <div
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-300"
+              style={{ animationDelay: "300ms", animationDuration: "1s" }}
+            />
+          </div>
+        </div>
+      ) : null}
       
       <div ref={scrollAnchorRef} className="h-4" />
     </div>
