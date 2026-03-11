@@ -10,7 +10,8 @@ import {
   hydrateAssistantAtom,
   completeConversationAtom,
   failConversationAtom,
-  startToolUseAtom
+  startToolUseAtom,
+  isAgentIdleAtom
 } from "./store/chat";
 import {
   extractStreamChunks,
@@ -36,11 +37,21 @@ export default function App() {
   const completeConversation = useSetAtom(completeConversationAtom);
   const failConversation = useSetAtom(failConversationAtom);
   const startToolUse = useSetAtom(startToolUseAtom);
+  const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
 
   // 处理 Agent 流式事件
   useEffect(() => {
+    let idleTimer: ReturnType<typeof setTimeout>;
+
     return window.zora.onStream((streamEvent) => {
       console.log("[renderer event]", JSON.stringify(streamEvent).slice(0, 500));
+
+      setIsAgentIdle(false);
+      clearTimeout(idleTimer);
+
+      const scheduleIdle = () => {
+        idleTimer = setTimeout(() => setIsAgentIdle(true), 500);
+      };
 
       if (streamEvent.type === "agent_error") {
         failConversation(
@@ -79,11 +90,13 @@ export default function App() {
           });
         }
 
+        scheduleIdle();
         return;
       }
 
       if (streamEvent.type === "assistant") {
         hydrateAssistant(extractAssistantPayload(streamEvent.message));
+        scheduleIdle();
         return;
       }
 
@@ -124,6 +137,8 @@ export default function App() {
       ) {
         completeStreamingMessage();
       }
+
+      scheduleIdle();
     });
   }, [
     startAssistantMessage,
@@ -135,7 +150,8 @@ export default function App() {
     completeToolResult,
     failConversation,
     hydrateAssistant,
-    startToolUse
+    startToolUse,
+    setIsAgentIdle
   ]);
 
   return <AppShell />;

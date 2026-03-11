@@ -5,6 +5,7 @@ import { createId, stringifyUnknown } from "../utils/message";
 // 基础状态 atoms
 export const messagesAtom = atom<ChatMessage[]>([]);
 export const isRunningAtom = atom(false);
+export const isAgentIdleAtom = atom(false);
 export const draftAtom = atom("");
 
 const FALLBACK_ASSISTANT_TEXT = "The agent stopped before returning a final reply.";

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAtom } from "jotai";
 import type { ChatMessage } from "../../types";
 import { cn } from "../../utils/cn";
@@ -12,7 +12,7 @@ export interface MessageItemProps {
 // Zora Avatar Icon
 function ZoraAvatar() {
   return (
-    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100/80 text-orange-600 shadow-sm ring-1 ring-orange-200/50">
+    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-orange-500 text-white shadow-sm mt-0.5">
       <svg
         className="h-4 w-4"
         fill="none"
@@ -30,14 +30,15 @@ function ZoraAvatar() {
   );
 }
 
-// Shared Process Block wrapper
+// Proma-style minimal Process Block wrapper
 function ProcessBlock({
   icon,
   title,
   isStreaming,
   isOpen,
   onToggle,
-  children
+  children,
+  variant = "tool"
 }: {
   icon: React.ReactNode;
   title: React.ReactNode;
@@ -45,25 +46,28 @@ function ProcessBlock({
   isOpen: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  variant?: "tool" | "thinking";
 }) {
   return (
-    <div className="mb-2 mt-1 overflow-hidden rounded-[14px] bg-stone-50/80 text-stone-700 ring-1 ring-stone-200/50 transition-all w-fit min-w-[200px] max-w-full">
+    <div className="mb-0.5 mt-0.5 w-full max-w-full">
       <div 
-        className="flex cursor-pointer items-center justify-between gap-6 px-3.5 py-2 text-[13px] font-medium text-stone-500 hover:bg-stone-100/80 hover:text-stone-700 transition-colors"
+        className="flex cursor-pointer items-center justify-between gap-6 py-1 text-[13.5px] text-stone-500 hover:text-stone-800 transition-colors w-fit group"
         onClick={onToggle}
       >
-        <div className="flex items-center gap-2 overflow-hidden">
-          <span className="shrink-0">{icon}</span>
-          <span className="truncate">{title}</span>
+        <div className="flex items-center gap-1.5 overflow-hidden">
+          <span className="flex items-center justify-center w-3 h-3 text-stone-400 group-hover:text-stone-500 transition-colors shrink-0">
+            {icon}
+          </span>
+          <span className="truncate flex items-center gap-1.5 leading-none">{title}</span>
           {isStreaming && (
-            <span className="flex h-2 w-2 items-center justify-center shrink-0 ml-1">
-              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-stone-400 opacity-75"></span>
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-stone-500"></span>
+            <span className="flex h-1.5 w-1.5 items-center justify-center shrink-0 ml-1">
+              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-400 opacity-75"></span>
+              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-500"></span>
             </span>
           )}
         </div>
         <svg 
-          className={cn("h-3.5 w-3.5 opacity-60 transition-transform shrink-0", isOpen ? "rotate-90" : "")} 
+          className={cn("h-3.5 w-3.5 opacity-0 group-hover:opacity-60 transition-all shrink-0 ml-1", isOpen ? "rotate-90 opacity-40" : "")} 
           fill="none" 
           viewBox="0 0 24 24" 
           stroke="currentColor"
@@ -72,8 +76,14 @@ function ProcessBlock({
         </svg>
       </div>
       
-      {isOpen && (
-        <div className="border-t border-stone-200/40 px-3.5 pb-3.5 pt-2.5 max-h-[400px] overflow-y-auto custom-scrollbar">
+      {isOpen && variant === "tool" && (
+        <div className="mt-1.5 px-4 py-3 bg-stone-50 rounded-lg border border-stone-100 max-h-[400px] overflow-y-auto custom-scrollbar shadow-inner w-[calc(100%-1rem)]">
+          {children}
+        </div>
+      )}
+
+      {isOpen && variant === "thinking" && (
+        <div className="mt-1 pl-[18px] pr-4 max-h-[400px] overflow-y-auto custom-scrollbar">
           {children}
         </div>
       )}
@@ -83,8 +93,15 @@ function ProcessBlock({
 
 function ThinkingTrace({ content, isStreaming }: { content: string, isStreaming: boolean }) {
   const [globalExpanded, setGlobalExpanded] = useAtom(globalThinkingExpandedAtom);
-  // Use global preference on mount to remember user's last action
-  const [isOpen, setIsOpen] = useState(globalExpanded);
+  // Auto-expand if streaming, otherwise use global preference
+  const [isOpen, setIsOpen] = useState(isStreaming ? true : globalExpanded);
+
+  // Force open when starting to stream
+  useEffect(() => {
+    if (isStreaming) {
+      setIsOpen(true);
+    }
+  }, [isStreaming]);
 
   const handleToggle = () => {
     const next = !isOpen;
@@ -94,11 +111,12 @@ function ThinkingTrace({ content, isStreaming }: { content: string, isStreaming:
 
   return (
     <ProcessBlock
-      icon="●"
+      icon={<span className="text-[10px] leading-none mb-0.5">●</span>}
       title={isStreaming ? "思考中..." : "思考过程"}
       isStreaming={isStreaming}
       isOpen={isOpen}
       onToggle={handleToggle}
+      variant="thinking"
     >
       <div className="text-[13.5px] leading-relaxed text-stone-500">
         <pre className="m-0 whitespace-pre-wrap font-sans">{content}</pre>
@@ -109,7 +127,6 @@ function ThinkingTrace({ content, isStreaming }: { content: string, isStreaming:
 
 function ToolCard({ message }: { message: ChatMessage }) {
   const [globalExpanded, setGlobalExpanded] = useAtom(globalToolExpandedAtom);
-  // Use global preference on mount to remember user's last action
   const [isOpen, setIsOpen] = useState(globalExpanded);
   
   const isInputStreaming = message.status === "streaming";
@@ -129,10 +146,10 @@ function ToolCard({ message }: { message: ChatMessage }) {
       const parsed = JSON.parse(message.toolInput);
       const toolName = message.toolName || "";
       if (toolName.includes("bash")) {
-        summary = parsed.command;
+        summary = parsed.command || parsed.description || "";
       } else if (toolName.includes("read") || toolName.includes("write")) {
         summary = parsed.filePath ? parsed.filePath.split('/').pop() : "";
-      } else if (toolName.includes("search")) {
+      } else if (toolName.includes("search") || toolName.includes("grep")) {
         summary = parsed.query || parsed.pattern || "";
       } else {
         const val = Object.values(parsed).find(v => typeof v === 'string' && v.trim().length > 0);
@@ -146,26 +163,51 @@ function ToolCard({ message }: { message: ChatMessage }) {
   }
   
   if (!summary) summary = "等待参数...";
-  if (summary.length > 30) summary = summary.slice(0, 30) + "...";
+  if (summary.length > 50) summary = summary.slice(0, 50) + "...";
 
   const cleanToolName = message.toolName?.replace('default_api:', '') || 'Tool';
-  const displayTitle = `${cleanToolName} · ${summary}`;
+  const formattedToolName = cleanToolName.charAt(0).toUpperCase() + cleanToolName.slice(1);
+  
+  const displayTitle = (
+    <>
+      <span className="text-stone-700 font-medium leading-none">
+        {formattedToolName}
+      </span>
+      <span className="text-stone-300 leading-none">·</span>
+      <span className="text-stone-500 truncate max-w-[200px] sm:max-w-[400px] text-[13px] leading-none">{summary}</span>
+      {isToolError && <span className="text-rose-500 text-xs ml-1 font-medium leading-none">失败</span>}
+    </>
+  );
 
   return (
     <ProcessBlock
-      icon={<span className="text-stone-400">⚙</span>}
+      icon={
+        isToolRunning ? (
+          <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-orange-500/30 border-t-orange-500" />
+        ) : isToolError ? (
+          <svg className="h-3.5 w-3.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ) : (
+          <svg className="h-3 w-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <circle cx="12" cy="12" r="9" strokeWidth="1.5" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12l3 3 5-5" />
+          </svg>
+        )
+      }
       title={displayTitle}
-      isStreaming={isToolRunning || isInputStreaming}
+      isStreaming={false} // Loading indicator is handled in the icon itself
       isOpen={isOpen}
       onToggle={handleToggle}
+      variant="tool"
     >
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-4">
         {/* Input parameters */}
         <div className="flex flex-col gap-1.5">
           <div className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
             Input
           </div>
-          <div className="rounded-lg bg-stone-100/50 px-3 py-2 text-[12px] leading-relaxed text-stone-600 ring-1 ring-stone-900/5">
+          <div className="text-[12px] leading-relaxed text-stone-600">
             <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11.5px]">
               {message.toolInput || "Waiting..."}
               {isInputStreaming ? (
@@ -177,16 +219,13 @@ function ToolCard({ message }: { message: ChatMessage }) {
 
         {/* Output results */}
         {(message.toolResult || isToolError || (!isToolRunning && !message.toolResult)) && (
-          <div className="flex flex-col gap-1.5 mt-1">
+          <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-stone-400">
               Output
-              {isToolError && <span className="text-rose-500 lowercase normal-case tracking-normal">Failed</span>}
             </div>
             <div className={cn(
-              "rounded-lg px-3 py-2 text-[12px] leading-relaxed ring-1",
-              isToolError 
-                ? "bg-rose-50/50 text-rose-700 ring-rose-200/50" 
-                : "bg-white text-stone-600 ring-stone-200/60"
+              "text-[12px] leading-relaxed",
+              isToolError ? "text-rose-600" : "text-stone-600"
             )}>
               <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11.5px]">
                 {message.toolResult || (isToolError ? "The tool returned an error." : "No output.")}
@@ -216,7 +255,7 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
   if (isUser) {
     return (
       <article className="ml-auto mt-6 flex max-w-[80%] flex-col items-end">
-        <div className="rounded-[24px] rounded-tr-[8px] bg-[#e6e2da] px-5 py-3 text-stone-900 shadow-[0_2px_4px_rgba(0,0,0,0.02)] transition-all">
+        <div className="rounded-[20px] rounded-tr-[4px] bg-[#f0e8dc] px-4 py-2.5 text-stone-900 shadow-sm transition-all">
           <div className="whitespace-pre-wrap text-[15px] leading-relaxed font-normal">
             {message.text}
           </div>
@@ -225,16 +264,29 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
     );
   }
 
-  // For Agent Message (Tool, Thinking, or Text)
+  // Agent Avatar and Title Header
+  const AgentHeader = showAvatar ? (
+    <div className="flex items-center gap-2 mb-2 mt-0.5">
+      <span className="text-[14px] font-semibold text-stone-800 tracking-tight">Zora</span>
+      <span className="text-[11px] font-medium text-stone-400 mt-[2px]">
+        {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+      </span>
+    </div>
+  ) : null;
+
+  // Spacing class
+  const mtClass = showAvatar ? "mt-8" : "mt-1.5";
+
   // Tool rendering check
   if (isToolUse) {
     return (
-      <article className={cn("mr-auto flex w-full max-w-[90%] items-start gap-3.5 group", showAvatar ? "mt-6" : "mt-1")}>
-        <div className="mt-1 shrink-0 w-7 flex justify-center transition-opacity">
+      <article className={cn("mr-auto flex w-full max-w-[95%] items-start gap-4 group", mtClass)}>
+        <div className="mt-1 shrink-0 w-8 flex justify-center transition-opacity">
           {showAvatar ? <ZoraAvatar /> : null}
         </div>
         
-        <div className="flex-1 overflow-hidden pt-1 w-full max-w-full">
+        <div className="flex-1 overflow-hidden w-full max-w-full">
+          {AgentHeader}
           <ToolCard message={message} />
         </div>
       </article>
@@ -242,12 +294,14 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
   }
 
   return (
-    <article className={cn("mr-auto flex w-full max-w-[90%] items-start gap-3.5 group", showAvatar ? "mt-6" : "mt-1")}>
-      <div className="mt-1 shrink-0 w-7 flex justify-center transition-opacity">
+    <article className={cn("mr-auto flex w-full max-w-[95%] items-start gap-4 group", mtClass)}>
+      <div className="mt-1 shrink-0 w-8 flex justify-center transition-opacity">
         {showAvatar ? <ZoraAvatar /> : null}
       </div>
       
-      <div className="flex-1 overflow-hidden pt-1 w-full max-w-full">
+      <div className="flex-1 overflow-hidden w-full max-w-full">
+        {AgentHeader}
+
         {isThinkingMessage ? (
           <ThinkingTrace 
             content={message.thinking} 
@@ -257,20 +311,11 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
         ) : null}
 
         {hasText ? (
-          <div className={cn("whitespace-pre-wrap text-[15px] leading-relaxed text-stone-800 break-words", (showAvatar || isThinkingMessage) ? "mt-1" : "mt-0")}>
+          <div className={cn("whitespace-pre-wrap text-[15px] leading-[1.6] text-stone-800 break-words", (showAvatar || isThinkingMessage) ? "mt-3" : "mt-0")}>
             {message.text}
             {isStreaming && (
-              <span className="ml-1 inline-block h-3.5 w-1.5 animate-pulse bg-stone-300 align-middle"></span>
+              <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-stone-300 align-middle"></span>
             )}
-          </div>
-        ) : null}
-
-        {!isThinkingMessage && !hasText && isStreaming ? (
-          <div className="mt-2 flex items-center gap-1.5 text-[15px] text-stone-400">
-            <span className="flex h-1.5 w-1.5 items-center justify-center">
-              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-300 opacity-75"></span>
-              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-400"></span>
-            </span>
           </div>
         ) : null}
 

@@ -1,8 +1,22 @@
 import { useRef, useEffect } from "react";
 import { useAtom } from "jotai";
-import { messagesAtom } from "../../store/chat";
+import { messagesAtom, isAgentIdleAtom, isRunningAtom } from "../../store/chat";
 import { MessageItem } from "./MessageItem";
 import { EmptyState } from "./EmptyState";
+
+// Typing Indicator component
+function TypingIndicator() {
+  return (
+    <div className="flex items-start gap-4 mt-1">
+      <div className="w-8 shrink-0 flex justify-center" />
+      <div className="flex items-center gap-1.5 h-6">
+        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
+        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
+        <div className="h-1.5 w-1.5 bg-stone-300 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+      </div>
+    </div>
+  );
+}
 
 /**
  * 消息列表组件
@@ -10,6 +24,8 @@ import { EmptyState } from "./EmptyState";
  */
 export function MessageList() {
   const [messages] = useAtom(messagesAtom);
+  const [isAgentIdle] = useAtom(isAgentIdleAtom);
+  const [isRunning] = useAtom(isRunningAtom);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // 自动滚动到底部
@@ -18,7 +34,7 @@ export function MessageList() {
       behavior: "smooth",
       block: "end"
     });
-  }, [messages]);
+  }, [messages, isAgentIdle]);
 
   if (messages.length === 0) {
     return <EmptyState />;
@@ -33,6 +49,9 @@ export function MessageList() {
 
         return <MessageItem key={message.id} message={message} showAvatar={showAvatar} />;
       })}
+      
+      {isRunning && isAgentIdle && <TypingIndicator />}
+      
       <div ref={scrollAnchorRef} className="h-4" />
     </div>
   );

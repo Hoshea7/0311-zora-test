@@ -55,14 +55,14 @@ export function MainArea() {
   };
 
   return (
-    <section className="titlebar-no-drag flex h-full flex-col overflow-hidden bg-white">
+    <section className="flex h-full flex-col overflow-hidden bg-white">
       <ChatHeader />
 
-      <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-8">
+      <div className="titlebar-no-drag flex-1 overflow-y-auto px-5 py-5 sm:px-8">
         <MessageList />
       </div>
 
-      <footer className="bg-white px-6 py-4">
+      <footer className="titlebar-no-drag bg-white px-6 py-4">
         <div className="mx-auto w-full max-w-4xl">
           <ChatInput onSubmit={handleSubmit} onStop={handleStop} />
         </div>
