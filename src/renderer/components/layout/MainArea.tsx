@@ -58,12 +58,12 @@ export function MainArea() {
     <section className="titlebar-no-drag flex h-full flex-col overflow-hidden bg-white">
       <ChatHeader />
 
-      <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+      <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-8">
         <MessageList />
       </div>
 
-      <footer className="bg-white px-6 py-3">
-        <div className="mx-auto w-[85%]">
+      <footer className="bg-white px-6 py-4">
+        <div className="mx-auto w-full max-w-4xl">
           <ChatInput onSubmit={handleSubmit} onStop={handleStop} />
         </div>
       </footer>

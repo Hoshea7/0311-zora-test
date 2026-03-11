@@ -25,11 +25,11 @@ export function MessageList() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto flex max-w-4xl flex-col pb-4">
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
-      <div ref={scrollAnchorRef} />
+      <div ref={scrollAnchorRef} className="h-4" />
     </div>
   );
 }
