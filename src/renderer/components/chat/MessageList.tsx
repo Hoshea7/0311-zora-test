@@ -26,9 +26,13 @@ export function MessageList() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col pb-4">
-      {messages.map((message) => (
-        <MessageItem key={message.id} message={message} />
-      ))}
+      {messages.map((message, index) => {
+        const isAssistant = message.role === "assistant";
+        const prevMessage = index > 0 ? messages[index - 1] : null;
+        const showAvatar = isAssistant && (!prevMessage || prevMessage.role !== "assistant");
+
+        return <MessageItem key={message.id} message={message} showAvatar={showAvatar} />;
+      })}
       <div ref={scrollAnchorRef} className="h-4" />
     </div>
   );
