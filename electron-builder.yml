@@ -1,0 +1,9 @@
+appId: com.zora.agent
+productName: ZoraAgent
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+mac:
+  category: public.app-category.productivity
