@@ -3,6 +3,7 @@ import { useAtom } from "jotai";
 import type { ChatMessage } from "../../types";
 import { cn } from "../../utils/cn";
 import { globalThinkingExpandedAtom, globalToolExpandedAtom } from "../../store/ui";
+import { MarkdownMessage } from "./MarkdownMessage";
 
 export interface MessageItemProps {
   message: ChatMessage;
@@ -311,11 +312,20 @@ export function MessageItem({ message, showAvatar = true }: MessageItemProps) {
         ) : null}
 
         {hasText ? (
-          <div className={cn("whitespace-pre-wrap text-[15px] leading-[1.6] text-stone-800 break-words", (showAvatar || isThinkingMessage) ? "mt-3" : "mt-0")}>
-            {message.text}
+          <div className={cn("text-[15px] leading-[1.6] text-stone-800 break-words", (showAvatar || isThinkingMessage) ? "mt-3" : "mt-0")}>
+            <MarkdownMessage content={message.text} />
             {isStreaming && (
               <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-stone-300 align-middle"></span>
             )}
+          </div>
+        ) : null}
+
+        {!isThinkingMessage && !hasText && isStreaming ? (
+          <div className="mt-2 flex items-center gap-1.5 text-[15px] text-stone-400">
+            <span className="flex h-1.5 w-1.5 items-center justify-center">
+              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-300 opacity-75"></span>
+              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-400"></span>
+            </span>
           </div>
         ) : null}
 
