@@ -29,6 +29,25 @@ export function getAgentErrorText(error: unknown): string {
 }
 
 /**
+ * 将未知内容安全地转成文本
+ */
+export function stringifyUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
  * 从内容块中提取文本
  */
 export function extractContentBlockText(block: unknown): string {
@@ -59,19 +78,54 @@ export function extractContentBlockThinking(block: unknown): string {
 }
 
 /**
- * 从流式事件中提取文本和思考内容
+ * 从工具结果块中提取结果文本
+ */
+export function extractToolResultContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    const text = content.map(extractContentBlockText).join("");
+    return text || stringifyUnknown(content);
+  }
+
+  return stringifyUnknown(content);
+}
+
+/**
+ * 从流式事件中提取文本、思考和工具调用内容
  */
 export function extractStreamChunks(streamEvent: AgentStreamEvent): {
-  text: string;
-  thinking: string;
+  text?: string;
+  thinking?: string;
+  toolStart?: {
+    name: string;
+    id: string;
+  };
+  toolInputDelta?: string;
 } {
   if (streamEvent.type !== "stream_event" || !isRecord(streamEvent.event)) {
-    return { text: "", thinking: "" };
+    return {};
   }
 
   const event = streamEvent.event;
 
   if (event.type === "content_block_start") {
+    if (
+      isRecord(event.content_block) &&
+      event.content_block.type === "tool_use" &&
+      typeof event.content_block.name === "string" &&
+      typeof event.content_block.id === "string"
+    ) {
+      return {
+        toolStart: {
+          name: event.content_block.name,
+          id: event.content_block.id
+        }
+      };
+    }
+
     return {
       text: extractContentBlockText(event.content_block),
       thinking: extractContentBlockThinking(event.content_block)
@@ -87,11 +141,18 @@ export function extractStreamChunks(streamEvent: AgentStreamEvent): {
       event.delta.type === "thinking_delta" &&
       typeof event.delta.thinking === "string"
     ) {
-      return { text: "", thinking: event.delta.thinking };
+      return { thinking: event.delta.thinking };
+    }
+
+    if (
+      event.delta.type === "input_json_delta" &&
+      typeof event.delta.partial_json === "string"
+    ) {
+      return { toolInputDelta: event.delta.partial_json };
     }
   }
 
-  return { text: "", thinking: "" };
+  return {};
 }
 
 /**

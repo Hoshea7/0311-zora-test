@@ -3,13 +3,18 @@ import { useSetAtom } from "jotai";
 import {
   appendAssistantTextAtom,
   appendAssistantThinkingAtom,
+  appendToolInputAtom,
+  completeStreamingMessageAtom,
+  completeToolResultAtom,
   hydrateAssistantAtom,
   completeConversationAtom,
-  failConversationAtom
+  failConversationAtom,
+  startToolUseAtom
 } from "./store/chat";
 import {
   extractStreamChunks,
   extractAssistantPayload,
+  extractToolResultContent,
   getAgentErrorText,
   isRecord
 } from "./utils/message";
@@ -22,9 +27,13 @@ import { AppShell } from "./components/layout/AppShell";
 export default function App() {
   const appendAssistantText = useSetAtom(appendAssistantTextAtom);
   const appendAssistantThinking = useSetAtom(appendAssistantThinkingAtom);
+  const appendToolInput = useSetAtom(appendToolInputAtom);
+  const completeStreamingMessage = useSetAtom(completeStreamingMessageAtom);
+  const completeToolResult = useSetAtom(completeToolResultAtom);
   const hydrateAssistant = useSetAtom(hydrateAssistantAtom);
   const completeConversation = useSetAtom(completeConversationAtom);
   const failConversation = useSetAtom(failConversationAtom);
+  const startToolUse = useSetAtom(startToolUseAtom);
 
   // 处理 Agent 流式事件
   useEffect(() => {
@@ -50,6 +59,27 @@ export default function App() {
         return;
       }
 
+      if (streamEvent.type === "user" && isRecord(streamEvent.message)) {
+        const content = streamEvent.message.content;
+        if (Array.isArray(content)) {
+          content.forEach((block) => {
+            if (
+              isRecord(block) &&
+              block.type === "tool_result" &&
+              typeof block.tool_use_id === "string"
+            ) {
+              completeToolResult(
+                block.tool_use_id,
+                extractToolResultContent(block.content),
+                block.is_error === true
+              );
+            }
+          });
+        }
+
+        return;
+      }
+
       if (streamEvent.type === "assistant") {
         hydrateAssistant(extractAssistantPayload(streamEvent.message));
         return;
@@ -68,13 +98,33 @@ export default function App() {
       if (chunks.thinking) {
         appendAssistantThinking(chunks.thinking);
       }
+
+      if (chunks.toolStart) {
+        startToolUse(chunks.toolStart.name, chunks.toolStart.id);
+      }
+
+      if (chunks.toolInputDelta) {
+        appendToolInput(chunks.toolInputDelta);
+      }
+
+      if (
+        streamEvent.type === "stream_event" &&
+        isRecord(streamEvent.event) &&
+        streamEvent.event.type === "content_block_stop"
+      ) {
+        completeStreamingMessage();
+      }
     });
   }, [
     appendAssistantText,
     appendAssistantThinking,
+    appendToolInput,
     completeConversation,
+    completeStreamingMessage,
+    completeToolResult,
     failConversation,
-    hydrateAssistant
+    hydrateAssistant,
+    startToolUse
   ]);
 
   return <AppShell />;
