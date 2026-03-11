@@ -1,5 +1,21 @@
 import type { AgentStreamEvent } from "../../shared/zora";
 
+type AssistantBlockPayload =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "thinking";
+      thinking: string;
+    }
+  | {
+      type: "tool_use";
+      toolName: string;
+      toolUseId: string;
+      toolInput: string;
+    };
+
 /**
  * 生成唯一 ID
  */
@@ -78,6 +94,25 @@ export function extractContentBlockThinking(block: unknown): string {
 }
 
 /**
+ * 从工具输入中提取文本
+ */
+export function extractToolUseInput(input: unknown): string {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input === undefined || input === null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return String(input);
+  }
+}
+
+/**
  * 从工具结果块中提取结果文本
  */
 export function extractToolResultContent(content: unknown): string {
@@ -86,23 +121,23 @@ export function extractToolResultContent(content: unknown): string {
   }
 
   if (Array.isArray(content)) {
-    const text = content.map(extractContentBlockText).join("");
-    return text || stringifyUnknown(content);
+    return content
+      .map((item) =>
+        isRecord(item) && typeof item.text === "string" ? item.text : ""
+      )
+      .join("");
   }
 
-  return stringifyUnknown(content);
+  return String(content ?? "");
 }
 
 /**
  * 从流式事件中提取文本、思考和工具调用内容
  */
 export function extractStreamChunks(streamEvent: AgentStreamEvent): {
-  text?: string;
-  thinking?: string;
-  toolStart?: {
-    name: string;
-    id: string;
-  };
+  blockStart?: AssistantBlockPayload;
+  textDelta?: string;
+  thinkingDelta?: string;
   toolInputDelta?: string;
 } {
   if (streamEvent.type !== "stream_event" || !isRecord(streamEvent.event)) {
@@ -119,29 +154,48 @@ export function extractStreamChunks(streamEvent: AgentStreamEvent): {
       typeof event.content_block.id === "string"
     ) {
       return {
-        toolStart: {
-          name: event.content_block.name,
-          id: event.content_block.id
+        blockStart: {
+          type: "tool_use",
+          toolName: event.content_block.name,
+          toolUseId: event.content_block.id,
+          toolInput: extractToolUseInput(event.content_block.input)
         }
       };
     }
 
-    return {
-      text: extractContentBlockText(event.content_block),
-      thinking: extractContentBlockThinking(event.content_block)
-    };
+    const text = extractContentBlockText(event.content_block);
+    if (isRecord(event.content_block) && event.content_block.type === "text") {
+      return {
+        blockStart: {
+          type: "text",
+          text
+        }
+      };
+    }
+
+    const thinking = extractContentBlockThinking(event.content_block);
+    if (isRecord(event.content_block) && event.content_block.type === "thinking") {
+      return {
+        blockStart: {
+          type: "thinking",
+          thinking
+        }
+      };
+    }
+
+    return {};
   }
 
   if (event.type === "content_block_delta" && isRecord(event.delta)) {
     if (event.delta.type === "text_delta" && typeof event.delta.text === "string") {
-      return { text: event.delta.text, thinking: "" };
+      return { textDelta: event.delta.text };
     }
 
     if (
       event.delta.type === "thinking_delta" &&
       typeof event.delta.thinking === "string"
     ) {
-      return { thinking: event.delta.thinking };
+      return { thinkingDelta: event.delta.thinking };
     }
 
     if (
@@ -158,21 +212,42 @@ export function extractStreamChunks(streamEvent: AgentStreamEvent): {
 /**
  * 从助手消息中提取完整的文本和思考内容
  */
-export function extractAssistantPayload(message: unknown): {
-  text: string;
-  thinking: string;
-} {
+export function extractAssistantPayload(message: unknown): AssistantBlockPayload | null {
   if (!isRecord(message) || !Array.isArray(message.content)) {
-    return { text: "", thinking: "" };
+    return null;
   }
 
-  let text = "";
-  let thinking = "";
-
-  for (const block of message.content) {
-    text += extractContentBlockText(block);
-    thinking += extractContentBlockThinking(block);
+  const [firstBlock] = message.content;
+  if (!isRecord(firstBlock)) {
+    return null;
   }
 
-  return { text, thinking };
+  if (firstBlock.type === "text") {
+    return {
+      type: "text",
+      text: extractContentBlockText(firstBlock)
+    };
+  }
+
+  if (firstBlock.type === "thinking") {
+    return {
+      type: "thinking",
+      thinking: extractContentBlockThinking(firstBlock)
+    };
+  }
+
+  if (
+    firstBlock.type === "tool_use" &&
+    typeof firstBlock.name === "string" &&
+    typeof firstBlock.id === "string"
+  ) {
+    return {
+      type: "tool_use",
+      toolName: firstBlock.name,
+      toolUseId: firstBlock.id,
+      toolInput: extractToolUseInput(firstBlock.input)
+    };
+  }
+
+  return null;
 }

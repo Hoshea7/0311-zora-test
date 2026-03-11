@@ -10,6 +10,33 @@ export const draftAtom = atom("");
 const FALLBACK_ASSISTANT_TEXT = "The agent stopped before returning a final reply.";
 const FALLBACK_TOOL_ERROR = "Tool execution stopped before returning a result.";
 
+type AssistantStreamStartPayload =
+  | {
+      type: "text";
+      text?: string;
+    }
+  | {
+      type: "thinking";
+      thinking?: string;
+    };
+
+type AssistantHydrationPayload =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "thinking";
+      thinking: string;
+    }
+  | {
+      type: "tool_use";
+      toolName: string;
+      toolUseId: string;
+      toolInput: string;
+    }
+  | null;
+
 function findLastMessageIndex(
   messages: ChatMessage[],
   predicate: (message: ChatMessage, index: number) => boolean
@@ -60,13 +87,7 @@ function appendAssistantChunk(
   );
 
   if (targetIndex === -1) {
-    return [
-      ...messages,
-      createAssistantMessage(
-        type,
-        type === "text" ? { text: chunk } : { thinking: chunk }
-      )
-    ];
+    return messages;
   }
 
   return messages.map((message, index) => {
@@ -86,28 +107,77 @@ function appendAssistantChunk(
   });
 }
 
-function hasAssistantContentSinceLastUser(
+function findLastAssistantMessageInActiveTurn(
   messages: ChatMessage[],
-  type: Extract<ChatMessageType, "text" | "thinking">
+  predicate: (message: ChatMessage) => boolean
 ) {
   const lastUserIndex = findLastMessageIndex(messages, (message) => message.role === "user");
 
-  for (let index = lastUserIndex + 1; index < messages.length; index += 1) {
+  for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
     const message = messages[index];
-    if (message.role !== "assistant") {
-      continue;
-    }
-
-    if (type === "text" && getMessageType(message) === "text" && message.text.trim()) {
-      return true;
-    }
-
-    if (type === "thinking" && message.thinking.trim()) {
-      return true;
+    if (message.role === "assistant" && predicate(message)) {
+      return index;
     }
   }
 
-  return false;
+  return -1;
+}
+
+function hydrateAssistantMessage(
+  message: ChatMessage,
+  payload: Exclude<AssistantHydrationPayload, null>
+) {
+  if (payload.type === "text") {
+    return {
+      ...message,
+      text: payload.text || message.text,
+      status: "done" as const
+    };
+  }
+
+  if (payload.type === "thinking") {
+    return {
+      ...message,
+      thinking: payload.thinking || message.thinking,
+      status: "done" as const
+    };
+  }
+
+  return {
+    ...message,
+    toolName: payload.toolName || message.toolName,
+    toolUseId: payload.toolUseId || message.toolUseId,
+    toolInput: payload.toolInput || message.toolInput || "",
+    toolStatus: message.toolStatus ?? "running",
+    status: "done" as const
+  };
+}
+
+function createHydratedAssistantMessage(
+  payload: Exclude<AssistantHydrationPayload, null>
+): ChatMessage {
+  if (payload.type === "text") {
+    return createAssistantMessage("text", {
+      text: payload.text,
+      status: "done"
+    });
+  }
+
+  if (payload.type === "thinking") {
+    return createAssistantMessage("thinking", {
+      thinking: payload.thinking,
+      status: "done"
+    });
+  }
+
+  return createAssistantMessage("tool_use", {
+    toolName: payload.toolName,
+    toolUseId: payload.toolUseId,
+    toolInput: payload.toolInput,
+    toolResult: "",
+    toolStatus: "running",
+    status: "done"
+  });
 }
 
 function finalizeToolUseMessage(message: ChatMessage, status: ChatMessageStatus) {
@@ -150,6 +220,32 @@ export const startConversationAtom = atom(null, (_get, set, prompt: string) => {
 });
 
 /**
+ * 创建新的助手流式消息块
+ * 每个 content_block_start 都会在消息尾部追加一条新消息
+ */
+export const startAssistantMessageAtom = atom(
+  null,
+  (_get, set, payload: AssistantStreamStartPayload) => {
+    if (payload.type === "text") {
+      set(messagesAtom, (current) => [
+        ...current,
+        createAssistantMessage("text", {
+          text: payload.text ?? ""
+        })
+      ]);
+      return;
+    }
+
+    set(messagesAtom, (current) => [
+      ...current,
+      createAssistantMessage("thinking", {
+        thinking: payload.thinking ?? ""
+      })
+    ]);
+  }
+);
+
+/**
  * 追加助手文本内容
  */
 export const appendAssistantTextAtom = atom(null, (_get, set, chunk: string) => {
@@ -177,35 +273,30 @@ export const appendAssistantThinkingAtom = atom(null, (_get, set, chunk: string)
  */
 export const hydrateAssistantAtom = atom(
   null,
-  (_get, set, payload: { text: string; thinking: string }) => {
-    if (!payload.text && !payload.thinking) {
+  (_get, set, payload: AssistantHydrationPayload) => {
+    if (!payload) {
       return;
     }
 
     set(messagesAtom, (current) => {
-      let next = current;
+      const targetIndex = findLastAssistantMessageInActiveTurn(current, (message) => {
+        if (payload.type === "tool_use") {
+          return (
+            getMessageType(message) === "tool_use" &&
+            (message.toolUseId === payload.toolUseId || message.status === "streaming")
+          );
+        }
 
-      if (payload.thinking && !hasAssistantContentSinceLastUser(next, "thinking")) {
-        next = [
-          ...next,
-          createAssistantMessage("thinking", {
-            thinking: payload.thinking,
-            status: "done"
-          })
-        ];
+        return getMessageType(message) === payload.type;
+      });
+
+      if (targetIndex === -1) {
+        return [...current, createHydratedAssistantMessage(payload)];
       }
 
-      if (payload.text && !hasAssistantContentSinceLastUser(next, "text")) {
-        next = [
-          ...next,
-          createAssistantMessage("text", {
-            text: payload.text,
-            status: "done"
-          })
-        ];
-      }
-
-      return next;
+      return current.map((message, index) =>
+        index === targetIndex ? hydrateAssistantMessage(message, payload) : message
+      );
     });
   }
 );
@@ -215,7 +306,7 @@ export const hydrateAssistantAtom = atom(
  */
 export const startToolUseAtom = atom(
   null,
-  (_get, set, toolName: string, toolUseId: string) => {
+  (_get, set, toolName: string, toolUseId: string, toolInput: string = "") => {
     if (!toolName || !toolUseId) {
       return;
     }
@@ -225,7 +316,7 @@ export const startToolUseAtom = atom(
       createAssistantMessage("tool_use", {
         toolName,
         toolUseId,
-        toolInput: "",
+        toolInput,
         toolResult: "",
         toolStatus: "running"
       })

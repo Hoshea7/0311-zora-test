@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSetAtom } from "jotai";
 import {
+  startAssistantMessageAtom,
   appendAssistantTextAtom,
   appendAssistantThinkingAtom,
   appendToolInputAtom,
@@ -25,6 +26,7 @@ import { AppShell } from "./components/layout/AppShell";
  * 负责初始化和流式事件处理
  */
 export default function App() {
+  const startAssistantMessage = useSetAtom(startAssistantMessageAtom);
   const appendAssistantText = useSetAtom(appendAssistantTextAtom);
   const appendAssistantThinking = useSetAtom(appendAssistantThinkingAtom);
   const appendToolInput = useSetAtom(appendToolInputAtom);
@@ -91,16 +93,24 @@ export default function App() {
       }
 
       const chunks = extractStreamChunks(streamEvent);
-      if (chunks.text) {
-        appendAssistantText(chunks.text);
+      if (chunks.blockStart) {
+        if (chunks.blockStart.type === "tool_use") {
+          startToolUse(
+            chunks.blockStart.toolName,
+            chunks.blockStart.toolUseId,
+            chunks.blockStart.toolInput
+          );
+        } else {
+          startAssistantMessage(chunks.blockStart);
+        }
       }
 
-      if (chunks.thinking) {
-        appendAssistantThinking(chunks.thinking);
+      if (chunks.textDelta) {
+        appendAssistantText(chunks.textDelta);
       }
 
-      if (chunks.toolStart) {
-        startToolUse(chunks.toolStart.name, chunks.toolStart.id);
+      if (chunks.thinkingDelta) {
+        appendAssistantThinking(chunks.thinkingDelta);
       }
 
       if (chunks.toolInputDelta) {
@@ -116,6 +126,7 @@ export default function App() {
       }
     });
   }, [
+    startAssistantMessage,
     appendAssistantText,
     appendAssistantThinking,
     appendToolInput,
