@@ -6,9 +6,10 @@ const shared: BuildOptions = {
   bundle: true,
   format: "cjs",
   platform: "node",
+  packages: "external",
   target: "node20",
   sourcemap: true,
-  external: ["electron"],
+  external: ["electron", "@anthropic-ai/claude-agent-sdk"],
   tsconfig: "tsconfig.json"
 };
 

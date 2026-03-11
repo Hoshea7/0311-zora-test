@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
+import { runClaudeAgentSmokeTest } from "./agent";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -29,6 +30,7 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle("app:get-version", () => app.getVersion());
   createWindow();
+  void runClaudeAgentSmokeTest(app.getAppPath());
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
