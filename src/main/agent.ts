@@ -3,6 +3,36 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentStatus, AgentStreamEvent } from "../shared/zora";
+import type {
+  PermissionRequest,
+  AskUserRequest,
+  AskUserQuestion,
+} from "../shared/zora";
+
+// ─── HITL: Promise + Map 异步挂起机制 ───
+
+type PermissionResult =
+  | { behavior: "allow"; updatedInput?: Record<string, unknown> }
+  | { behavior: "deny"; message: string };
+
+type PendingPermission = {
+  resolve: (result: PermissionResult) => void;
+  request: PermissionRequest;
+};
+
+type PendingAskUser = {
+  resolve: (result: PermissionResult) => void;
+  request: AskUserRequest;
+};
+
+const pendingPermissions = new Map<string, PendingPermission>();
+const pendingAskUsers = new Map<string, PendingAskUser>();
+
+let hitlIdCounter = 0;
+function nextHitlId(prefix: string): string {
+  hitlIdCounter += 1;
+  return `${prefix}-${Date.now()}-${hitlIdCounter}`;
+}
 
 type JsonRecord = Record<string, unknown>;
 type AgentEventForwarder = (event: AgentStreamEvent) => void;
@@ -206,6 +236,127 @@ function resolveSDKCliPath(): string {
   return cliPath;
 }
 
+// ─── HITL 辅助函数 ───
+
+const READ_ONLY_TOOLS = new Set([
+  "Read", "ReadFile", "Search", "Grep", "Glob", "LS",
+  "ListDirectory", "View", "Cat",
+]);
+
+function isReadOnlyTool(toolName: string): boolean {
+  return READ_ONLY_TOOLS.has(toolName);
+}
+
+function buildDescription(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === "Bash" || toolName.toLowerCase().includes("bash")) {
+    const cmd = typeof input.command === "string" ? input.command : "";
+    return cmd ? `执行命令: ${cmd.slice(0, 120)}` : "执行 Bash 命令";
+  }
+  if (
+    toolName === "Write" ||
+    toolName === "Edit" ||
+    toolName.toLowerCase().includes("write")
+  ) {
+    const filePath =
+      typeof input.filePath === "string"
+        ? input.filePath
+        : typeof input.file_path === "string"
+          ? input.file_path
+          : "";
+    return filePath ? `写入文件: ${filePath}` : "写入文件";
+  }
+  return `使用工具: ${toolName}`;
+}
+
+function parseAskUserQuestions(
+  input: Record<string, unknown>
+): AskUserQuestion[] {
+  if (typeof input.question === "string") {
+    return [{ question: input.question }];
+  }
+  if (Array.isArray(input.questions)) {
+    return input.questions.map((q: unknown) => {
+      if (typeof q === "string") return { question: q };
+      if (isRecord(q) && typeof q.question === "string") {
+        return {
+          question: q.question,
+          options: Array.isArray(q.options) ? q.options : undefined,
+        };
+      }
+      return { question: stringifyContent(q) };
+    });
+  }
+  return [{ question: stringifyContent(input) }];
+}
+
+function createCanUseTool(onEvent?: AgentEventForwarder) {
+  return async (
+    toolName: string,
+    input: Record<string, unknown>,
+    options: { signal?: AbortSignal; toolUseID?: string; agentID?: string }
+  ): Promise<PermissionResult> => {
+    // 1. 拦截 AskUserQuestion 工具
+    if (toolName === "AskUserQuestion") {
+      const requestId = nextHitlId("ask");
+      const request: AskUserRequest = {
+        requestId,
+        questions: parseAskUserQuestions(input),
+        toolInput: input,
+      };
+      onEvent?.({ type: "ask_user_request", request });
+
+      return new Promise<PermissionResult>((resolve) => {
+        pendingAskUsers.set(requestId, { resolve, request });
+        options.signal?.addEventListener(
+          "abort",
+          () => {
+            if (pendingAskUsers.has(requestId)) {
+              pendingAskUsers.delete(requestId);
+              resolve({ behavior: "deny", message: "操作已中止" });
+            }
+          },
+          { once: true }
+        );
+      });
+    }
+
+    // 2. 只读工具自动放行
+    if (isReadOnlyTool(toolName)) {
+      return { behavior: "allow", updatedInput: input };
+    }
+
+    // 3. 需要用户确认：挂起 Promise
+    const requestId = nextHitlId("perm");
+    const command =
+      (toolName === "Bash" || toolName.toLowerCase().includes("bash")) &&
+      typeof input.command === "string"
+        ? input.command
+        : undefined;
+    const request: PermissionRequest = {
+      requestId,
+      toolName,
+      toolInput: input,
+      description: buildDescription(toolName, input),
+      command,
+    };
+    onEvent?.({ type: "permission_request", request });
+
+    return new Promise<PermissionResult>((resolve) => {
+      pendingPermissions.set(requestId, { resolve, request });
+      options.signal?.addEventListener(
+        "abort",
+        () => {
+          if (pendingPermissions.has(requestId)) {
+            pendingPermissions.delete(requestId);
+            resolve({ behavior: "deny", message: "操作已中止" });
+          }
+        },
+        { once: true }
+      );
+    });
+  };
+}
+
 function isAbortLikeError(error: unknown) {
   return (
     error instanceof Error &&
@@ -257,7 +408,8 @@ export async function runClaudeAgentChat({
       maxTurns: 30,
       persistSession: false,
       includePartialMessages: true,
-      env: sdkEnv
+      env: sdkEnv,
+      canUseTool: createCanUseTool(onEvent),
     }
   });
 
@@ -289,6 +441,16 @@ export async function runClaudeAgentChat({
         // Ignore close errors while tearing down a finished or aborted run.
       }
 
+      // 清理所有挂起的 HITL 请求
+      for (const [, p] of pendingPermissions) {
+        p.resolve({ behavior: "deny", message: "会话已结束" });
+      }
+      pendingPermissions.clear();
+      for (const [, p] of pendingAskUsers) {
+        p.resolve({ behavior: "deny", message: "会话已结束" });
+      }
+      pendingAskUsers.clear();
+
       if (activeAgentRun === run) {
         activeAgentRun = null;
       }
@@ -317,4 +479,39 @@ export async function stopClaudeAgentChat() {
       console.warn("[agent] Failed to close Claude Agent SDK chat.", error);
     }
   }
+}
+
+// ─── HITL 响应函数（从 IPC handler 调用） ───
+
+export function respondToPermission(
+  requestId: string,
+  behavior: "allow" | "deny",
+  _alwaysAllow: boolean,
+  userMessage?: string
+) {
+  const pending = pendingPermissions.get(requestId);
+  if (!pending) return;
+
+  if (behavior === "allow") {
+    pending.resolve({ behavior: "allow", updatedInput: pending.request.toolInput });
+  } else {
+    const baseMsg = "用户拒绝了此操作";
+    const message = userMessage ? `${baseMsg}：${userMessage}` : baseMsg;
+    pending.resolve({ behavior: "deny", message });
+  }
+  pendingPermissions.delete(requestId);
+}
+
+export function respondToAskUser(
+  requestId: string,
+  answers: Record<string, string>
+) {
+  const pending = pendingAskUsers.get(requestId);
+  if (!pending) return;
+
+  pending.resolve({
+    behavior: "allow",
+    updatedInput: { ...pending.request.toolInput, answers },
+  });
+  pendingAskUsers.delete(requestId);
 }
