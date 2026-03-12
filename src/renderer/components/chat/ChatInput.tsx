@@ -2,6 +2,7 @@ import { useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { draftAtom, isRunningAtom } from "../../store/chat";
 import { Button } from "../ui/Button";
+import { PermissionModeButton } from "./PermissionModeButton";
 
 export interface ChatInputProps {
   onSubmit: () => void;
@@ -45,16 +46,14 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
         onChange={(event) => setDraft(event.target.value)}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
-        placeholder="给 Zora 发消息..."
+        placeholder="给 Zora 发消息… Enter 发送，Shift+Enter 换行"
         className="w-full resize-none border-0 bg-transparent px-2 py-1 text-[15px] leading-[1.6] text-stone-900 outline-none placeholder:text-stone-400 custom-scrollbar"
         rows={1}
         style={{ minHeight: "26px", maxHeight: "180px" }}
       />
 
       <div className="flex items-end justify-between mt-2 px-1 pb-0.5">
-        <div className="text-[12px] font-medium text-stone-400">
-          Enter 发送 <span className="mx-1 text-stone-300">/</span> Shift+Enter 换行
-        </div>
+        <PermissionModeButton />
         <div className="flex items-center gap-2">
           {isRunning ? (
             <Button

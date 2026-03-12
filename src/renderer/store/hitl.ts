@@ -1,5 +1,9 @@
 import { atom } from "jotai";
-import type { PermissionRequest, AskUserRequest } from "../../shared/zora";
+import type {
+  PermissionRequest,
+  AskUserRequest,
+  PermissionMode,
+} from "../../shared/zora";
 
 // ─── Pending 队列（FIFO，先进先出） ───
 
@@ -55,3 +59,15 @@ export const clearAllHitlAtom = atom(null, (_get, set) => {
   set(pendingPermissionsAtom, []);
   set(pendingAskUsersAtom, []);
 });
+
+/** 当前会话的 Permission Mode */
+export const permissionModeAtom = atom<PermissionMode>("ask");
+
+/** 更新 Permission Mode，并同步到 Main 进程 */
+export const setPermissionModeAtom = atom(
+  null,
+  async (_get, set, mode: PermissionMode) => {
+    set(permissionModeAtom, mode);
+    await window.zora.setPermissionMode(mode);
+  }
+);
