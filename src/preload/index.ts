@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentStreamEvent, ZoraApi } from "../shared/zora";
+import type {
+  AgentStreamEvent,
+  ZoraApi,
+  PermissionResponse,
+  AskUserResponse,
+} from "../shared/zora";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
@@ -16,7 +21,11 @@ const zoraApi: ZoraApi = {
     };
   },
   stopAgent: () => ipcRenderer.invoke("agent:stop") as Promise<void>,
-  isAwakened: () => ipcRenderer.invoke("zora:is-awakened") as Promise<boolean>
+  isAwakened: () => ipcRenderer.invoke("zora:is-awakened") as Promise<boolean>,
+  respondPermission: (response: PermissionResponse) =>
+    ipcRenderer.invoke("agent:permission:respond", response) as Promise<void>,
+  respondAskUser: (response: AskUserResponse) =>
+    ipcRenderer.invoke("agent:ask-user:respond", response) as Promise<void>
 };
 
 contextBridge.exposeInMainWorld("zora", zoraApi);

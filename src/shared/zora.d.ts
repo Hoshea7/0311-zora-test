@@ -10,7 +10,64 @@ export type AgentControlEvent =
       error: string;
     };
 
-export type AgentStreamEvent = AgentControlEvent | ({ type: string } & Record<string, unknown>);
+// ═══════════════════════════════════════════════════════════
+// HITL (Human-in-the-Loop) 类型
+// 用于 Main ↔ Renderer 双向通信的权限审批与用户提问机制
+// ═══════════════════════════════════════════════════════════
+
+/** 权限请求：Main → Renderer 推送，Agent 运行中某个工具需要用户审批 */
+export interface PermissionRequest {
+  requestId: string; // 唯一标识，格式 perm-{timestamp}-{counter}
+  toolName: string; // 工具名，如 "Bash", "Write", "Edit"
+  toolInput: Record<string, unknown>; // 工具的完整输入参数
+  description: string; // 人类可读的操作描述
+  command?: string; // 当 toolName 含 Bash 时，提取出的 command 字段
+}
+
+/** 权限响应：Renderer → Main 回复，用户对权限请求的决定 */
+export interface PermissionResponse {
+  requestId: string;
+  behavior: "allow" | "deny";
+  alwaysAllow: boolean; // true = 加入本次会话白名单，后续同类工具自动放行
+  userMessage?: string; // 用户在反馈框输入的自由文本（可选）
+  // deny 时会拼入 message 传给 Claude，让它据此调整策略
+  // allow 时忽略
+}
+
+/** AskUser 单个问题结构 */
+export interface AskUserQuestion {
+  question: string; // 问题文本
+  options?: {
+    // 预设选项（可选，没有则纯文本回答）
+    label: string;
+    description?: string;
+  }[];
+}
+
+/** AskUser 请求：Main → Renderer 推送，Agent 主动向用户提问 */
+export interface AskUserRequest {
+  requestId: string; // 唯一标识，格式 ask-{timestamp}-{counter}
+  questions: AskUserQuestion[]; // 一个或多个问题
+  toolInput: Record<string, unknown>; // 原始工具输入，respond 时会合并 answers 回去
+}
+
+/** AskUser 响应：Renderer → Main 回复 */
+export interface AskUserResponse {
+  requestId: string;
+  answers: Record<string, string>; // key = 问题索引字符串 ("0", "1", ...), value = 用户回答
+}
+
+/** HITL 相关的流式事件类型 */
+export type HitlEvent =
+  | { type: "permission_request"; request: PermissionRequest }
+  | { type: "permission_resolved"; requestId: string; behavior: "allow" | "deny" }
+  | { type: "ask_user_request"; request: AskUserRequest }
+  | { type: "ask_user_resolved"; requestId: string };
+
+export type AgentStreamEvent =
+  | AgentControlEvent
+  | HitlEvent
+  | ({ type: string } & Record<string, unknown>);
 
 export type AppPhase = "splash" | "awakening" | "chat";
 
@@ -20,6 +77,10 @@ export interface ZoraApi {
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: () => Promise<void>;
   isAwakened: () => Promise<boolean>;
+  /** 回复权限审批请求 */
+  respondPermission: (response: PermissionResponse) => Promise<void>;
+  /** 回复 Agent 向用户的提问 */
+  respondAskUser: (response: AskUserResponse) => Promise<void>;
 }
 
 declare global {

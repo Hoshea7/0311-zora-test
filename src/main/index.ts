@@ -1,10 +1,16 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
-import type { AgentStreamEvent } from "../shared/zora";
+import type {
+  AgentStreamEvent,
+  PermissionResponse,
+  AskUserResponse,
+} from "../shared/zora";
 import {
   isClaudeAgentRunning,
   runClaudeAgentChat,
-  stopClaudeAgentChat
+  stopClaudeAgentChat,
+  respondToPermission,
+  respondToAskUser,
 } from "./agent";
 import { isBootstrapMode } from "./prompt-builder";
 
@@ -64,6 +70,23 @@ app.whenReady().then(() => {
     const bootstrapMode = await isBootstrapMode();
     return !bootstrapMode;
   });
+  ipcMain.handle(
+    "agent:permission:respond",
+    async (_event, response: PermissionResponse) => {
+      respondToPermission(
+        response.requestId,
+        response.behavior,
+        response.alwaysAllow,
+        response.userMessage
+      );
+    }
+  );
+  ipcMain.handle(
+    "agent:ask-user:respond",
+    async (_event, response: AskUserResponse) => {
+      respondToAskUser(response.requestId, response.answers);
+    }
+  );
   createWindow();
 
   app.on("activate", () => {

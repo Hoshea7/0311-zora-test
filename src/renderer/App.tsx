@@ -20,6 +20,14 @@ import {
   completeAwakeningAtom
 } from "./store/zora";
 import {
+  pushPermissionAtom,
+  resolvePermissionAtom,
+  pushAskUserAtom,
+  resolveAskUserAtom,
+  clearAllHitlAtom,
+} from "./store/hitl";
+import type { PermissionRequest, AskUserRequest } from "../shared/zora";
+import {
   extractStreamChunks,
   extractAssistantPayload,
   extractToolResultContent,
@@ -51,6 +59,11 @@ export default function App() {
   const failConversation = useSetAtom(failConversationAtom);
   const startToolUse = useSetAtom(startToolUseAtom);
   const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
+  const pushPermission = useSetAtom(pushPermissionAtom);
+  const resolvePermission = useSetAtom(resolvePermissionAtom);
+  const pushAskUser = useSetAtom(pushAskUserAtom);
+  const resolveAskUser = useSetAtom(resolveAskUserAtom);
+  const clearAllHitl = useSetAtom(clearAllHitlAtom);
 
   // 启动阶段：检查唤醒状态
   useEffect(() => {
@@ -81,6 +94,24 @@ export default function App() {
     const unsubscribe = zora.onStream((streamEvent) => {
       console.log("[renderer event]", JSON.stringify(streamEvent).slice(0, 500));
 
+      // ─── HITL 事件分发 ───
+      if (streamEvent.type === "permission_request" && "request" in streamEvent) {
+        pushPermission(streamEvent.request as PermissionRequest);
+        return;
+      }
+      if (streamEvent.type === "permission_resolved" && "requestId" in streamEvent) {
+        resolvePermission(streamEvent.requestId as string);
+        return;
+      }
+      if (streamEvent.type === "ask_user_request" && "request" in streamEvent) {
+        pushAskUser(streamEvent.request as AskUserRequest);
+        return;
+      }
+      if (streamEvent.type === "ask_user_resolved" && "requestId" in streamEvent) {
+        resolveAskUser(streamEvent.requestId as string);
+        return;
+      }
+
       if (streamEvent.type === "agent_error") {
         clearIdleTimer();
         setIsAgentIdle(false);
@@ -100,6 +131,7 @@ export default function App() {
           clearIdleTimer();
           setIsAgentIdle(false);
           completeConversation("done");
+          clearAllHitl();
 
           // 唤醒完成检测：Agent 完成一轮对话后，检查是否已写入 SOUL.md
           zora.isAwakened().then((awakened) => {
@@ -114,6 +146,7 @@ export default function App() {
           clearIdleTimer();
           setIsAgentIdle(false);
           completeConversation("stopped");
+          clearAllHitl();
         }
 
         return;
@@ -209,7 +242,12 @@ export default function App() {
     startToolUse,
     setIsAgentIdle,
     completeAwakening,
-    setMessages
+    setMessages,
+    pushPermission,
+    resolvePermission,
+    pushAskUser,
+    resolveAskUser,
+    clearAllHitl
   ]);
 
   if (appPhase === "splash") {
