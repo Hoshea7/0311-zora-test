@@ -409,6 +409,7 @@ export async function runClaudeAgentChat({
       persistSession: false,
       includePartialMessages: true,
       env: sdkEnv,
+      permissionMode: "default",
       canUseTool: createCanUseTool(onEvent),
     }
   });
