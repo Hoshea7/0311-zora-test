@@ -38,7 +38,7 @@ export function LeftSidebar() {
 
           {/* SESSIONS 标题和新建按钮 */}
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-500">Sessions</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-500">新建会话</h2>
             <button
               onClick={handleNewChat}
               className="rounded-full p-1.5 border border-blue-500 text-blue-500 hover:bg-blue-50 transition"
@@ -55,7 +55,7 @@ export function LeftSidebar() {
           </div>
 
           {/* 底部区域 */}
-          <div className="border-t border-stone-200/50 p-3">
+          <div className="border-stone-200/50 p-3">
             <SidebarFooter />
           </div>
         </>

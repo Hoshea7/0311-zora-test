@@ -25,7 +25,6 @@ export function EmptyState() {
           你好！我是 Zora
         </h2>
         <p className="mt-3 text-[15px] leading-relaxed text-stone-500">
-          我是一个企业级的 AI Agent 办公助手。<br />
           在下方输入框发送消息，即可开始对话。
         </p>
       </div>

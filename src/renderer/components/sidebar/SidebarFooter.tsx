@@ -4,7 +4,7 @@
  */
 export function SidebarFooter() {
   return (
-    <div className="space-y-3 border-t border-stone-900/8 pt-4">
+    <div className="space-y-3 border-stone-900/8 pt-4">
       {/* MCP 和 Skills 状态 */}
       <div className="flex items-center gap-4 px-3 text-xs text-stone-500">
         <div className="flex items-center gap-1.5">
