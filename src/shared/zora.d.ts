@@ -12,11 +12,14 @@ export type AgentControlEvent =
 
 export type AgentStreamEvent = AgentControlEvent | ({ type: string } & Record<string, unknown>);
 
+export type AppPhase = "splash" | "awakening" | "chat";
+
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
   chat: (text: string) => Promise<void>;
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: () => Promise<void>;
+  isAwakened: () => Promise<boolean>;
 }
 
 declare global {

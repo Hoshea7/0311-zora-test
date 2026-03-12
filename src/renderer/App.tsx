@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import {
   startAssistantMessageAtom,
   appendAssistantTextAtom,
@@ -11,8 +11,14 @@ import {
   completeConversationAtom,
   failConversationAtom,
   startToolUseAtom,
-  isAgentIdleAtom
+  isAgentIdleAtom,
+  messagesAtom
 } from "./store/chat";
+import {
+  appPhaseAtom,
+  checkAwakeningAtom,
+  completeAwakeningAtom
+} from "./store/zora";
 import {
   extractStreamChunks,
   extractAssistantPayload,
@@ -21,12 +27,19 @@ import {
   isRecord
 } from "./utils/message";
 import { AppShell } from "./components/layout/AppShell";
+import { AwakeningView } from "./components/awakening/AwakeningView";
 
 /**
  * 应用根组件
+ * 管理 App 生命周期阶段（splash → awakening → chat）
  * 负责初始化和流式事件处理
  */
 export default function App() {
+  const appPhase = useAtomValue(appPhaseAtom);
+  const checkAwakening = useSetAtom(checkAwakeningAtom);
+  const completeAwakening = useSetAtom(completeAwakeningAtom);
+  const setMessages = useSetAtom(messagesAtom);
+
   const startAssistantMessage = useSetAtom(startAssistantMessageAtom);
   const appendAssistantText = useSetAtom(appendAssistantTextAtom);
   const appendAssistantThinking = useSetAtom(appendAssistantThinkingAtom);
@@ -39,7 +52,12 @@ export default function App() {
   const startToolUse = useSetAtom(startToolUseAtom);
   const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
 
-  // 处理 Agent 流式事件
+  // 启动阶段：检查唤醒状态
+  useEffect(() => {
+    checkAwakening();
+  }, [checkAwakening]);
+
+  // 处理 Agent 流式事件（awakening 和 chat 阶段都需要）
   useEffect(() => {
     const zora = window.zora;
     if (!zora) {
@@ -82,6 +100,14 @@ export default function App() {
           clearIdleTimer();
           setIsAgentIdle(false);
           completeConversation("done");
+
+          // 唤醒完成检测：Agent 完成一轮对话后，检查是否已写入 SOUL.md
+          zora.isAwakened().then((awakened) => {
+            if (awakened) {
+              setMessages([]);
+              completeAwakening();
+            }
+          });
         }
 
         if (streamEvent.status === "stopped") {
@@ -181,8 +207,18 @@ export default function App() {
     failConversation,
     hydrateAssistant,
     startToolUse,
-    setIsAgentIdle
+    setIsAgentIdle,
+    completeAwakening,
+    setMessages
   ]);
+
+  if (appPhase === "splash") {
+    return null;
+  }
+
+  if (appPhase === "awakening") {
+    return <AwakeningView />;
+  }
 
   return <AppShell />;
 }

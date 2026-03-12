@@ -6,6 +6,7 @@ import {
   runClaudeAgentChat,
   stopClaudeAgentChat
 } from "./agent";
+import { isBootstrapMode } from "./prompt-builder";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -58,6 +59,10 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("agent:stop", async () => {
     await stopClaudeAgentChat();
+  });
+  ipcMain.handle("zora:is-awakened", async () => {
+    const bootstrapMode = await isBootstrapMode();
+    return !bootstrapMode;
   });
   createWindow();
 

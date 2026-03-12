@@ -15,7 +15,8 @@ const zoraApi: ZoraApi = {
       ipcRenderer.removeListener("agent:stream", listener);
     };
   },
-  stopAgent: () => ipcRenderer.invoke("agent:stop") as Promise<void>
+  stopAgent: () => ipcRenderer.invoke("agent:stop") as Promise<void>,
+  isAwakened: () => ipcRenderer.invoke("zora:is-awakened") as Promise<boolean>
 };
 
 contextBridge.exposeInMainWorld("zora", zoraApi);
