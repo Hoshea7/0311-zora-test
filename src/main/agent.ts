@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentStatus, AgentStreamEvent } from "../shared/zora";
+import { ensureZoraDir } from "./memory-store";
+import { buildZoraSystemPrompt, isBootstrapMode } from "./prompt-builder";
 
 type JsonRecord = Record<string, unknown>;
 type AgentEventForwarder = (event: AgentStreamEvent) => void;
@@ -228,6 +230,8 @@ export async function runClaudeAgentChat({
 
   console.log("[agent] Starting Claude Agent SDK chat...");
 
+  await ensureZoraDir();
+
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   const sdkCliPath = resolveSDKCliPath();
   const executable = "node";
@@ -237,6 +241,10 @@ export async function runClaudeAgentChat({
     CLAUDE_AGENT_SDK_CLIENT_APP: "zora-agent"
   };
 
+  const zoraSystemPrompt = await buildZoraSystemPrompt();
+
+  console.log(`[agent] System prompt mode: ${await isBootstrapMode() ? "bootstrap" : "normal"}`);
+  console.log(`[agent] Append length: ${zoraSystemPrompt.append.length} chars`);
   console.log(`[agent] Using SDK CLI: ${sdkCliPath}`);
   console.log(`[agent] Using runtime: ${executable}`);
   console.log(`[agent] API KEY: api key from ~/.claude global setting`);
@@ -257,6 +265,7 @@ export async function runClaudeAgentChat({
       maxTurns: 30,
       persistSession: false,
       includePartialMessages: true,
+      systemPrompt: zoraSystemPrompt,
       env: sdkEnv
     }
   });
