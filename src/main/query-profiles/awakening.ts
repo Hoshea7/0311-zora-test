@@ -14,7 +14,7 @@ export async function buildAwakeningProfile(ctx: ProfileBuildContext): Promise<Q
     ? `${AWAKENING_PREAMBLE}${ctx.userPrompt}`
     : ctx.userPrompt;
 
-  const options: Record<string, unknown> = {
+  const options: QueryProfile["options"] = {
     cwd: ctx.cwd,
     pathToClaudeCodeExecutable: ctx.sdkCliPath,
     executable: "node",
@@ -22,7 +22,10 @@ export async function buildAwakeningProfile(ctx: ProfileBuildContext): Promise<Q
     maxTurns: 30,
     persistSession: true,
     includePartialMessages: true,
-    env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "zora-agent" },
+    env: {
+      ...(process.env as Record<string, string>),
+      CLAUDE_AGENT_SDK_CLIENT_APP: "zora-agent",
+    },
     systemPrompt,
     permissionMode: "bypassPermissions",
   };

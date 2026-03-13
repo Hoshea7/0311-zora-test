@@ -36,7 +36,7 @@ export function AwakeningView() {
     setDraft("");
 
     try {
-      await window.zora.chat(draft);
+      await window.zora.awaken(draft);
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
@@ -64,6 +64,8 @@ export function AwakeningView() {
         console.warn("[awakening] Failed to stop agent while skipping.", error);
       });
     }
+
+    void window.zora.awakeningComplete().catch(() => {});
   };
 
   return (

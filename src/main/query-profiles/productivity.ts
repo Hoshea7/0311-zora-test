@@ -5,7 +5,7 @@ import type { ProfileBuildContext, QueryProfile } from "./types";
 export async function buildProductivityProfile(ctx: ProfileBuildContext): Promise<QueryProfile> {
   const systemPrompt = await buildZoraSystemPrompt();
 
-  const options: Record<string, unknown> = {
+  const options: QueryProfile["options"] = {
     cwd: ctx.cwd,
     pathToClaudeCodeExecutable: ctx.sdkCliPath,
     executable: "node",
@@ -13,10 +13,13 @@ export async function buildProductivityProfile(ctx: ProfileBuildContext): Promis
     maxTurns: 30,
     persistSession: true,
     includePartialMessages: true,
-    env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "zora-agent" },
+    env: {
+      ...(process.env as Record<string, string>),
+      CLAUDE_AGENT_SDK_CLIENT_APP: "zora-agent",
+    },
     systemPrompt,
     permissionMode: "default",
-    canUseTool: createCanUseTool(ctx.onEvent),
+    canUseTool: createCanUseTool(ctx.onEvent) as QueryProfile["options"]["canUseTool"],
   };
 
   if (ctx.sessionId) {

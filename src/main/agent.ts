@@ -224,6 +224,7 @@ export async function runAgentWithProfile(
   }
 
   console.log(`[agent] Starting query with profile: ${profile.name}`);
+  console.log(`[agent] Current mode: ${profile.name}`);
   console.log(`[agent] Resume session: ${(profile.options as any).resume ?? "(new session)"}`);
   console.log(`[agent] Permission mode: ${(profile.options as any).permissionMode}`);
 

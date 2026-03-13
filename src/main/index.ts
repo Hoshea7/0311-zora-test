@@ -64,6 +64,8 @@ app.whenReady().then(() => {
       throw new Error("An agent is already running.");
     }
 
+    console.log("[index] Current mode: productivity");
+
     const target = event.sender;
     const forwardEvent = (payload: AgentStreamEvent) => {
       if (!target.isDestroyed()) {
@@ -91,6 +93,8 @@ app.whenReady().then(() => {
     if (isAgentRunning()) {
       throw new Error("An agent is already running.");
     }
+
+    console.log("[index] Current mode: awakening");
 
     const target = event.sender;
     const forwardEvent = (payload: AgentStreamEvent) => {
