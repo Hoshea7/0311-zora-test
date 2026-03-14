@@ -1,23 +1,9 @@
-// 消息状态类型
-export type ChatMessageStatus = "streaming" | "done" | "stopped" | "error";
-export type ChatMessageType = "text" | "thinking" | "tool_use";
-export type ChatToolStatus = "running" | "done" | "error";
-
-// 聊天消息类型
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  type?: ChatMessageType;
-  text: string;
-  thinking: string;
-  status: ChatMessageStatus;
-  error?: string;
-  toolName?: string;
-  toolUseId?: string;
-  toolInput?: string;
-  toolResult?: string;
-  toolStatus?: ChatToolStatus;
-};
+export type {
+  ChatMessageStatus,
+  ChatMessageType,
+  ChatToolStatus,
+  ChatMessage,
+} from "../../shared/zora";
 
 // 工作区类型
 export type Workspace = {
@@ -29,11 +15,10 @@ export type Workspace = {
 // 会话类型
 export type Session = {
   id: string;
-  workspaceId: string;
   title: string;
-  createdAt: Date;
-  updatedAt: Date;
-  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+  sdkSessionId?: string;
 };
 
 // 分组会话类型

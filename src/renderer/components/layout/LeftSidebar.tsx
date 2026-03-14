@@ -1,32 +1,33 @@
-import { useAtom, useSetAtom } from "jotai";
 import { useState, useRef, useEffect } from "react";
+import { useAtom, useSetAtom } from "jotai";
 import { sidebarCollapsedAtom } from "../../store/ui";
-import { 
-  startNewChatAtom, 
-  workspacesAtom, 
+import {
+  loadSessionsAtom,
+  startNewChatAtom,
+  workspacesAtom,
   currentWorkspaceAtom,
   currentWorkspaceIdAtom
 } from "../../store/workspace";
-import { messagesAtom } from "../../store/chat";
 import { cn } from "../../utils/cn";
 import { SessionList } from "../sidebar/SessionList";
 import { SidebarFooter } from "../sidebar/SidebarFooter";
 
 export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
+  const loadSessions = useSetAtom(loadSessionsAtom);
   const startNewChat = useSetAtom(startNewChatAtom);
-  const setMessages = useSetAtom(messagesAtom);
-  
   const [workspaces] = useAtom(workspacesAtom);
   const [currentWorkspace] = useAtom(currentWorkspaceAtom);
   const setCurrentWorkspaceId = useSetAtom(currentWorkspaceIdAtom);
-  
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
   const handleNewChat = () => {
     startNewChat();
-    setMessages([]);
   };
 
   const toggleSidebar = () => {
@@ -39,9 +40,11 @@ export function LeftSidebar() {
         setIsWorkspaceMenuOpen(false);
       }
     };
+
     if (isWorkspaceMenuOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
+
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
@@ -57,7 +60,7 @@ export function LeftSidebar() {
       {!collapsed && (
         <>
           <div className="border-b border-stone-200/50 px-4 py-3 pt-[62px] flex items-start justify-between relative">
-            <div 
+            <div
               className="flex-1 overflow-hidden cursor-pointer rounded-md hover:bg-stone-200/40 p-1 -ml-1 transition-colors select-none"
               onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
             >
@@ -74,16 +77,16 @@ export function LeftSidebar() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </div>
-              <div 
-                className="mt-1 text-[11px] text-stone-500 truncate pl-6" 
+              <div
+                className="mt-1 text-[11px] text-stone-500 truncate pl-6"
                 title="/Users/bytedance/Desktop/code/learn/0311-zora"
               >
                 /Users/bytedance/Desktop/code/learn/0311-zora
               </div>
             </div>
-            
+
             {isWorkspaceMenuOpen && (
-              <div 
+              <div
                 ref={menuRef}
                 className="absolute top-[100%] left-4 right-4 mt-1 bg-white rounded-xl shadow-lg border border-stone-200 py-1.5 z-50 overflow-hidden"
               >
@@ -122,7 +125,7 @@ export function LeftSidebar() {
                 </div>
               </div>
             )}
-            
+
             <button
               onClick={toggleSidebar}
               className="rounded-md p-1.5 text-stone-400 hover:bg-stone-200/50 hover:text-stone-600 transition shrink-0 ml-2"
@@ -161,7 +164,7 @@ export function LeftSidebar() {
       {collapsed && (
         <div className="flex h-full flex-col items-center py-4 pt-[62px] justify-between">
           <div className="flex flex-col items-center">
-            <button 
+            <button
               onClick={toggleSidebar}
               className="rounded-md p-2 text-stone-400 hover:bg-stone-200/50 hover:text-stone-600 transition"
               title="展开侧边栏"
@@ -172,7 +175,7 @@ export function LeftSidebar() {
               </svg>
             </button>
 
-            <button 
+            <button
               onClick={handleNewChat}
               className="rounded-md p-2 text-stone-500 hover:bg-stone-200/50 hover:text-stone-800 transition mt-2"
               title="新建会话"
@@ -183,7 +186,7 @@ export function LeftSidebar() {
             </button>
           </div>
 
-          <button 
+          <button
             className="rounded-md p-2 text-stone-400 hover:bg-stone-200/50 hover:text-stone-600 transition mb-2"
             title="设置"
           >

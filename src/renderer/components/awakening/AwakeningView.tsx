@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   startConversationAtom,
   failConversationAtom,
   draftAtom,
   isRunningAtom,
   messagesAtom,
+  setSessionRunningAtom,
 } from "../../store/chat";
 import { completeAwakeningAtom } from "../../store/zora";
 import { clearAllHitlAtom } from "../../store/hitl";
@@ -30,9 +31,10 @@ export function AwakeningView() {
   const failConversation = useSetAtom(failConversationAtom);
   const [draft, setDraft] = useAtom(draftAtom);
   const [messages, setMessages] = useAtom(messagesAtom);
+  const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
   const clearAllHitl = useSetAtom(clearAllHitlAtom);
-  const [isRunning, setIsRunning] = useAtom(isRunningAtom);
+  const isRunning = useAtomValue(isRunningAtom);
   const autoAwakenScheduledRef = useRef(false);
 
   useEffect(() => {
@@ -44,39 +46,41 @@ export function AwakeningView() {
     autoAwakenScheduledRef.current = true;
 
     // 先给出“正在苏醒”的即时反馈，再短暂等待主界面和监听器稳定。
-    setIsRunning(true);
+    setSessionRunning("__awakening__", true);
 
     const timer = setTimeout(async () => {
       // 不调用 startConversation — 避免在消息列表中出现用户消息气泡
       try {
         await window.zora.awaken(AUTO_AWAKEN_PROMPT);
       } catch (error) {
+        setSessionRunning("__awakening__", false);
         failConversation(getErrorMessage(error));
       }
     }, AUTO_AWAKEN_DELAY_MS);
 
     // Strict Mode 下第一次 effect 会被立刻清理；保留 cleanup 即可避免重复触发。
     return () => clearTimeout(timer);
-  }, [failConversation, messages.length, setIsRunning]);
+  }, [failConversation, messages.length, setSessionRunning]);
 
   const handleSubmit = async () => {
-    if (!draft.trim()) return;
+    const text = draft.trim();
+    if (!text) {
+      return;
+    }
 
-    startConversation(draft.trim());
+    startConversation(text);
     setDraft("");
 
     try {
-      await window.zora.awaken(draft.trim());
+      await window.zora.awaken(text);
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
   };
 
   const handleStop = async () => {
-    setIsRunning(false);
-
     try {
-      await window.zora.stopAgent();
+      await window.zora.stopAgent("__awakening__");
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
@@ -86,11 +90,11 @@ export function AwakeningView() {
     setDraft("");
     setMessages([]);
     clearAllHitl();
-    setIsRunning(false);
+    setSessionRunning("__awakening__", false);
     completeAwakening();
 
     if (isRunning) {
-      void window.zora.stopAgent().catch((error) => {
+      void window.zora.stopAgent("__awakening__").catch((error) => {
         console.warn("[awakening] Failed to stop agent while skipping.", error);
       });
     }

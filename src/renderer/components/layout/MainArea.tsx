@@ -3,8 +3,6 @@ import {
   startConversationAtom,
   failConversationAtom,
   draftAtom,
-  isRunningAtom,
-  messagesAtom
 } from "../../store/chat";
 import {
   currentSessionIdAtom,
@@ -21,35 +19,42 @@ export function MainArea() {
   const startConversation = useSetAtom(startConversationAtom);
   const failConversation = useSetAtom(failConversationAtom);
   const [draft, setDraft] = useAtom(draftAtom);
-  const setIsRunning = useSetAtom(isRunningAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const createSession = useSetAtom(createSessionAtom);
-  const [messages] = useAtom(messagesAtom);
 
   const handleSubmit = async () => {
-    if (!draft.trim()) return;
-
-    // 首条消息时创建会话，标题取消息前 20 字
-    if (!currentSessionId && messages.length === 0) {
-      const title = draft.length > 20 ? `${draft.slice(0, 20)}...` : draft;
-      createSession(title);
+    const text = draft.trim();
+    if (!text) {
+      return;
     }
 
-    startConversation(draft.trim());
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      const title = text.length > 20 ? `${text.slice(0, 20)}...` : text;
+      sessionId = await createSession(title);
+    }
+
+    if (!sessionId) {
+      return;
+    }
+
+    startConversation(text);
     setDraft("");
 
     try {
-      await window.zora.chat(draft.trim());
+      await window.zora.chat(text, sessionId);
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
   };
 
   const handleStop = async () => {
-    setIsRunning(false);
+    if (!currentSessionId) {
+      return;
+    }
 
     try {
-      await window.zora.stopAgent();
+      await window.zora.stopAgent(currentSessionId);
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
