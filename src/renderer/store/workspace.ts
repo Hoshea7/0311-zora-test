@@ -143,14 +143,58 @@ export const switchSessionAtom = atom(
  */
 export const deleteSessionAtom = atom(
   null,
-  async (get, set, sessionId: string) => {
-    await window.zora.deleteSession(sessionId);
+  (get, set, sessionId: string) => {
     set(sessionsAtom, (current) => current.filter((s) => s.id !== sessionId));
+    set(pinnedSessionIdsAtom, (current) => {
+      if (!current.has(sessionId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(sessionId);
+      return next;
+    });
     set(clearSessionMessagesAtom, sessionId);
 
     if (get(currentSessionIdAtom) === sessionId) {
       set(currentSessionIdAtom, null);
+      set(messagesAtom, []);
     }
+
+    window.zora.deleteSession(sessionId).catch((err) => {
+      console.error("[workspace] Failed to delete session from disk:", err);
+    });
+  }
+);
+
+/**
+ * 操作：重命名会话
+ */
+export const renameSessionAtom = atom(
+  null,
+  (_get, set, params: { sessionId: string; title: string }) => {
+    const { sessionId, title } = params;
+    const nextTitle = title.trim();
+
+    if (!nextTitle) {
+      return;
+    }
+
+    set(sessionsAtom, (current) =>
+      current.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              title: nextTitle,
+              updatedAt: new Date().toISOString()
+            }
+          : session
+      )
+    );
+
+    window.zora.renameSession(sessionId, nextTitle).catch((err) => {
+      console.error("[workspace] Failed to rename session on disk:", err);
+    });
   }
 );
 

@@ -21,6 +21,8 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("session:create", title) as Promise<SessionMeta>,
   deleteSession: (sessionId: string) =>
     ipcRenderer.invoke("session:delete", sessionId) as Promise<void>,
+  renameSession: (sessionId: string, title: string) =>
+    ipcRenderer.invoke("session:rename", sessionId, title) as Promise<void>,
   awaken: (text: string) => ipcRenderer.invoke("agent:awaken", text) as Promise<void>,
   awakeningComplete: () => ipcRenderer.invoke("agent:awakening-complete") as Promise<void>,
   onStream: (callback) => {

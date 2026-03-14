@@ -33,8 +33,10 @@ import {
   getSdkSessionId,
   listSessions,
   loadMessages,
+  migrateSessionsIfNeeded,
   persistAssistantMessage,
   persistToolResults,
+  renameSession,
 } from "./session-store";
 import { clearSessionId, getSessionId } from "./session-manager";
 
@@ -194,7 +196,9 @@ function createWindow() {
   window.loadFile(path.join(app.getAppPath(), "dist", "renderer", "index.html"));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await migrateSessionsIfNeeded();
+
   ipcMain.handle("app:get-version", () => app.getVersion());
 
   ipcMain.handle("session:list", async () => {
@@ -209,12 +213,26 @@ app.whenReady().then(() => {
     return createSession(title.trim());
   });
 
-  ipcMain.handle("session:delete", async (_event, sessionId: string) => {
-    if (typeof sessionId !== "string") {
-      throw new Error("Session ID is required.");
+  ipcMain.handle("session:delete", async (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+      throw new Error("A valid sessionId is required.");
     }
 
     await deleteSession(sessionId);
+    console.log(`[index] Session deleted: ${sessionId}`);
+  });
+
+  ipcMain.handle("session:rename", async (_event, sessionId: unknown, title: unknown) => {
+    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+      throw new Error("A valid sessionId is required.");
+    }
+    if (typeof title !== "string" || title.trim().length === 0) {
+      throw new Error("A non-empty title is required.");
+    }
+
+    const nextTitle = title.trim();
+    await renameSession(sessionId, nextTitle);
+    console.log(`[index] Session renamed: ${sessionId} -> "${nextTitle}"`);
   });
 
   ipcMain.handle("session:load-messages", async (_event, sessionId: string) => {

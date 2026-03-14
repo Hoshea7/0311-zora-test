@@ -109,6 +109,7 @@ export interface ZoraApi {
   loadMessages: (sessionId: string) => Promise<ChatMessage[]>;
   createSession: (title: string) => Promise<SessionMeta>;
   deleteSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: (sessionId: string) => Promise<void>;
   isAwakened: () => Promise<boolean>;

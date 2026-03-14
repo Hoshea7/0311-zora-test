@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  access,
   appendFile,
   mkdir,
   readFile,
-  rename,
+  rename as fsRename,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -19,11 +20,52 @@ export interface SessionMeta {
   sdkSessionId?: string;
 }
 
-const SESSIONS_DIR = path.join(homedir(), ".zora", "sessions");
-const INDEX_FILE = path.join(SESSIONS_DIR, "index.json");
+const ZORA_DIR = path.join(homedir(), ".zora");
+const OLD_SESSIONS_DIR = path.join(ZORA_DIR, "sessions");
 
-async function ensureSessionsDir(): Promise<void> {
-  await mkdir(SESSIONS_DIR, { recursive: true });
+function getSessionsDir(workspaceId = "default"): string {
+  return path.join(ZORA_DIR, "workspaces", workspaceId, "sessions");
+}
+
+function getIndexFile(workspaceId = "default"): string {
+  return path.join(getSessionsDir(workspaceId), "index.json");
+}
+
+let migrationDone = false;
+
+export async function migrateSessionsIfNeeded(): Promise<void> {
+  if (migrationDone) {
+    return;
+  }
+
+  migrationDone = true;
+
+  const newDir = getSessionsDir("default");
+
+  try {
+    await access(OLD_SESSIONS_DIR);
+  } catch {
+    return;
+  }
+
+  try {
+    await access(newDir);
+    console.log("[session-store] New sessions dir already exists, skipping migration.");
+    return;
+  } catch {
+    // The workspace-aware directory does not exist yet, continue migrating.
+  }
+
+  await mkdir(path.join(ZORA_DIR, "workspaces", "default"), { recursive: true });
+  await fsRename(OLD_SESSIONS_DIR, newDir);
+  console.log(
+    "[session-store] Migrated sessions from ~/.zora/sessions/ to ~/.zora/workspaces/default/sessions/."
+  );
+}
+
+async function ensureSessionsDir(workspaceId = "default"): Promise<void> {
+  await migrateSessionsIfNeeded();
+  await mkdir(getSessionsDir(workspaceId), { recursive: true });
 }
 
 async function replaceFileAtomically(
@@ -34,7 +76,7 @@ async function replaceFileAtomically(
   await writeFile(tmpPath, content, "utf8");
 
   try {
-    await rename(tmpPath, filePath);
+    await fsRename(tmpPath, filePath);
   } catch (error: unknown) {
     const code =
       typeof error === "object" && error !== null && "code" in error
@@ -48,7 +90,7 @@ async function replaceFileAtomically(
         // Ignore missing destination files.
       }
 
-      await rename(tmpPath, filePath);
+      await fsRename(tmpPath, filePath);
       return;
     }
 
@@ -62,25 +104,39 @@ async function replaceFileAtomically(
   }
 }
 
-async function readIndex(): Promise<SessionMeta[]> {
+async function readIndex(workspaceId = "default"): Promise<SessionMeta[]> {
+  await migrateSessionsIfNeeded();
+
   try {
-    const raw = await readFile(INDEX_FILE, "utf8");
+    const raw = await readFile(getIndexFile(workspaceId), "utf8");
     return JSON.parse(raw) as SessionMeta[];
   } catch {
     return [];
   }
 }
 
-async function writeIndex(sessions: SessionMeta[]): Promise<void> {
-  await ensureSessionsDir();
-  await replaceFileAtomically(INDEX_FILE, JSON.stringify(sessions, null, 2));
+async function writeIndex(
+  sessions: SessionMeta[],
+  workspaceId = "default"
+): Promise<void> {
+  await ensureSessionsDir(workspaceId);
+  await replaceFileAtomically(
+    getIndexFile(workspaceId),
+    JSON.stringify(sessions, null, 2)
+  );
 }
 
-export async function listSessions(): Promise<SessionMeta[]> {
-  return readIndex();
+export async function listSessions(workspaceId = "default"): Promise<SessionMeta[]> {
+  await ensureSessionsDir(workspaceId);
+  return readIndex(workspaceId);
 }
 
-export async function createSession(title: string): Promise<SessionMeta> {
+export async function createSession(
+  title: string,
+  workspaceId = "default"
+): Promise<SessionMeta> {
+  await ensureSessionsDir(workspaceId);
+
   const now = new Date().toISOString();
   const meta: SessionMeta = {
     id: randomUUID(),
@@ -89,28 +145,37 @@ export async function createSession(title: string): Promise<SessionMeta> {
     updatedAt: now,
   };
 
-  const sessions = await readIndex();
+  const sessions = await readIndex(workspaceId);
   sessions.unshift(meta);
-  await writeIndex(sessions);
+  await writeIndex(sessions, workspaceId);
   return meta;
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  const sessions = await readIndex();
-  await writeIndex(sessions.filter((session) => session.id !== sessionId));
+export async function deleteSession(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<void> {
+  await ensureSessionsDir(workspaceId);
+
+  const sessions = await readIndex(workspaceId);
+  const filtered = sessions.filter((session) => session.id !== sessionId);
+  await writeIndex(filtered, workspaceId);
 
   try {
-    await unlink(path.join(SESSIONS_DIR, `${sessionId}.jsonl`));
+    await unlink(getJsonlPath(sessionId, workspaceId));
   } catch {
-    // Step 1 does not create message files yet.
+    // Ignore missing message files so metadata cleanup can still succeed.
   }
 }
 
 export async function updateSessionMeta(
   sessionId: string,
-  updates: Partial<Pick<SessionMeta, "title" | "sdkSessionId">>
+  updates: Partial<Pick<SessionMeta, "title" | "sdkSessionId">>,
+  workspaceId = "default"
 ): Promise<void> {
-  const sessions = await readIndex();
+  await ensureSessionsDir(workspaceId);
+
+  const sessions = await readIndex(workspaceId);
   const index = sessions.findIndex((session) => session.id === sessionId);
 
   if (index === -1) {
@@ -123,24 +188,38 @@ export async function updateSessionMeta(
     updatedAt: new Date().toISOString(),
   };
 
-  await writeIndex(sessions);
+  await writeIndex(sessions, workspaceId);
+}
+
+export async function renameSession(
+  sessionId: string,
+  title: string,
+  workspaceId = "default"
+): Promise<void> {
+  await updateSessionMeta(sessionId, { title }, workspaceId);
 }
 
 export async function setSdkSessionId(
   sessionId: string,
-  sdkSessionId: string
+  sdkSessionId: string,
+  workspaceId = "default"
 ): Promise<void> {
-  await updateSessionMeta(sessionId, { sdkSessionId });
+  await updateSessionMeta(sessionId, { sdkSessionId }, workspaceId);
 }
 
-export async function clearSdkSessionId(sessionId: string): Promise<void> {
-  await updateSessionMeta(sessionId, { sdkSessionId: undefined });
+export async function clearSdkSessionId(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<void> {
+  await updateSessionMeta(sessionId, { sdkSessionId: undefined }, workspaceId);
 }
 
 export async function getSdkSessionId(
-  sessionId: string
+  sessionId: string,
+  workspaceId = "default"
 ): Promise<string | undefined> {
-  const sessions = await readIndex();
+  await ensureSessionsDir(workspaceId);
+  const sessions = await readIndex(workspaceId);
   return sessions.find((session) => session.id === sessionId)?.sdkSessionId;
 }
 
@@ -149,8 +228,8 @@ type MessageRecord =
   | { kind: "assistant_block"; message: ChatMessage }
   | { kind: "tool_result"; toolUseId: string; result: string; isError: boolean };
 
-function getJsonlPath(sessionId: string): string {
-  return path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
+function getJsonlPath(sessionId: string, workspaceId = "default"): string {
+  return path.join(getSessionsDir(workspaceId), `${sessionId}.jsonl`);
 }
 
 function makeId(prefix: string): string {
@@ -159,17 +238,27 @@ function makeId(prefix: string): string {
 
 export async function appendMessageRecord(
   sessionId: string,
-  record: MessageRecord
+  record: MessageRecord,
+  workspaceId = "default"
 ): Promise<void> {
-  await ensureSessionsDir();
-  await appendFile(getJsonlPath(sessionId), `${JSON.stringify(record)}\n`, "utf8");
+  await ensureSessionsDir(workspaceId);
+  await appendFile(
+    getJsonlPath(sessionId, workspaceId),
+    `${JSON.stringify(record)}\n`,
+    "utf8"
+  );
 }
 
-export async function loadMessages(sessionId: string): Promise<ChatMessage[]> {
+export async function loadMessages(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<ChatMessage[]> {
+  await ensureSessionsDir(workspaceId);
+
   let content: string;
 
   try {
-    content = await readFile(getJsonlPath(sessionId), "utf8");
+    content = await readFile(getJsonlPath(sessionId, workspaceId), "utf8");
   } catch {
     return [];
   }
@@ -207,7 +296,11 @@ export async function loadMessages(sessionId: string): Promise<ChatMessage[]> {
   return messages;
 }
 
-export function persistAssistantMessage(sessionId: string, sdkMessage: unknown): void {
+export function persistAssistantMessage(
+  sessionId: string,
+  sdkMessage: unknown,
+  workspaceId = "default"
+): void {
   if (typeof sdkMessage !== "object" || sdkMessage === null) {
     return;
   }
@@ -235,7 +328,7 @@ export function persistAssistantMessage(sessionId: string, sdkMessage: unknown):
           thinking: "",
           status: "done",
         },
-      });
+      }, workspaceId);
       continue;
     }
 
@@ -250,7 +343,7 @@ export function persistAssistantMessage(sessionId: string, sdkMessage: unknown):
           thinking: item.thinking,
           status: "done",
         },
-      });
+      }, workspaceId);
       continue;
     }
 
@@ -273,12 +366,16 @@ export function persistAssistantMessage(sessionId: string, sdkMessage: unknown):
           toolStatus: "running",
           status: "done",
         },
-      });
+      }, workspaceId);
     }
   }
 }
 
-export function persistToolResults(sessionId: string, sdkMessage: unknown): void {
+export function persistToolResults(
+  sessionId: string,
+  sdkMessage: unknown,
+  workspaceId = "default"
+): void {
   if (typeof sdkMessage !== "object" || sdkMessage === null) {
     return;
   }
@@ -306,6 +403,6 @@ export function persistToolResults(sessionId: string, sdkMessage: unknown): void
           ? item.content
           : JSON.stringify(item.content ?? ""),
       isError: item.is_error === true,
-    });
+    }, workspaceId);
   }
 }
