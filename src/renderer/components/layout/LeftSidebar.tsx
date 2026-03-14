@@ -1,19 +1,22 @@
+import { useEffect } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import { sidebarCollapsedAtom } from "../../store/ui";
-import { startNewChatAtom } from "../../store/workspace";
-import { messagesAtom } from "../../store/chat";
+import { loadSessionsAtom, startNewChatAtom } from "../../store/workspace";
 import { cn } from "../../utils/cn";
 import { SessionList } from "../sidebar/SessionList";
 import { SidebarFooter } from "../sidebar/SidebarFooter";
 
 export function LeftSidebar() {
   const [collapsed] = useAtom(sidebarCollapsedAtom);
+  const loadSessions = useSetAtom(loadSessionsAtom);
   const startNewChat = useSetAtom(startNewChatAtom);
-  const setMessages = useSetAtom(messagesAtom);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
 
   const handleNewChat = () => {
     startNewChat();
-    setMessages([]);
   };
 
   return (

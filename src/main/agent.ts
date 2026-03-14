@@ -6,7 +6,6 @@ import type { AgentStatus, AgentStreamEvent } from "../shared/zora";
 import { clearAllPending } from "./hitl";
 import { ensureZoraDir } from "./memory-store";
 import type { QueryProfile } from "./query-profiles/types";
-import { setSessionId } from "./session-manager";
 
 type JsonRecord = Record<string, unknown>;
 export type AgentEventForwarder = (event: AgentStreamEvent) => void;
@@ -240,20 +239,6 @@ export async function runAgentWithProfile(
   void (async () => {
     try {
       for await (const message of response) {
-        if (message.type === "system" && (message as any).subtype === "init") {
-          const sid = (message as any).session_id;
-          if (typeof sid === "string" && sid.length > 0) {
-            setSessionId(profile.name, sid);
-          }
-        }
-
-        if (message.type === "result") {
-          const sid = (message as any).session_id;
-          if (typeof sid === "string" && sid.length > 0) {
-            setSessionId(profile.name, sid);
-          }
-        }
-
         logSdkMessage(message, onEvent);
       }
       console.log(`[agent] Query finished (profile: ${profile.name})`);

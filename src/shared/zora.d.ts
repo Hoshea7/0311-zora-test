@@ -1,6 +1,33 @@
 export type AgentStatus = "started" | "finished" | "stopped";
 export type PermissionMode = "ask" | "smart" | "yolo";
 
+export interface SessionMeta {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  sdkSessionId?: string;
+}
+
+export type ChatMessageStatus = "streaming" | "done" | "stopped" | "error";
+export type ChatMessageType = "text" | "thinking" | "tool_use";
+export type ChatToolStatus = "running" | "done" | "error";
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  type?: ChatMessageType;
+  text: string;
+  thinking: string;
+  status: ChatMessageStatus;
+  error?: string;
+  toolName?: string;
+  toolUseId?: string;
+  toolInput?: string;
+  toolResult?: string;
+  toolStatus?: ChatToolStatus;
+};
+
 export type AgentControlEvent =
   | {
       type: "agent_status";
@@ -74,7 +101,11 @@ export type AppPhase = "splash" | "awakening" | "chat";
 
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
-  chat: (text: string) => Promise<void>;
+  chat: (params: { sessionId: string; text: string }) => Promise<void>;
+  listSessions: () => Promise<SessionMeta[]>;
+  loadMessages: (sessionId: string) => Promise<ChatMessage[]>;
+  createSession: (title: string) => Promise<SessionMeta>;
+  deleteSession: (sessionId: string) => Promise<void>;
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: () => Promise<void>;
   isAwakened: () => Promise<boolean>;

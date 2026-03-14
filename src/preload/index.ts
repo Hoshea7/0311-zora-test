@@ -5,11 +5,22 @@ import type {
   PermissionResponse,
   AskUserResponse,
   PermissionMode,
+  ChatMessage,
+  SessionMeta,
 } from "../shared/zora";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
-  chat: (text: string) => ipcRenderer.invoke("agent:chat", text) as Promise<void>,
+  chat: (params: { sessionId: string; text: string }) =>
+    ipcRenderer.invoke("agent:chat", params) as Promise<void>,
+  listSessions: () =>
+    ipcRenderer.invoke("session:list") as Promise<SessionMeta[]>,
+  loadMessages: (sessionId: string) =>
+    ipcRenderer.invoke("session:load-messages", sessionId) as Promise<ChatMessage[]>,
+  createSession: (title: string) =>
+    ipcRenderer.invoke("session:create", title) as Promise<SessionMeta>,
+  deleteSession: (sessionId: string) =>
+    ipcRenderer.invoke("session:delete", sessionId) as Promise<void>,
   awaken: (text: string) => ipcRenderer.invoke("agent:awaken", text) as Promise<void>,
   awakeningComplete: () => ipcRenderer.invoke("agent:awakening-complete") as Promise<void>,
   onStream: (callback) => {
@@ -30,7 +41,7 @@ const zoraApi: ZoraApi = {
   respondPermission: (response: PermissionResponse) =>
     ipcRenderer.invoke("agent:permission:respond", response) as Promise<void>,
   respondAskUser: (response: AskUserResponse) =>
-    ipcRenderer.invoke("agent:ask-user:respond", response) as Promise<void>
+    ipcRenderer.invoke("agent:ask-user:respond", response) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld("zora", zoraApi);

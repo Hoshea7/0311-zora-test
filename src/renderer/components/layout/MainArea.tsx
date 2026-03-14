@@ -4,7 +4,6 @@ import {
   failConversationAtom,
   draftAtom,
   isRunningAtom,
-  messagesAtom
 } from "../../store/chat";
 import {
   currentSessionIdAtom,
@@ -24,23 +23,22 @@ export function MainArea() {
   const setIsRunning = useSetAtom(isRunningAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const createSession = useSetAtom(createSessionAtom);
-  const [messages] = useAtom(messagesAtom);
 
   const handleSubmit = async () => {
     const draft = document.querySelector<HTMLTextAreaElement>("textarea")?.value.trim();
     if (!draft) return;
 
-    // 首条消息时创建会话，标题取消息前 20 字
-    if (!currentSessionId && messages.length === 0) {
+    let sessionId = currentSessionId;
+    if (!sessionId) {
       const title = draft.length > 20 ? `${draft.slice(0, 20)}...` : draft;
-      createSession(title);
+      sessionId = await createSession(title);
     }
 
     startConversation(draft);
     setDraft("");
 
     try {
-      await window.zora.chat(draft);
+      await window.zora.chat({ sessionId, text: draft });
     } catch (error) {
       failConversation(getErrorMessage(error));
     }

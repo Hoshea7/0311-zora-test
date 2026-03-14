@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   AgentStreamEvent,
@@ -22,7 +23,18 @@ import {
   buildAwakeningProfile,
   buildProductivityProfile,
 } from "./query-profiles";
-import { clearSessionId, getSessionId } from "./session-manager";
+import {
+  appendMessageRecord,
+  createSession,
+  deleteSession,
+  getSdkSessionId,
+  listSessions,
+  loadMessages,
+  persistAssistantMessage,
+  persistToolResults,
+  setSdkSessionId,
+} from "./session-store";
+import { clearSessionId, getSessionId, setSessionId } from "./session-manager";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -56,31 +68,102 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle("app:get-version", () => app.getVersion());
 
-  ipcMain.handle("agent:chat", async (event, text: unknown) => {
-    if (typeof text !== "string" || text.trim().length === 0) {
+  ipcMain.handle("session:list", async () => {
+    return listSessions();
+  });
+
+  ipcMain.handle("session:create", async (_event, title: string) => {
+    if (typeof title !== "string" || title.trim().length === 0) {
+      throw new Error("Session title is required.");
+    }
+
+    return createSession(title.trim());
+  });
+
+  ipcMain.handle("session:delete", async (_event, sessionId: string) => {
+    if (typeof sessionId !== "string") {
+      throw new Error("Session ID is required.");
+    }
+
+    await deleteSession(sessionId);
+  });
+
+  ipcMain.handle("session:load-messages", async (_event, sessionId: string) => {
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      throw new Error("Session ID is required.");
+    }
+
+    return loadMessages(sessionId);
+  });
+
+  ipcMain.handle("agent:chat", async (event, params: unknown) => {
+    if (
+      typeof params !== "object" ||
+      params === null ||
+      typeof (params as { sessionId?: unknown }).sessionId !== "string" ||
+      typeof (params as { text?: unknown }).text !== "string"
+    ) {
+      throw new Error("Invalid params: {sessionId, text} required.");
+    }
+
+    const { sessionId, text } = params as { sessionId: string; text: string };
+    if (text.trim().length === 0) {
       throw new Error("A non-empty prompt is required.");
     }
     if (isAgentRunning()) {
       throw new Error("An agent is already running.");
     }
 
-    console.log("[index] Current mode: productivity");
+    console.log("[index] Current mode: productivity, session:", sessionId);
+
+    await appendMessageRecord(sessionId, {
+      kind: "user",
+      message: {
+        id: `user-${randomUUID()}`,
+        role: "user",
+        type: "text",
+        text: text.trim(),
+        thinking: "",
+        status: "done",
+      },
+    });
 
     const target = event.sender;
     const forwardEvent = (payload: AgentStreamEvent) => {
       if (!target.isDestroyed()) {
-        target.send("agent:stream", payload);
+        target.send("agent:stream", { ...payload, sessionId });
+      }
+
+      const message = payload as Record<string, unknown>;
+
+      if (message.type === "assistant" && "message" in message) {
+        persistAssistantMessage(sessionId, message.message);
+      }
+
+      if (message.type === "user" && "message" in message) {
+        persistToolResults(sessionId, message.message);
+      }
+
+      if (message.type === "system" && message.subtype === "init") {
+        const sdkSessionId = message.session_id;
+        if (typeof sdkSessionId === "string" && sdkSessionId.length > 0) {
+          void setSdkSessionId(sessionId, sdkSessionId);
+        }
+      }
+
+      if (message.type === "result" && typeof message.session_id === "string") {
+        void setSdkSessionId(sessionId, message.session_id);
       }
     };
 
-    const existingSessionId = getSessionId("productivity");
+    const sdkSessionId = await getSdkSessionId(sessionId);
     const profile = await buildProductivityProfile({
       userPrompt: text.trim(),
       cwd: app.getAppPath(),
       sdkCliPath: resolveSDKCliPath(),
       onEvent: forwardEvent,
-      isFirstTurn: !existingSessionId,
-      sessionId: existingSessionId,
+      isFirstTurn: !sdkSessionId,
+      sessionId: sdkSessionId,
     });
 
     await runAgentWithProfile(profile, forwardEvent);
@@ -100,6 +183,18 @@ app.whenReady().then(() => {
     const forwardEvent = (payload: AgentStreamEvent) => {
       if (!target.isDestroyed()) {
         target.send("agent:stream", payload);
+      }
+
+      const message = payload as Record<string, unknown>;
+      if (message.type === "system" && message.subtype === "init") {
+        const sdkSessionId = message.session_id;
+        if (typeof sdkSessionId === "string" && sdkSessionId.length > 0) {
+          setSessionId("awakening", sdkSessionId);
+        }
+      }
+
+      if (message.type === "result" && typeof message.session_id === "string") {
+        setSessionId("awakening", message.session_id);
       }
     };
 
