@@ -9,6 +9,7 @@ import {
   switchSessionAtom
 } from "../../store/workspace";
 import { cn } from "../../utils/cn";
+import { isSettingsOpenAtom } from "../../store/ui";
 import type { Session } from "../../types";
 
 /**
@@ -22,6 +23,7 @@ export function SessionList() {
   const switchSession = useSetAtom(switchSessionAtom);
   const deleteSession = useSetAtom(deleteSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
+  const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function SessionList() {
 
   const handleSwitchSession = (sessionId: string) => {
     switchSession(sessionId);
+    setSettingsOpen(false);
   };
 
   const handleRenameSubmit = (sessionId: string, currentTitle: string) => {

@@ -10,6 +10,7 @@ import { isSettingsOpenAtom } from "../../store/ui";
 export function SidebarFooter() {
   const skills = useAtomValue(skillsAtom);
   const loadSkills = useSetAtom(loadSkillsAtom);
+  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
 
   useEffect(() => {
@@ -58,10 +59,12 @@ export function SidebarFooter() {
       <button
         type="button"
         onClick={() => setSettingsOpen(true)}
-        className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition hover:bg-stone-900/[0.04]"
+        className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition ${
+          isSettingsOpen ? "bg-stone-200/50 text-stone-900 font-medium" : "hover:bg-stone-900/[0.04] text-stone-600"
+        }`}
       >
         <svg
-          className="h-4 w-4 text-stone-500"
+          className={`h-4 w-4 ${isSettingsOpen ? "text-stone-700" : "text-stone-500"}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

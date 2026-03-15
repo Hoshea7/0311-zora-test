@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import { isSettingsOpenAtom, sidebarCollapsedAtom } from "../../store/ui";
 import {
   loadSessionsAtom,
@@ -16,6 +16,7 @@ export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
   const loadSessions = useSetAtom(loadSessionsAtom);
   const startNewChat = useSetAtom(startNewChatAtom);
+  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [workspaces] = useAtom(workspacesAtom);
   const [currentWorkspace] = useAtom(currentWorkspaceAtom);
@@ -29,6 +30,7 @@ export function LeftSidebar() {
 
   const handleNewChat = () => {
     startNewChat();
+    setSettingsOpen(false);
   };
 
   const toggleSidebar = () => {
@@ -189,7 +191,10 @@ export function LeftSidebar() {
 
           <button
             onClick={() => setSettingsOpen(true)}
-            className="rounded-md p-2 text-stone-400 hover:bg-stone-200/50 hover:text-stone-600 transition mb-2"
+            className={cn(
+              "rounded-md p-2 transition mb-2",
+              isSettingsOpen ? "bg-stone-200 text-stone-700" : "text-stone-400 hover:bg-stone-200/50 hover:text-stone-600"
+            )}
             title="设置"
           >
             <svg

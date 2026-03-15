@@ -38,7 +38,6 @@ import {
 } from "./utils/message";
 import { AppShell } from "./components/layout/AppShell";
 import { AwakeningView } from "./components/awakening/AwakeningView";
-import { SettingsPanel } from "./components/settings/SettingsPanel";
 
 /**
  * 应用根组件
@@ -340,9 +339,6 @@ export default function App() {
   }
 
   return (
-    <>
-      <AppShell />
-      <SettingsPanel />
-    </>
+    <AppShell />
   );
 }
