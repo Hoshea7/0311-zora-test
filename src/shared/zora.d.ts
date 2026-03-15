@@ -8,6 +8,16 @@ export interface SkillMeta {
   path: string;
 }
 
+export interface FileAttachment {
+  id: string;
+  name: string;
+  category: "image" | "document" | "text";
+  mimeType: string;
+  size: number;
+  localPath: string;
+  base64Data?: string;
+}
+
 export interface SessionMeta {
   id: string;
   title: string;
@@ -35,6 +45,7 @@ export type ChatMessage = {
   text: string;
   thinking: string;
   status: ChatMessageStatus;
+  attachments?: FileAttachment[];
   error?: string;
   toolName?: string;
   toolUseId?: string;
@@ -119,7 +130,12 @@ export type AppPhase = "splash" | "awakening" | "chat";
 
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
-  chat: (text: string, sessionId: string, workspaceId?: string) => Promise<void>;
+  chat: (
+    text: string,
+    sessionId: string,
+    workspaceId?: string,
+    attachments?: FileAttachment[]
+  ) => Promise<void>;
   listSkills: () => Promise<SkillMeta[]>;
   openSkillsDir: () => Promise<void>;
   openSkillDir: (dirName: string) => Promise<void>;
@@ -136,6 +152,9 @@ export interface ZoraApi {
   stopAgent: (sessionId: string) => Promise<void>;
   isAwakened: () => Promise<boolean>;
   setPermissionMode: (mode: PermissionMode) => Promise<void>;
+  selectFiles: () => Promise<FileAttachment[]>;
+  readFileAsAttachment: (filePath: string) => Promise<FileAttachment | null>;
+  getPathForFile: (file: File) => string;
   /** 回复权限审批请求 */
   respondPermission: (response: PermissionResponse) => Promise<void>;
   /** 回复 Agent 向用户的提问 */

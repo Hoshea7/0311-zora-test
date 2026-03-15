@@ -2,15 +2,17 @@ import { randomUUID } from "node:crypto";
 import {
   access,
   appendFile,
+  copyFile,
   mkdir,
   readFile,
   rename as fsRename,
+  rm,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { ChatMessage } from "../shared/zora";
+import type { ChatMessage, FileAttachment } from "../shared/zora";
 
 export interface SessionMeta {
   id: string;
@@ -20,8 +22,19 @@ export interface SessionMeta {
   sdkSessionId?: string;
 }
 
+export interface SavedAttachmentMeta {
+  id: string;
+  name: string;
+  category: "image" | "document" | "text";
+  mimeType: string;
+  size: number;
+  savedFileName: string;
+}
+
 const ZORA_DIR = path.join(homedir(), ".zora");
 const OLD_SESSIONS_DIR = path.join(ZORA_DIR, "sessions");
+const HISTORY_IMAGE_BASE64_LIMIT = 20;
+const HISTORY_IMAGE_MAX_INLINE_BYTES = 5 * 1024 * 1024;
 
 function getSessionsDir(workspaceId = "default"): string {
   return path.join(ZORA_DIR, "workspaces", workspaceId, "sessions");
@@ -166,6 +179,15 @@ export async function deleteSession(
   } catch {
     // Ignore missing message files so metadata cleanup can still succeed.
   }
+
+  try {
+    await rm(getAttachmentsDir(sessionId, workspaceId), {
+      recursive: true,
+      force: true,
+    });
+  } catch {
+    // Ignore attachment cleanup failures so metadata cleanup can still succeed.
+  }
 }
 
 export async function updateSessionMeta(
@@ -224,7 +246,12 @@ export async function getSdkSessionId(
 }
 
 type MessageRecord =
-  | { kind: "user"; message: ChatMessage }
+  | {
+      kind: "user";
+      message: Omit<ChatMessage, "attachments"> & {
+        attachments?: SavedAttachmentMeta[];
+      };
+    }
   | { kind: "assistant_block"; message: ChatMessage }
   | { kind: "tool_result"; toolUseId: string; result: string; isError: boolean };
 
@@ -232,8 +259,76 @@ function getJsonlPath(sessionId: string, workspaceId = "default"): string {
   return path.join(getSessionsDir(workspaceId), `${sessionId}.jsonl`);
 }
 
+function getAttachmentsDir(sessionId: string, workspaceId = "default"): string {
+  return path.join(getSessionsDir(workspaceId), "attachments", sessionId);
+}
+
+function getAttachmentPath(
+  sessionId: string,
+  savedFileName: string,
+  workspaceId = "default"
+): string {
+  return path.join(getAttachmentsDir(sessionId, workspaceId), savedFileName);
+}
+
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export async function saveAttachments(
+  sessionId: string,
+  attachments: FileAttachment[],
+  workspaceId = "default"
+): Promise<SavedAttachmentMeta[]> {
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  await ensureSessionsDir(workspaceId);
+  const attachmentsDir = getAttachmentsDir(sessionId, workspaceId);
+  await mkdir(attachmentsDir, { recursive: true });
+
+  const savedMetas: SavedAttachmentMeta[] = [];
+
+  for (const attachment of attachments) {
+    const originalName = path.basename(attachment.name);
+    const savedFileName = `${attachment.id}-${originalName}`;
+    const destinationPath = path.join(attachmentsDir, savedFileName);
+
+    try {
+      if (attachment.localPath) {
+        try {
+          await copyFile(attachment.localPath, destinationPath);
+        } catch (error) {
+          if (!attachment.base64Data) {
+            throw error;
+          }
+
+          await writeFile(destinationPath, Buffer.from(attachment.base64Data, "base64"));
+        }
+      } else if (attachment.base64Data) {
+        await writeFile(destinationPath, Buffer.from(attachment.base64Data, "base64"));
+      } else {
+        continue;
+      }
+
+      savedMetas.push({
+        id: attachment.id,
+        name: originalName,
+        category: attachment.category,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        savedFileName,
+      });
+    } catch (error) {
+      console.error(
+        `[session-store] Failed to save attachment "${attachment.name}" for session ${sessionId}.`,
+        error
+      );
+    }
+  }
+
+  return savedMetas;
 }
 
 export async function appendMessageRecord(
@@ -264,6 +359,7 @@ export async function loadMessages(
   }
 
   const messages: ChatMessage[] = [];
+  let restoredInlineImageCount = 0;
 
   for (const line of content.split("\n")) {
     if (line.trim().length === 0) {
@@ -273,8 +369,64 @@ export async function loadMessages(
     try {
       const record = JSON.parse(line) as MessageRecord;
 
-      if (record.kind === "user" || record.kind === "assistant_block") {
+      if (record.kind === "assistant_block") {
         messages.push(record.message);
+        continue;
+      }
+
+      if (record.kind === "user") {
+        const { attachments, ...message } = record.message;
+        const restoredMessage: ChatMessage = { ...message };
+
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          const restoredAttachments: FileAttachment[] = [];
+
+          for (const meta of attachments) {
+            const filePath = getAttachmentPath(
+              sessionId,
+              meta.savedFileName,
+              workspaceId
+            );
+
+            try {
+              await access(filePath);
+            } catch {
+              continue;
+            }
+
+            const restoredAttachment: FileAttachment = {
+              id: meta.id,
+              name: meta.name,
+              category: meta.category,
+              mimeType: meta.mimeType,
+              size: meta.size,
+              localPath: filePath,
+            };
+
+            if (
+              meta.category === "image" &&
+              meta.size <= HISTORY_IMAGE_MAX_INLINE_BYTES &&
+              restoredInlineImageCount < HISTORY_IMAGE_BASE64_LIMIT
+            ) {
+              try {
+                restoredAttachment.base64Data = (
+                  await readFile(filePath)
+                ).toString("base64");
+                restoredInlineImageCount += 1;
+              } catch {
+                // Ignore image preview load failures and keep the placeholder state.
+              }
+            }
+
+            restoredAttachments.push(restoredAttachment);
+          }
+
+          if (restoredAttachments.length > 0) {
+            restoredMessage.attachments = restoredAttachments;
+          }
+        }
+
+        messages.push(restoredMessage);
         continue;
       }
 

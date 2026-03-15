@@ -1,5 +1,10 @@
 import { atom, type Getter } from "jotai";
-import type { ChatMessage, ChatMessageStatus, ChatMessageType } from "../types";
+import type {
+  ChatMessage,
+  ChatMessageStatus,
+  ChatMessageType,
+  FileAttachment,
+} from "../types";
 import { createId, stringifyUnknown } from "../utils/message";
 import { currentSessionIdAtom } from "./workspace";
 import { appPhaseAtom } from "./zora";
@@ -7,6 +12,46 @@ import { appPhaseAtom } from "./zora";
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
 export const draftAtom = atom("");
+export const draftAttachmentsAtom = atom<FileAttachment[]>([]);
+
+export const addDraftAttachmentsAtom = atom(
+  null,
+  (get, set, newAttachments: FileAttachment[]) => {
+    const current = get(draftAttachmentsAtom);
+    const remaining = 5 - current.length;
+
+    if (remaining <= 0) {
+      return;
+    }
+
+    const toAdd = newAttachments
+      .filter(
+        (newAttachment) =>
+          !current.some(
+            (attachment) =>
+              attachment.name === newAttachment.name &&
+              attachment.size === newAttachment.size
+          )
+      )
+      .slice(0, remaining);
+
+    set(draftAttachmentsAtom, [...current, ...toAdd]);
+  }
+);
+
+export const removeDraftAttachmentAtom = atom(
+  null,
+  (get, set, attachmentId: string) => {
+    set(
+      draftAttachmentsAtom,
+      get(draftAttachmentsAtom).filter((attachment) => attachment.id !== attachmentId)
+    );
+  }
+);
+
+export const clearDraftAttachmentsAtom = atom(null, (_get, set) => {
+  set(draftAttachmentsAtom, []);
+});
 
 type SessionMessages = Record<string, ChatMessage[]>;
 type MessageUpdate = ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]);
@@ -567,21 +612,30 @@ export const failConversationForSessionAtom = atom(
  * 开始新对话
  * 只创建用户消息，助手消息由流式事件驱动
  */
-export const startConversationAtom = atom(null, (_get, set, prompt: string) => {
+export const startConversationAtom = atom(
+  null,
+  (
+    _get,
+    set,
+    prompt: string,
+    attachments: FileAttachment[] = []
+  ) => {
   const userId = createId("user");
 
-  set(messagesAtom, (current) => [
-    ...current,
-    {
-      id: userId,
-      role: "user",
-      type: "text",
-      text: prompt,
-      thinking: "",
-      status: "done"
-    }
-  ]);
-});
+    set(messagesAtom, (current) => [
+      ...current,
+      {
+        id: userId,
+        role: "user",
+        type: "text",
+        text: prompt,
+        thinking: "",
+        status: "done",
+        attachments: attachments.length > 0 ? attachments : undefined,
+      }
+    ]);
+  }
+);
 
 /**
  * 创建新的助手流式消息块

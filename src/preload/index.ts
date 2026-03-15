@@ -1,20 +1,26 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AgentStreamEvent,
-  ZoraApi,
-  PermissionResponse,
   AskUserResponse,
-  PermissionMode,
   ChatMessage,
-  SkillMeta,
+  FileAttachment,
+  PermissionMode,
+  PermissionResponse,
   SessionMeta,
+  SkillMeta,
   WorkspaceMeta,
+  ZoraApi,
 } from "../shared/zora";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
-  chat: (text: string, sessionId: string, workspaceId?: string) =>
-    ipcRenderer.invoke("agent:chat", text, sessionId, workspaceId) as Promise<void>,
+  chat: (
+    text: string,
+    sessionId: string,
+    workspaceId?: string,
+    attachments?: FileAttachment[]
+  ) =>
+    ipcRenderer.invoke("agent:chat", text, sessionId, workspaceId, attachments) as Promise<void>,
   listSkills: () =>
     ipcRenderer.invoke("skill:list") as Promise<SkillMeta[]>,
   openSkillsDir: () =>
@@ -57,6 +63,10 @@ const zoraApi: ZoraApi = {
   isAwakened: () => ipcRenderer.invoke("zora:is-awakened") as Promise<boolean>,
   setPermissionMode: (mode: PermissionMode) =>
     ipcRenderer.invoke("agent:permission-mode:set", mode) as Promise<void>,
+  selectFiles: () => ipcRenderer.invoke("dialog:select-files"),
+  readFileAsAttachment: (filePath: string) =>
+    ipcRenderer.invoke("file:read-as-attachment", filePath),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   respondPermission: (response: PermissionResponse) =>
     ipcRenderer.invoke("agent:permission:respond", response) as Promise<void>,
   respondAskUser: (response: AskUserResponse) =>
