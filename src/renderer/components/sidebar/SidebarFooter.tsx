@@ -1,8 +1,22 @@
+import { useEffect } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { loadSkillsAtom, skillsAtom } from "../../store/skill";
+import { isSettingsOpenAtom } from "../../store/ui";
+
 /**
  * 侧边栏底部组件
  * 显示 MCP 和 Skills 状态，以及设置按钮
  */
 export function SidebarFooter() {
+  const skills = useAtomValue(skillsAtom);
+  const loadSkills = useSetAtom(loadSkillsAtom);
+  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
+  const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
+
+  useEffect(() => {
+    void loadSkills();
+  }, [loadSkills]);
+
   return (
     <div className="space-y-3 border-stone-900/8 pt-4">
       {/* MCP 和 Skills 状态 */}
@@ -21,7 +35,7 @@ export function SidebarFooter() {
               d="M13 10V3L4 14h7v7l9-11h-7z"
             />
           </svg>
-          <span>1 MCP</span>
+          <span>0 MCP</span>
         </div>
         <div className="flex items-center gap-1.5">
           <svg
@@ -37,14 +51,20 @@ export function SidebarFooter() {
               d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <span>1 Skills</span>
+          <span>{skills.length} {skills.length === 1 ? "Skill" : "Skills"}</span>
         </div>
       </div>
 
       {/* 设置按钮 */}
-      <button className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition hover:bg-stone-900/[0.04]">
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition ${
+          isSettingsOpen ? "bg-stone-200/50 text-stone-900 font-medium" : "hover:bg-stone-900/[0.04] text-stone-600"
+        }`}
+      >
         <svg
-          className="h-4 w-4 text-stone-500"
+          className={`h-4 w-4 ${isSettingsOpen ? "text-stone-700" : "text-stone-500"}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

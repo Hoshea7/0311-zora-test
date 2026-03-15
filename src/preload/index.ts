@@ -6,6 +6,7 @@ import type {
   AskUserResponse,
   PermissionMode,
   ChatMessage,
+  SkillMeta,
   SessionMeta,
   WorkspaceMeta,
 } from "../shared/zora";
@@ -14,6 +15,12 @@ const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
   chat: (text: string, sessionId: string, workspaceId?: string) =>
     ipcRenderer.invoke("agent:chat", text, sessionId, workspaceId) as Promise<void>,
+  listSkills: () =>
+    ipcRenderer.invoke("skill:list") as Promise<SkillMeta[]>,
+  openSkillsDir: () =>
+    ipcRenderer.invoke("skill:open-dir") as Promise<void>,
+  openSkillDir: (dirName: string) =>
+    ipcRenderer.invoke("skill:open-skill-dir", dirName) as Promise<void>,
   listSessions: (workspaceId?: string) =>
     ipcRenderer.invoke("session:list", workspaceId) as Promise<SessionMeta[]>,
   loadMessages: (sessionId: string, workspaceId?: string) =>

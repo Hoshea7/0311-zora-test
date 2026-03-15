@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useAtom, useSetAtom } from "jotai";
-import { sidebarCollapsedAtom } from "../../store/ui";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
+import { isSettingsOpenAtom, sidebarCollapsedAtom } from "../../store/ui";
 import {
   createWorkspaceAtom,
   currentWorkspaceAtom,
@@ -17,6 +17,8 @@ import { SidebarFooter } from "../sidebar/SidebarFooter";
 
 export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
+  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
+  const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [workspaces] = useAtom(workspacesAtom);
   const [currentWorkspace] = useAtom(currentWorkspaceAtom);
   const loadWorkspaces = useSetAtom(loadWorkspacesAtom);
@@ -80,6 +82,7 @@ export function LeftSidebar() {
 
   const handleNewChat = () => {
     startNewChat();
+    setSettingsOpen(false);
   };
 
   const handleSwitchWorkspace = async (workspaceId: string) => {
@@ -492,28 +495,61 @@ export function LeftSidebar() {
               </button>
             </div>
 
-            <button
-              className={cn(
-                "mx-auto mb-2 rounded-lg p-2 text-stone-500",
-                "transition hover:bg-stone-200/60 hover:text-stone-800",
-                "focus-visible:outline-none"
-              )}
-              title={currentWorkspace?.path ?? "当前工作区"}
-            >
-              <svg
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div className="mb-2 flex flex-col items-center gap-2">
+              <button
+                className={cn(
+                  "mx-auto rounded-lg p-2 text-stone-500",
+                  "transition hover:bg-stone-200/60 hover:text-stone-800",
+                  "focus-visible:outline-none"
+                )}
+                title={currentWorkspace?.path ?? "当前工作区"}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                />
-              </svg>
-            </button>
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                  />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className={cn(
+                  "rounded-lg p-2 transition",
+                  isSettingsOpen
+                    ? "bg-stone-200 text-stone-700"
+                    : "text-stone-400 hover:bg-stone-200/50 hover:text-stone-600"
+                )}
+                title="设置"
+              >
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
       </aside>

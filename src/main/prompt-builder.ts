@@ -1,8 +1,3 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { app } from "electron";
-
 import { DEFAULT_ZORA_ID, getZoraDirPath, isBootstrapped, loadFile, loadRecentLogs } from "./memory-store";
 
 type ZoraSystemPrompt = {
@@ -33,66 +28,20 @@ Casual chat and generic Q&A don't need logging.
 
 Write memory naturally — like a person, only important things are worth remembering.`;
 
-function getSkillsDir(): string | null {
-  // In packaged app, skills are bundled as resources
-  if (app.isPackaged) {
-    const resourcePath = join(process.resourcesPath, "skills");
-    if (existsSync(resourcePath)) {
-      return resourcePath;
-    }
+function buildBootstrapHint(zoraId: string): string {
+  const zoraDirPath = getZoraDirPath(zoraId);
 
-    const appPath = join(app.getAppPath(), "skills");
-    if (existsSync(appPath)) {
-      return appPath;
-    }
-  }
-
-  // Development: resolve from project root (src/main/ → ../../skills/)
-  const devPath = join(__dirname, "..", "..", "skills");
-  if (existsSync(devPath)) {
-    return devPath;
-  }
-
-  console.warn("[prompt-builder] Could not locate skills directory");
-  return null;
-}
-
-async function readFileIfExists(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function buildBootstrapAppend(): Promise<string> {
-  const skillsDir = getSkillsDir();
-  if (!skillsDir) {
-    return "Bootstrap skill files not found. Ask the user to set up their Zora manually.";
-  }
-
-  const bootstrapDir = join(skillsDir, "bootstrap");
-
-  const filesToLoad = [
-    join(bootstrapDir, "SKILL.md"),
-    join(bootstrapDir, "references", "conversation-guide.md"),
-    join(bootstrapDir, "templates", "SOUL.template.md"),
-    join(bootstrapDir, "templates", "IDENTITY.template.md"),
-    join(bootstrapDir, "templates", "USER.template.md")
-  ];
-
-  const contents = await Promise.all(filesToLoad.map(readFileIfExists));
-
-  const sections = contents.filter((c): c is string => c !== null);
-
-  if (sections.length === 0) {
-    return "Bootstrap skill files not found. Ask the user to set up their Zora manually.";
-  }
-
-  const zoraDirPath = getZoraDirPath(DEFAULT_ZORA_ID);
-  const pathNote = `\n\n---\n\n**File output path:** Write all generated files to \`${zoraDirPath}/\`. Create the directory with \`mkdir -p ${zoraDirPath}\` if needed.`;
-
-  return sections.join("\n\n---\n\n") + pathNote;
+  return [
+    "## Bootstrap Mode",
+    "",
+    "This is a first-time setup. The user's Zora has not been created yet.",
+    `No SOUL.md found at ${zoraDirPath}/.`,
+    "",
+    "You have a skill called `bootstrap` (or `zora-skills:bootstrap`) available.",
+    "Use it now to guide the user through creating their Zora identity.",
+    "",
+    "Activate the bootstrap skill immediately — do not wait for the user to ask.",
+  ].join("\n");
 }
 
 async function buildNormalAppend(zoraId: string): Promise<string> {
@@ -136,7 +85,7 @@ export async function buildZoraSystemPrompt(zoraId = DEFAULT_ZORA_ID): Promise<Z
   const bootstrap = await isBootstrapMode(zoraId);
 
   const append = bootstrap
-    ? await buildBootstrapAppend()
+    ? buildBootstrapHint(zoraId)
     : await buildNormalAppend(zoraId);
 
   return {

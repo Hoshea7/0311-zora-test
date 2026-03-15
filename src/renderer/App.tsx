@@ -338,5 +338,7 @@ export default function App() {
     return <AwakeningView />;
   }
 
-  return <AppShell />;
+  return (
+    <AppShell />
+  );
 }
