@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
@@ -40,11 +40,29 @@ import {
   updateSessionMeta,
 } from "./session-store";
 import { clearSessionId, getSessionId } from "./session-manager";
+import {
+  createWorkspace,
+  deleteWorkspace,
+  getWorkspacePath,
+  listWorkspaces,
+} from "./workspace-store";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 function isPermissionMode(value: unknown): value is PermissionMode {
   return value === "ask" || value === "smart" || value === "yolo";
+}
+
+function resolveWorkspaceId(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return "default";
+  }
+
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("A valid workspaceId is required.");
+  }
+
+  return value.trim();
 }
 
 const RECOVERY_MAX_MESSAGES = 80;
@@ -133,14 +151,16 @@ function buildRecoveredPromptFromMessages(messages: ChatMessage[], fallbackUserP
 async function startProductivityRun(
   sessionId: string,
   text: string,
-  forwardEvent: (payload: AgentStreamEvent) => void
+  forwardEvent: (payload: AgentStreamEvent) => void,
+  workspaceId = "default"
 ) {
   const sdkCliPath = resolveSDKCliPath();
   const currentPrompt = text.trim();
-  const existingSDKSessionId = await getSdkSessionId(sessionId);
+  const existingSDKSessionId = await getSdkSessionId(sessionId, workspaceId);
+  const workspacePath = await getWorkspacePath(workspaceId);
   const profile = await buildProductivityProfile({
     userPrompt: currentPrompt,
-    cwd: app.getAppPath(),
+    cwd: workspacePath,
     sdkCliPath,
     onEvent: forwardEvent,
     isFirstTurn: !existingSDKSessionId,
@@ -158,12 +178,12 @@ async function startProductivityRun(
       `[index] Stored SDK session ${existingSDKSessionId} is unavailable for local session ${sessionId}. Rebuilding context from local transcript.`
     );
 
-    await clearSdkSessionId(sessionId);
-    const persistedMessages = await loadMessages(sessionId);
+    await clearSdkSessionId(sessionId, workspaceId);
+    const persistedMessages = await loadMessages(sessionId, workspaceId);
     const rebuiltPrompt = buildRecoveredPromptFromMessages(persistedMessages, currentPrompt);
     const recoveredProfile = await buildProductivityProfile({
       userPrompt: rebuiltPrompt,
-      cwd: app.getAppPath(),
+      cwd: workspacePath,
       sdkCliPath,
       onEvent: forwardEvent,
       isFirstTurn: false,
@@ -202,96 +222,166 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("app:get-version", () => app.getVersion());
 
-  ipcMain.handle("session:list", async () => {
-    return listSessions();
+  ipcMain.handle("workspace:list", async () => {
+    return listWorkspaces();
   });
 
-  ipcMain.handle("session:create", async (_event, title: string) => {
+  ipcMain.handle(
+    "workspace:create",
+    async (_event, name: unknown, workspacePath: unknown) => {
+      if (typeof name !== "string" || name.trim().length === 0) {
+        throw new Error("Workspace name is required.");
+      }
+      if (typeof workspacePath !== "string" || workspacePath.trim().length === 0) {
+        throw new Error("Workspace path is required.");
+      }
+
+      const workspace = await createWorkspace(name.trim(), workspacePath.trim());
+      console.log(`[index] Workspace created: ${workspace.id} (${workspace.path})`);
+      return workspace;
+    }
+  );
+
+  ipcMain.handle("workspace:delete", async (_event, workspaceId: unknown) => {
+    const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+
+    if (targetWorkspaceId === "default") {
+      throw new Error("Default workspace cannot be deleted.");
+    }
+
+    await deleteWorkspace(targetWorkspaceId);
+    console.log(`[index] Workspace deleted: ${targetWorkspaceId}`);
+  });
+
+  ipcMain.handle("workspace:pick-directory", async (event) => {
+    const browserWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const result = browserWindow
+      ? await dialog.showOpenDialog(browserWindow, {
+          properties: ["openDirectory", "createDirectory"],
+        })
+      : await dialog.showOpenDialog({
+          properties: ["openDirectory", "createDirectory"],
+        });
+
+    if (result.canceled) {
+      return null;
+    }
+
+    return result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle("session:list", async (_event, workspaceId: unknown) => {
+    return listSessions(resolveWorkspaceId(workspaceId));
+  });
+
+  ipcMain.handle("session:create", async (_event, title: string, workspaceId: unknown) => {
     if (typeof title !== "string" || title.trim().length === 0) {
       throw new Error("Session title is required.");
     }
 
-    return createSession(title.trim());
+    return createSession(title.trim(), resolveWorkspaceId(workspaceId));
   });
 
-  ipcMain.handle("session:delete", async (_event, sessionId: unknown) => {
+  ipcMain.handle("session:delete", async (_event, sessionId: unknown, workspaceId: unknown) => {
     if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
       throw new Error("A valid sessionId is required.");
     }
 
-    await deleteSession(sessionId);
+    await deleteSession(sessionId, resolveWorkspaceId(workspaceId));
     console.log(`[index] Session deleted: ${sessionId}`);
   });
 
-  ipcMain.handle("session:rename", async (_event, sessionId: unknown, title: unknown) => {
-    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
-      throw new Error("A valid sessionId is required.");
-    }
-    if (typeof title !== "string" || title.trim().length === 0) {
-      throw new Error("A non-empty title is required.");
-    }
-
-    const nextTitle = title.trim();
-    await renameSession(sessionId, nextTitle);
-    console.log(`[index] Session renamed: ${sessionId} -> "${nextTitle}"`);
-  });
-
-  ipcMain.handle("session:load-messages", async (_event, sessionId: string) => {
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      throw new Error("Session ID is required.");
-    }
-
-    return loadMessages(sessionId);
-  });
-
-  ipcMain.handle("agent:chat", async (event, text: unknown, sessionId: unknown) => {
-    if (typeof text !== "string" || text.trim().length === 0) {
-      throw new Error("A non-empty prompt is required.");
-    }
-    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
-      throw new Error("A valid sessionId is required.");
-    }
-
-    if (isAgentRunningForSession(sessionId)) {
-      throw new Error(`An agent is already running for session ${sessionId}.`);
-    }
-
-    console.log(`[index] Current mode: productivity, session: ${sessionId}`);
-
-    await updateSessionMeta(sessionId, {});
-    await appendMessageRecord(sessionId, {
-      kind: "user",
-      message: {
-        id: `user-${randomUUID()}`,
-        role: "user",
-        type: "text",
-        text: text.trim(),
-        thinking: "",
-        status: "done",
-      },
-    });
-
-    const target = event.sender;
-    const forwardEvent = (payload: AgentStreamEvent) => {
-      if (!target.isDestroyed()) {
-        target.send("agent:stream", { ...payload, sessionId });
+  ipcMain.handle(
+    "session:rename",
+    async (_event, sessionId: unknown, title: unknown, workspaceId: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+        throw new Error("A valid sessionId is required.");
+      }
+      if (typeof title !== "string" || title.trim().length === 0) {
+        throw new Error("A non-empty title is required.");
       }
 
-      const message = payload as Record<string, unknown>;
+      const nextTitle = title.trim();
+      await renameSession(sessionId, nextTitle, resolveWorkspaceId(workspaceId));
+      console.log(`[index] Session renamed: ${sessionId} -> "${nextTitle}"`);
+    }
+  );
 
-      if (message.type === "assistant" && "message" in message) {
-        persistAssistantMessage(sessionId, message.message);
+  ipcMain.handle(
+    "session:load-messages",
+    async (_event, sessionId: string, workspaceId: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        throw new Error("Session ID is required.");
       }
 
-      if (message.type === "user" && "message" in message) {
-        persistToolResults(sessionId, message.message);
-      }
-    };
+      return loadMessages(sessionId, resolveWorkspaceId(workspaceId));
+    }
+  );
 
-    void startProductivityRun(sessionId, text.trim(), forwardEvent).catch((err) => {
-      console.error(`[index] Agent run failed for session ${sessionId}:`, err);
-    });
-  });
+  ipcMain.handle(
+    "agent:chat",
+    async (event, text: unknown, sessionId: unknown, workspaceId: unknown) => {
+      if (typeof text !== "string" || text.trim().length === 0) {
+        throw new Error("A non-empty prompt is required.");
+      }
+      if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+        throw new Error("A valid sessionId is required.");
+      }
+
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+
+      if (isAgentRunningForSession(sessionId)) {
+        throw new Error(`An agent is already running for session ${sessionId}.`);
+      }
+
+      console.log(
+        `[index] Current mode: productivity, workspace: ${targetWorkspaceId}, session: ${sessionId}`
+      );
+
+      await updateSessionMeta(sessionId, {}, targetWorkspaceId);
+      await appendMessageRecord(
+        sessionId,
+        {
+          kind: "user",
+          message: {
+            id: `user-${randomUUID()}`,
+            role: "user",
+            type: "text",
+            text: text.trim(),
+            thinking: "",
+            status: "done",
+          },
+        },
+        targetWorkspaceId
+      );
+
+      const target = event.sender;
+      const forwardEvent = (payload: AgentStreamEvent) => {
+        if (!target.isDestroyed()) {
+          target.send("agent:stream", { ...payload, sessionId });
+        }
+
+        const message = payload as Record<string, unknown>;
+
+        if (message.type === "assistant" && "message" in message) {
+          persistAssistantMessage(sessionId, message.message, targetWorkspaceId);
+        }
+
+        if (message.type === "user" && "message" in message) {
+          persistToolResults(sessionId, message.message, targetWorkspaceId);
+        }
+      };
+
+      void startProductivityRun(
+        sessionId,
+        text.trim(),
+        forwardEvent,
+        targetWorkspaceId
+      ).catch((err) => {
+        console.error(`[index] Agent run failed for session ${sessionId}:`, err);
+      });
+    }
+  );
 
   ipcMain.handle("agent:awaken", async (event, text: unknown) => {
     if (typeof text !== "string" || text.trim().length === 0) {

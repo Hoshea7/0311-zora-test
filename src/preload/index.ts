@@ -7,22 +7,31 @@ import type {
   PermissionMode,
   ChatMessage,
   SessionMeta,
+  WorkspaceMeta,
 } from "../shared/zora";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
-  chat: (text: string, sessionId: string) =>
-    ipcRenderer.invoke("agent:chat", text, sessionId) as Promise<void>,
-  listSessions: () =>
-    ipcRenderer.invoke("session:list") as Promise<SessionMeta[]>,
-  loadMessages: (sessionId: string) =>
-    ipcRenderer.invoke("session:load-messages", sessionId) as Promise<ChatMessage[]>,
-  createSession: (title: string) =>
-    ipcRenderer.invoke("session:create", title) as Promise<SessionMeta>,
-  deleteSession: (sessionId: string) =>
-    ipcRenderer.invoke("session:delete", sessionId) as Promise<void>,
-  renameSession: (sessionId: string, title: string) =>
-    ipcRenderer.invoke("session:rename", sessionId, title) as Promise<void>,
+  chat: (text: string, sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke("agent:chat", text, sessionId, workspaceId) as Promise<void>,
+  listSessions: (workspaceId?: string) =>
+    ipcRenderer.invoke("session:list", workspaceId) as Promise<SessionMeta[]>,
+  loadMessages: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ChatMessage[]>,
+  createSession: (title: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:create", title, workspaceId) as Promise<SessionMeta>,
+  deleteSession: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:delete", sessionId, workspaceId) as Promise<void>,
+  renameSession: (sessionId: string, title: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:rename", sessionId, title, workspaceId) as Promise<void>,
+  listWorkspaces: () =>
+    ipcRenderer.invoke("workspace:list") as Promise<WorkspaceMeta[]>,
+  createWorkspace: (name: string, workspacePath: string) =>
+    ipcRenderer.invoke("workspace:create", name, workspacePath) as Promise<WorkspaceMeta>,
+  deleteWorkspace: (workspaceId: string) =>
+    ipcRenderer.invoke("workspace:delete", workspaceId) as Promise<void>,
+  pickWorkspaceDirectory: () =>
+    ipcRenderer.invoke("workspace:pick-directory") as Promise<string | null>,
   awaken: (text: string) => ipcRenderer.invoke("agent:awaken", text) as Promise<void>,
   awakeningComplete: () => ipcRenderer.invoke("agent:awakening-complete") as Promise<void>,
   onStream: (callback) => {

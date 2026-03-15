@@ -1,5 +1,9 @@
-import { useAtom } from "jotai";
-import { workspacesAtom, currentWorkspaceIdAtom } from "../../store/workspace";
+import { useAtom, useSetAtom } from "jotai";
+import {
+  currentWorkspaceIdAtom,
+  switchWorkspaceAtom,
+  workspacesAtom,
+} from "../../store/workspace";
 import { cn } from "../../utils/cn";
 
 /**
@@ -8,14 +12,15 @@ import { cn } from "../../utils/cn";
  */
 export function WorkspaceList() {
   const [workspaces] = useAtom(workspacesAtom);
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentWorkspaceIdAtom);
+  const [currentWorkspaceId] = useAtom(currentWorkspaceIdAtom);
+  const switchWorkspace = useSetAtom(switchWorkspaceAtom);
 
   return (
     <div className="space-y-1">
       {workspaces.map((workspace) => (
         <button
           key={workspace.id}
-          onClick={() => setCurrentWorkspaceId(workspace.id)}
+          onClick={() => void switchWorkspace(workspace.id)}
           className={cn(
             "flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition",
             currentWorkspaceId === workspace.id

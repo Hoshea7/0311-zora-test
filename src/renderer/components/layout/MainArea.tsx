@@ -6,6 +6,7 @@ import {
 } from "../../store/chat";
 import {
   currentSessionIdAtom,
+  currentWorkspaceIdAtom,
   createSessionAtom,
   touchSessionAtom
 } from "../../store/workspace";
@@ -22,6 +23,7 @@ export function MainArea() {
   const failConversation = useSetAtom(failConversationAtom);
   const [draft, setDraft] = useAtom(draftAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
+  const [currentWorkspaceId] = useAtom(currentWorkspaceIdAtom);
   const createSession = useSetAtom(createSessionAtom);
   const touchSession = useSetAtom(touchSessionAtom);
 
@@ -45,7 +47,7 @@ export function MainArea() {
     setDraft("");
 
     try {
-      await window.zora.chat(text, sessionId);
+      await window.zora.chat(text, sessionId, currentWorkspaceId);
     } catch (error) {
       failConversation(getErrorMessage(error));
     }

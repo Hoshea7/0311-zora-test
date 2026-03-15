@@ -1,3 +1,5 @@
+import type { WorkspaceMeta } from "../../shared/zora";
+
 export type {
   ChatMessageStatus,
   ChatMessageType,
@@ -6,11 +8,7 @@ export type {
 } from "../../shared/zora";
 
 // 工作区类型
-export type Workspace = {
-  id: string;
-  name: string;
-  icon?: string;
-};
+export type Workspace = WorkspaceMeta;
 
 // 会话类型
 export type Session = {

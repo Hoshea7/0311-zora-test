@@ -9,6 +9,14 @@ export interface SessionMeta {
   sdkSessionId?: string;
 }
 
+export interface WorkspaceMeta {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ChatMessageStatus = "streaming" | "done" | "stopped" | "error";
 export type ChatMessageType = "text" | "thinking" | "tool_use";
 export type ChatToolStatus = "running" | "done" | "error";
@@ -104,12 +112,16 @@ export type AppPhase = "splash" | "awakening" | "chat";
 
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
-  chat: (text: string, sessionId: string) => Promise<void>;
-  listSessions: () => Promise<SessionMeta[]>;
-  loadMessages: (sessionId: string) => Promise<ChatMessage[]>;
-  createSession: (title: string) => Promise<SessionMeta>;
-  deleteSession: (sessionId: string) => Promise<void>;
-  renameSession: (sessionId: string, title: string) => Promise<void>;
+  chat: (text: string, sessionId: string, workspaceId?: string) => Promise<void>;
+  listSessions: (workspaceId?: string) => Promise<SessionMeta[]>;
+  loadMessages: (sessionId: string, workspaceId?: string) => Promise<ChatMessage[]>;
+  createSession: (title: string, workspaceId?: string) => Promise<SessionMeta>;
+  deleteSession: (sessionId: string, workspaceId?: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string, workspaceId?: string) => Promise<void>;
+  listWorkspaces: () => Promise<WorkspaceMeta[]>;
+  createWorkspace: (name: string, workspacePath: string) => Promise<WorkspaceMeta>;
+  deleteWorkspace: (workspaceId: string) => Promise<void>;
+  pickWorkspaceDirectory: () => Promise<string | null>;
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: (sessionId: string) => Promise<void>;
   isAwakened: () => Promise<boolean>;

@@ -1,30 +1,68 @@
-import { atom } from "jotai";
+import { atom, type Setter } from "jotai";
 import type { Workspace, Session, GroupedSessions } from "../types";
 import {
   clearSessionMessagesAtom,
+  draftAtom,
   messagesAtom,
   sessionMessagesAtom,
-  setSessionMessagesAtom
+  setSessionMessagesAtom,
 } from "./chat";
 
-// 默认工作区（硬编码）
-const DEFAULT_WORKSPACES: Workspace[] = [
-  { id: "default", name: "默认工作区" }
-];
+const CURRENT_WORKSPACE_STORAGE_KEY = "zora:currentWorkspaceId";
+const DEFAULT_WORKSPACE_ID = "default";
+
+function readStoredWorkspaceId(): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_WORKSPACE_ID;
+  }
+
+  const stored = window.localStorage.getItem(CURRENT_WORKSPACE_STORAGE_KEY);
+  return stored && stored.trim().length > 0 ? stored : DEFAULT_WORKSPACE_ID;
+}
+
+function persistCurrentWorkspaceId(workspaceId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(CURRENT_WORKSPACE_STORAGE_KEY, workspaceId);
+}
 
 function sortSessionsByUpdatedAtDesc(a: Session, b: Session) {
   return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
 }
 
+function sortWorkspaces(workspaces: Workspace[]): Workspace[] {
+  const defaultWorkspace = workspaces.find(
+    (workspace) => workspace.id === DEFAULT_WORKSPACE_ID
+  );
+  const others = workspaces
+    .filter((workspace) => workspace.id !== DEFAULT_WORKSPACE_ID)
+    .sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+
+  return defaultWorkspace ? [defaultWorkspace, ...others] : others;
+}
+
+function resetWorkspaceSurface(set: Setter): void {
+  set(sessionsAtom, []);
+  set(currentSessionIdAtom, null);
+  set(messagesAtom, []);
+  set(draftAtom, "");
+  set(pinnedSessionIdsAtom, new Set<string>());
+}
+
 /**
  * 工作区列表
  */
-export const workspacesAtom = atom<Workspace[]>(DEFAULT_WORKSPACES);
+export const workspacesAtom = atom<Workspace[]>([]);
 
 /**
  * 当前工作区 ID
  */
-export const currentWorkspaceIdAtom = atom<string>("default");
+export const currentWorkspaceIdAtom = atom<string>(readStoredWorkspaceId());
 
 /**
  * 会话列表
@@ -47,7 +85,7 @@ export const pinnedSessionIdsAtom = atom<Set<string>>(new Set<string>());
 export const currentWorkspaceAtom = atom((get) => {
   const workspaces = get(workspacesAtom);
   const currentId = get(currentWorkspaceIdAtom);
-  return workspaces.find((w) => w.id === currentId) || null;
+  return workspaces.find((workspace) => workspace.id === currentId) ?? null;
 });
 
 /**
@@ -56,7 +94,7 @@ export const currentWorkspaceAtom = atom((get) => {
 export const currentSessionAtom = atom((get) => {
   const sessions = get(sessionsAtom);
   const currentId = get(currentSessionIdAtom);
-  return sessions.find((s) => s.id === currentId) || null;
+  return sessions.find((session) => session.id === currentId) ?? null;
 });
 
 /**
@@ -71,7 +109,7 @@ export const groupedSessionsAtom = atom((get) => {
   const grouped: GroupedSessions = {
     pinned: [],
     today: [],
-    earlier: []
+    earlier: [],
   };
 
   for (const session of sessions) {
@@ -92,27 +130,123 @@ export const groupedSessionsAtom = atom((get) => {
 });
 
 /**
- * 启动时从磁盘加载会话列表
+ * 加载指定工作区的会话列表
  */
-export const loadSessionsAtom = atom(null, async (_get, set) => {
-  const sessions = await window.zora.listSessions();
-  set(sessionsAtom, (current) => {
-    if (current.length === 0) {
-      return sessions;
+export const loadSessionsAtom = atom(
+  null,
+  async (get, set, workspaceId?: string) => {
+    const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
+    const sessions = await window.zora.listSessions(targetWorkspaceId);
+
+    if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
+      set(sessionsAtom, sessions);
     }
 
-    const existingIds = new Set(current.map((session) => session.id));
-    return [...current, ...sessions.filter((session) => !existingIds.has(session.id))];
-  });
+    return sessions;
+  }
+);
+
+/**
+ * 启动时加载工作区列表，并恢复当前工作区
+ */
+export const loadWorkspacesAtom = atom(null, async (get, set) => {
+  const workspaces = sortWorkspaces(await window.zora.listWorkspaces());
+  const storedWorkspaceId = get(currentWorkspaceIdAtom);
+  const nextWorkspaceId = workspaces.some(
+    (workspace) => workspace.id === storedWorkspaceId
+  )
+    ? storedWorkspaceId
+    : DEFAULT_WORKSPACE_ID;
+
+  set(workspacesAtom, workspaces);
+  set(currentWorkspaceIdAtom, nextWorkspaceId);
+  persistCurrentWorkspaceId(nextWorkspaceId);
+  resetWorkspaceSurface(set);
+  await set(loadSessionsAtom, nextWorkspaceId);
 });
 
 /**
+ * 操作：切换工作区
+ */
+export const switchWorkspaceAtom = atom(
+  null,
+  async (get, set, workspaceId: string) => {
+    if (workspaceId === get(currentWorkspaceIdAtom)) {
+      await set(loadSessionsAtom, workspaceId);
+      return;
+    }
+
+    set(currentWorkspaceIdAtom, workspaceId);
+    persistCurrentWorkspaceId(workspaceId);
+    resetWorkspaceSurface(set);
+    await set(loadSessionsAtom, workspaceId);
+  }
+);
+
+/**
+ * 操作：创建工作区
+ */
+export const createWorkspaceAtom = atom(
+  null,
+  async (
+    _get,
+    set,
+    params: {
+      name: string;
+      path: string;
+    }
+  ) => {
+    const workspace = await window.zora.createWorkspace(
+      params.name,
+      params.path
+    );
+
+    set(workspacesAtom, (current) => sortWorkspaces([...current, workspace]));
+    set(currentWorkspaceIdAtom, workspace.id);
+    persistCurrentWorkspaceId(workspace.id);
+    resetWorkspaceSurface(set);
+
+    return workspace;
+  }
+);
+
+/**
+ * 操作：删除工作区
+ */
+export const deleteWorkspaceAtom = atom(
+  null,
+  async (get, set, workspaceId: string) => {
+    await window.zora.deleteWorkspace(workspaceId);
+
+    const remaining = sortWorkspaces(
+      get(workspacesAtom).filter((workspace) => workspace.id !== workspaceId)
+    );
+    set(workspacesAtom, remaining);
+
+    if (get(currentWorkspaceIdAtom) !== workspaceId) {
+      return;
+    }
+
+    const fallbackWorkspaceId =
+      remaining.find((workspace) => workspace.id === DEFAULT_WORKSPACE_ID)?.id ??
+      remaining[0]?.id ??
+      DEFAULT_WORKSPACE_ID;
+
+    set(currentWorkspaceIdAtom, fallbackWorkspaceId);
+    persistCurrentWorkspaceId(fallbackWorkspaceId);
+    resetWorkspaceSurface(set);
+    await set(loadSessionsAtom, fallbackWorkspaceId);
+  }
+);
+
+/**
  * 操作：进入新对话状态（不创建会话）
- * 保留已有会话消息，只清空新对话草稿视图
+ * 保留已有会话消息缓存，只清空当前草稿视图
  */
 export const startNewChatAtom = atom(null, (_get, set) => {
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
+  set(draftAtom, "");
 });
 
 /**
@@ -120,8 +254,14 @@ export const startNewChatAtom = atom(null, (_get, set) => {
  */
 export const createSessionAtom = atom(
   null,
-  async (_get, set, title: string = "新会话") => {
-    const meta = await window.zora.createSession(title);
+  async (get, set, title: string = "新会话") => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    const meta = await window.zora.createSession(title, workspaceId);
+
+    if (get(currentWorkspaceIdAtom) !== workspaceId) {
+      return meta.id;
+    }
+
     set(sessionsAtom, (current) => [meta, ...current]);
     set(currentSessionIdAtom, meta.id);
     return meta.id;
@@ -134,11 +274,12 @@ export const createSessionAtom = atom(
 export const switchSessionAtom = atom(
   null,
   async (get, set, sessionId: string) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
     set(currentSessionIdAtom, sessionId);
 
     const cachedMessages = get(sessionMessagesAtom)[sessionId];
     if (cachedMessages === undefined) {
-      const messages = await window.zora.loadMessages(sessionId);
+      const messages = await window.zora.loadMessages(sessionId, workspaceId);
       if (get(sessionMessagesAtom)[sessionId] === undefined) {
         set(setSessionMessagesAtom, sessionId, messages);
       }
@@ -152,7 +293,9 @@ export const switchSessionAtom = atom(
 export const deleteSessionAtom = atom(
   null,
   (get, set, sessionId: string) => {
-    set(sessionsAtom, (current) => current.filter((s) => s.id !== sessionId));
+    const workspaceId = get(currentWorkspaceIdAtom);
+
+    set(sessionsAtom, (current) => current.filter((session) => session.id !== sessionId));
     set(pinnedSessionIdsAtom, (current) => {
       if (!current.has(sessionId)) {
         return current;
@@ -169,8 +312,8 @@ export const deleteSessionAtom = atom(
       set(messagesAtom, []);
     }
 
-    window.zora.deleteSession(sessionId).catch((err) => {
-      console.error("[workspace] Failed to delete session from disk:", err);
+    window.zora.deleteSession(sessionId, workspaceId).catch((error) => {
+      console.error("[workspace] Failed to delete session from disk:", error);
     });
   }
 );
@@ -186,7 +329,7 @@ export const touchSessionAtom = atom(null, (_get, set, sessionId: string) => {
       session.id === sessionId
         ? {
             ...session,
-            updatedAt: now
+            updatedAt: now,
           }
         : session
     )
@@ -198,9 +341,9 @@ export const touchSessionAtom = atom(null, (_get, set, sessionId: string) => {
  */
 export const renameSessionAtom = atom(
   null,
-  (_get, set, params: { sessionId: string; title: string }) => {
-    const { sessionId, title } = params;
-    const nextTitle = title.trim();
+  (get, set, params: { sessionId: string; title: string }) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    const nextTitle = params.title.trim();
 
     if (!nextTitle) {
       return;
@@ -208,34 +351,39 @@ export const renameSessionAtom = atom(
 
     set(sessionsAtom, (current) =>
       current.map((session) =>
-        session.id === sessionId
+        session.id === params.sessionId
           ? {
               ...session,
               title: nextTitle,
-              updatedAt: new Date().toISOString()
+              updatedAt: new Date().toISOString(),
             }
           : session
       )
     );
 
-    window.zora.renameSession(sessionId, nextTitle).catch((err) => {
-      console.error("[workspace] Failed to rename session on disk:", err);
-    });
+    window.zora
+      .renameSession(params.sessionId, nextTitle, workspaceId)
+      .catch((error) => {
+        console.error("[workspace] Failed to rename session on disk:", error);
+      });
   }
 );
 
 /**
  * 操作：切换会话置顶状态
  */
-export const togglePinSessionAtom = atom(null, (get, set, sessionId: string) => {
-  const pinnedIds = get(pinnedSessionIdsAtom);
-  const newPinnedIds = new Set(pinnedIds);
+export const togglePinSessionAtom = atom(
+  null,
+  (get, set, sessionId: string) => {
+    const pinnedIds = get(pinnedSessionIdsAtom);
+    const nextPinnedIds = new Set(pinnedIds);
 
-  if (newPinnedIds.has(sessionId)) {
-    newPinnedIds.delete(sessionId);
-  } else {
-    newPinnedIds.add(sessionId);
+    if (nextPinnedIds.has(sessionId)) {
+      nextPinnedIds.delete(sessionId);
+    } else {
+      nextPinnedIds.add(sessionId);
+    }
+
+    set(pinnedSessionIdsAtom, nextPinnedIds);
   }
-
-  set(pinnedSessionIdsAtom, newPinnedIds);
-});
+);
