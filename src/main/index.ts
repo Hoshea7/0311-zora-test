@@ -215,6 +215,21 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle("skill:open-skill-dir", async (_event, dirName: unknown) => {
+    if (
+      typeof dirName !== "string" ||
+      dirName.trim().length === 0 ||
+      path.basename(dirName) !== dirName
+    ) {
+      throw new Error("A valid skill directory name is required.");
+    }
+
+    const error = await shell.openPath(path.join(GLOBAL_SKILLS_DIR, dirName));
+    if (error) {
+      throw new Error(error);
+    }
+  });
+
   ipcMain.handle("session:list", async () => {
     return listSessions();
   });

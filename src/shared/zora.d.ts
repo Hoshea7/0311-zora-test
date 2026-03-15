@@ -114,6 +114,7 @@ export interface ZoraApi {
   chat: (text: string, sessionId: string) => Promise<void>;
   listSkills: () => Promise<SkillMeta[]>;
   openSkillsDir: () => Promise<void>;
+  openSkillDir: (dirName: string) => Promise<void>;
   listSessions: () => Promise<SessionMeta[]>;
   loadMessages: (sessionId: string) => Promise<ChatMessage[]>;
   createSession: (title: string) => Promise<SessionMeta>;

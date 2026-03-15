@@ -18,6 +18,8 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("skill:list") as Promise<SkillMeta[]>,
   openSkillsDir: () =>
     ipcRenderer.invoke("skill:open-dir") as Promise<void>,
+  openSkillDir: (dirName: string) =>
+    ipcRenderer.invoke("skill:open-skill-dir", dirName) as Promise<void>,
   listSessions: () =>
     ipcRenderer.invoke("session:list") as Promise<SessionMeta[]>,
   loadMessages: (sessionId: string) =>

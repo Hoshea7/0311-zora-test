@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useAtom, useSetAtom } from "jotai";
-import { sidebarCollapsedAtom } from "../../store/ui";
+import { isSettingsOpenAtom, sidebarCollapsedAtom } from "../../store/ui";
 import {
   loadSessionsAtom,
   startNewChatAtom,
@@ -16,6 +16,7 @@ export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
   const loadSessions = useSetAtom(loadSessionsAtom);
   const startNewChat = useSetAtom(startNewChatAtom);
+  const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [workspaces] = useAtom(workspacesAtom);
   const [currentWorkspace] = useAtom(currentWorkspaceAtom);
   const setCurrentWorkspaceId = useSetAtom(currentWorkspaceIdAtom);
@@ -187,6 +188,7 @@ export function LeftSidebar() {
           </div>
 
           <button
+            onClick={() => setSettingsOpen(true)}
             className="rounded-md p-2 text-stone-400 hover:bg-stone-200/50 hover:text-stone-600 transition mb-2"
             title="设置"
           >
