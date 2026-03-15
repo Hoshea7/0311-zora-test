@@ -12,6 +12,10 @@ const DEFAULT_WORKSPACES: Workspace[] = [
   { id: "default", name: "默认工作区" }
 ];
 
+function sortSessionsByUpdatedAtDesc(a: Session, b: Session) {
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
 /**
  * 工作区列表
  */
@@ -79,6 +83,10 @@ export const groupedSessionsAtom = atom((get) => {
       grouped.earlier.push(session);
     }
   }
+
+  grouped.pinned.sort(sortSessionsByUpdatedAtDesc);
+  grouped.today.sort(sortSessionsByUpdatedAtDesc);
+  grouped.earlier.sort(sortSessionsByUpdatedAtDesc);
 
   return grouped;
 });
@@ -166,6 +174,24 @@ export const deleteSessionAtom = atom(
     });
   }
 );
+
+/**
+ * 操作：更新会话活跃时间（让它浮到同组顶部）
+ */
+export const touchSessionAtom = atom(null, (_get, set, sessionId: string) => {
+  const now = new Date().toISOString();
+
+  set(sessionsAtom, (current) =>
+    current.map((session) =>
+      session.id === sessionId
+        ? {
+            ...session,
+            updatedAt: now
+          }
+        : session
+    )
+  );
+});
 
 /**
  * 操作：重命名会话

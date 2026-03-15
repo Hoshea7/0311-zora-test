@@ -6,8 +6,10 @@ import {
 } from "../../store/chat";
 import {
   currentSessionIdAtom,
-  createSessionAtom
+  createSessionAtom,
+  touchSessionAtom
 } from "../../store/workspace";
+import { generateSmartTitle } from "../../utils/title";
 import { getErrorMessage } from "../../utils/message";
 import { ChatHeader } from "../chat/ChatHeader";
 import { MessageList } from "../chat/MessageList";
@@ -21,6 +23,7 @@ export function MainArea() {
   const [draft, setDraft] = useAtom(draftAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const createSession = useSetAtom(createSessionAtom);
+  const touchSession = useSetAtom(touchSessionAtom);
 
   const handleSubmit = async () => {
     const text = draft.trim();
@@ -30,8 +33,7 @@ export function MainArea() {
 
     let sessionId = currentSessionId;
     if (!sessionId) {
-      const title = text.length > 20 ? `${text.slice(0, 20)}...` : text;
-      sessionId = await createSession(title);
+      sessionId = await createSession(generateSmartTitle(text));
     }
 
     if (!sessionId) {
@@ -39,6 +41,7 @@ export function MainArea() {
     }
 
     startConversation(text);
+    touchSession(sessionId);
     setDraft("");
 
     try {

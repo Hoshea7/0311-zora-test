@@ -37,6 +37,7 @@ import {
   persistAssistantMessage,
   persistToolResults,
   renameSession,
+  updateSessionMeta,
 } from "./session-store";
 import { clearSessionId, getSessionId } from "./session-manager";
 
@@ -257,6 +258,7 @@ app.whenReady().then(async () => {
 
     console.log(`[index] Current mode: productivity, session: ${sessionId}`);
 
+    await updateSessionMeta(sessionId, {});
     await appendMessageRecord(sessionId, {
       kind: "user",
       message: {

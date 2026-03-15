@@ -1,5 +1,6 @@
 import { useAtom, useSetAtom } from "jotai";
 import { useEffect, useRef, useState } from "react";
+import { runningSessionsAtom } from "../../store/chat";
 import {
   groupedSessionsAtom,
   currentSessionIdAtom,
@@ -17,6 +18,7 @@ import type { Session } from "../../types";
 export function SessionList() {
   const [groupedSessions] = useAtom(groupedSessionsAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
+  const [runningSessions] = useAtom(runningSessionsAtom);
   const switchSession = useSetAtom(switchSessionAtom);
   const deleteSession = useSetAtom(deleteSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
@@ -103,14 +105,21 @@ export function SessionList() {
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
         <div className="flex h-5 w-5 items-center justify-center">
-          <div
-            className={cn(
-              "h-2 w-2 rounded-full border-2",
-              currentSessionId === session.id
-                ? "border-stone-400"
-                : "border-stone-300"
-            )}
-          ></div>
+          {runningSessions.has(session.id) ? (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500"></span>
+            </span>
+          ) : (
+            <div
+              className={cn(
+                "h-2 w-2 rounded-full border-2",
+                currentSessionId === session.id
+                  ? "border-stone-400"
+                  : "border-stone-300"
+              )}
+            ></div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           {renamingId === session.id ? (
