@@ -39,6 +39,7 @@ import {
   persistAssistantMessage,
   persistToolResults,
   renameSession,
+  saveAttachments,
   updateSessionMeta,
 } from "./session-store";
 import { clearSessionId, getSessionId } from "./session-manager";
@@ -407,6 +408,11 @@ app.whenReady().then(async () => {
       console.log(`[index] Current mode: productivity, session: ${sessionId}`);
 
       await updateSessionMeta(sessionId, {});
+      const savedAttachments =
+        attachments && attachments.length > 0
+          ? await saveAttachments(sessionId, attachments)
+          : [];
+
       await appendMessageRecord(sessionId, {
         kind: "user",
         message: {
@@ -416,6 +422,7 @@ app.whenReady().then(async () => {
           text: text.trim(),
           thinking: "",
           status: "done",
+          attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
         },
       });
 

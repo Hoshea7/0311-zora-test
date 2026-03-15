@@ -285,8 +285,17 @@ function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) 
   return (
     <div className="flex flex-col gap-2 w-full max-w-[280px]">
       {attachments.map((attachment) => {
-        const isImage = attachment.category === "image" && attachment.base64Data;
-        const FileIcon = attachment.category === "document" ? (
+        const hasImagePreview =
+          attachment.category === "image" && Boolean(attachment.base64Data);
+        const isImagePlaceholder =
+          attachment.category === "image" && !attachment.base64Data;
+        const FileIcon = attachment.category === "image" ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="9" r="1.5" />
+            <path d="m21 15-4.5-4.5L7 20" />
+          </svg>
+        ) : attachment.category === "document" ? (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
             <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
             <path d="M14 2v5h5" />
@@ -307,7 +316,7 @@ function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) 
             title={attachment.name}
           >
             <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white shadow-sm ring-1 ring-inset ring-black/5">
-              {isImage ? (
+              {hasImagePreview ? (
                 <img
                   src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
                   alt={attachment.name}
@@ -325,7 +334,13 @@ function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) 
                 {truncateAttachmentName(attachment.name, 22)}
               </div>
               <div className="mt-0.5 text-[12px] leading-tight text-stone-500">
-                {isImage ? 'Image' : 'Document'} • {formatFileSize(attachment.size)}
+                {isImagePlaceholder
+                  ? `图片过大 • ${formatFileSize(attachment.size)}`
+                  : `${attachment.category === "image"
+                      ? "Image"
+                      : attachment.category === "document"
+                        ? "PDF"
+                        : "Text"} • ${formatFileSize(attachment.size)}`}
               </div>
             </div>
           </div>
