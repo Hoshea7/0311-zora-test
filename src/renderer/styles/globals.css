@@ -90,3 +90,7 @@ body {
   animation: fade-out 0.4s ease-out both;
 }
 
+.duration-600 {
+  transition-duration: 600ms;
+}
+

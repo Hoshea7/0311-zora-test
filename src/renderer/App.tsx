@@ -39,6 +39,7 @@ import {
 import { AppShell } from "./components/layout/AppShell";
 import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
 import { AwakeningCanvas } from "./components/awakening/AwakeningCanvas";
+import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
 
 /**
  * 应用根组件
@@ -341,6 +342,10 @@ export default function App() {
 
   if (appPhase === "awakening-dialogue") {
     return <AwakeningDialogue />;
+  }
+
+  if (appPhase === "awakening-complete") {
+    return <AwakeningComplete />;
   }
 
   return (
