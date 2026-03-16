@@ -91,7 +91,7 @@ function removeSessionMessages(
 }
 
 function resolveActiveMessagesKey(get: Getter): string {
-  if (get(appPhaseAtom) === "awakening") {
+  if (get(appPhaseAtom).startsWith("awakening")) {
     return "__awakening__";
   }
 

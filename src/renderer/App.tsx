@@ -37,7 +37,9 @@ import {
   isRecord
 } from "./utils/message";
 import { AppShell } from "./components/layout/AppShell";
-import { AwakeningView } from "./components/awakening/AwakeningView";
+import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
+import { AwakeningCanvas } from "./components/awakening/AwakeningCanvas";
+import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
 
 /**
  * 应用根组件
@@ -103,7 +105,7 @@ export default function App() {
       const eventSessionId = streamEvent.sessionId;
       const currentSessionId = store.get(currentSessionIdAtom);
       const activeMessageSessionId =
-        appPhase === "awakening" ? "__awakening__" : currentSessionId;
+        appPhase.startsWith("awakening") ? "__awakening__" : currentSessionId;
       const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
       const targetSessionId = eventSessionId ?? activeMessageSessionId;
 
@@ -173,7 +175,7 @@ export default function App() {
             clearAllHitl();
           }
 
-          if (appPhase === "awakening" && isCurrentSessionEvent) {
+          if (appPhase.startsWith("awakening") && isCurrentSessionEvent) {
             void zora.isAwakened().then((awakened) => {
               if (awakened) {
                 void zora.awakeningComplete().then(() => {
@@ -334,8 +336,16 @@ export default function App() {
     return null;
   }
 
-  if (appPhase === "awakening") {
-    return <AwakeningView />;
+  if (appPhase === "awakening-visual") {
+    return <AwakeningCanvas />;
+  }
+
+  if (appPhase === "awakening-dialogue") {
+    return <AwakeningDialogue />;
+  }
+
+  if (appPhase === "awakening-complete") {
+    return <AwakeningComplete />;
   }
 
   return (
