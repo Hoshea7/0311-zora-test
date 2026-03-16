@@ -1,12 +1,9 @@
-import { memo, useMemo, useState, useEffect, useRef, createContext, useContext, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { memo, useMemo, useState, useEffect, useRef, createContext, useContext, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
 import { marked } from "marked";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkToc from "remark-toc";
 import rehypeSlug from "rehype-slug";
-import mermaid from "mermaid";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { cn } from "../../utils/cn";
 
 type MarkdownMessageProps = {
@@ -18,30 +15,80 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
   node?: unknown;
 };
 
+type SyntaxHighlighterAssets = {
+  SyntaxHighlighter: typeof import("react-syntax-highlighter")["Prism"];
+  syntaxTheme: Record<string, CSSProperties>;
+};
+
 const TableContext = createContext(false);
 const MERMAID_DISALLOWED_TAGS = ["script", "foreignObject", "iframe", "object", "embed"] as const;
 const MERMAID_URL_ATTRS = new Set(["href", "xlink:href"]);
-
-const syntaxTheme: { [key: string]: CSSProperties } = {
-  ...(oneLight as { [key: string]: CSSProperties }),
-  'pre[class*="language-"]': {
-    ...oneLight['pre[class*="language-"]'],
-    background: "transparent",
-    margin: 0,
-    padding: 0
-  },
-  'code[class*="language-"]': {
-    ...oneLight['code[class*="language-"]'],
-    background: "transparent"
-  }
-} as const;
-
-mermaid.initialize({
+const CODE_FONT_FAMILY =
+  '"SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace';
+const MERMAID_CONFIG = {
   startOnLoad: false,
   theme: "default",
   securityLevel: "strict",
   fontFamily: "inherit"
-});
+} as const;
+
+let syntaxHighlighterAssetsPromise: Promise<SyntaxHighlighterAssets> | null = null;
+let mermaidPromise: Promise<typeof import("mermaid")["default"]> | null = null;
+
+function buildSyntaxTheme(baseTheme: Record<string, CSSProperties>) {
+  return {
+    ...baseTheme,
+    'pre[class*="language-"]': {
+      ...(baseTheme['pre[class*="language-"]'] ?? {}),
+      background: "transparent",
+      margin: 0,
+      padding: 0
+    },
+    'code[class*="language-"]': {
+      ...(baseTheme['code[class*="language-"]'] ?? {}),
+      background: "transparent"
+    }
+  } as const satisfies Record<string, CSSProperties>;
+}
+
+function getCodeBlockStyle(inTable: boolean): CSSProperties {
+  return {
+    margin: 0,
+    padding: inTable ? "0.6rem 0.75rem" : "1rem",
+    backgroundColor: "transparent",
+    fontSize: inTable ? "12.5px" : "13.5px",
+    lineHeight: 1.6,
+    overflowX: "auto"
+  };
+}
+
+function loadSyntaxHighlighterAssets() {
+  if (!syntaxHighlighterAssetsPromise) {
+    syntaxHighlighterAssetsPromise = Promise.all([
+      import("react-syntax-highlighter"),
+      import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
+    ]).then(([syntaxHighlighterModule, themeModule]) => ({
+      SyntaxHighlighter: syntaxHighlighterModule.Prism,
+      syntaxTheme: buildSyntaxTheme(
+        themeModule.default as Record<string, CSSProperties>
+      )
+    }));
+  }
+
+  return syntaxHighlighterAssetsPromise;
+}
+
+function loadMermaid() {
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid").then((mermaidModule) => {
+      const mermaid = mermaidModule.default;
+      mermaid.initialize(MERMAID_CONFIG);
+      return mermaid;
+    });
+  }
+
+  return mermaidPromise;
+}
 
 function sanitizeMermaidSvg(svg: string) {
   if (typeof DOMParser === "undefined") {
@@ -114,6 +161,131 @@ function CopyButton({ content, className }: { content: string, className?: strin
   );
 }
 
+function CodeBlockFrame({
+  code,
+  inTable,
+  label,
+  children
+}: {
+  code: string;
+  inTable: boolean;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative group overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50 shadow-sm",
+        inTable ? "my-1.5" : "my-5"
+      )}
+    >
+      {!inTable && (
+        <div className="flex items-center justify-between border-b border-stone-200/80 bg-stone-100 px-4 py-2">
+          <span className="text-[12px] font-medium text-stone-500">
+            {label}
+          </span>
+          <CopyButton content={code} />
+        </div>
+      )}
+      {inTable && (
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          <CopyButton
+            content={code}
+            className="bg-white/80 backdrop-blur-sm border border-stone-200/50 shadow-sm"
+          />
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function PlainCodeBlock({
+  code,
+  inTable,
+  label
+}: {
+  code: string;
+  inTable: boolean;
+  label: string;
+}) {
+  return (
+    <CodeBlockFrame code={code} inTable={inTable} label={label}>
+      <pre
+        className="text-stone-700"
+        style={getCodeBlockStyle(inTable)}
+      >
+        <code style={{ fontFamily: CODE_FONT_FAMILY }}>
+          {code}
+        </code>
+      </pre>
+    </CodeBlockFrame>
+  );
+}
+
+function HighlightedCodeBlock({
+  code,
+  inTable,
+  language
+}: {
+  code: string;
+  inTable: boolean;
+  language: string;
+}) {
+  const [assets, setAssets] = useState<SyntaxHighlighterAssets | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void loadSyntaxHighlighterAssets()
+      .then((loadedAssets) => {
+        if (isMounted) {
+          setAssets(loadedAssets);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setLoadFailed(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (!assets || loadFailed) {
+    return (
+      <PlainCodeBlock
+        code={code}
+        inTable={inTable}
+        label={loadFailed ? `${language} (plain text)` : language}
+      />
+    );
+  }
+
+  const { SyntaxHighlighter, syntaxTheme } = assets;
+
+  return (
+    <CodeBlockFrame code={code} inTable={inTable} label={language}>
+      <SyntaxHighlighter
+        language={language}
+        style={syntaxTheme}
+        PreTag="div"
+        customStyle={getCodeBlockStyle(inTable)}
+        codeTagProps={{
+          style: {
+            fontFamily: CODE_FONT_FAMILY
+          }
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </CodeBlockFrame>
+  );
+}
+
 function MermaidBlock({ code }: { code: string }) {
   const [svgContent, setSvgContent] = useState<string>("");
   const [hasError, setHasError] = useState(false);
@@ -128,6 +300,7 @@ function MermaidBlock({ code }: { code: string }) {
     const renderMermaid = async () => {
       try {
         const cleanCode = code.trim();
+        const mermaid = await loadMermaid();
         const { svg } = await mermaid.render(idRef.current, cleanCode);
         const sanitizedSvg = sanitizeMermaidSvg(svg);
 
@@ -155,36 +328,11 @@ function MermaidBlock({ code }: { code: string }) {
 
   if (hasError || !svgContent) {
     return (
-      <div className={cn("relative group overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50 shadow-sm", inTable ? "my-1.5" : "my-5")}>
-        {!inTable && (
-          <div className="flex items-center justify-between border-b border-stone-200/80 bg-stone-100 px-4 py-2">
-            <span className="text-[12px] font-medium text-stone-500">
-              {hasError ? "mermaid (failed to render)" : "mermaid (rendering...)"}
-            </span>
-            <CopyButton content={code} />
-          </div>
-        )}
-        {inTable && (
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-            <CopyButton content={code} className="bg-white/80 backdrop-blur-sm border border-stone-200/50 shadow-sm" />
-          </div>
-        )}
-        <SyntaxHighlighter
-          language="text"
-          style={syntaxTheme}
-          PreTag="div"
-          customStyle={{ 
-            margin: 0, 
-            padding: inTable ? "0.6rem 0.75rem" : "1rem", 
-            backgroundColor: "transparent", 
-            fontSize: inTable ? "12.5px" : "13.5px", 
-            lineHeight: 1.6,
-            overflowX: "auto"
-          }}
-        >
-          {code}
-        </SyntaxHighlighter>
-      </div>
+      <PlainCodeBlock
+        code={code}
+        inTable={inTable}
+        label={hasError ? "mermaid (failed to render)" : "mermaid (rendering...)"}
+      />
     );
   }
 
@@ -407,46 +555,7 @@ const markdownComponents: Components = {
       return <MermaidBlock code={code} />;
     }
 
-    return (
-      <div className={cn("relative group overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50 shadow-sm", inTable ? "my-1.5" : "my-5")}>
-        {!inTable && (
-          <div className="flex items-center justify-between border-b border-stone-200/80 bg-stone-100 px-4 py-2">
-            <span className="text-[12px] font-medium text-stone-500">
-              {lang}
-            </span>
-            <CopyButton content={code} />
-          </div>
-        )}
-        {inTable && (
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-            <CopyButton content={code} className="bg-white/80 backdrop-blur-sm border border-stone-200/50 shadow-sm" />
-          </div>
-        )}
-        <SyntaxHighlighter
-          language={lang}
-          style={syntaxTheme}
-          PreTag="div"
-          customStyle={
-            {
-              margin: 0,
-              padding: inTable ? "0.6rem 0.75rem" : "1rem",
-              backgroundColor: "transparent",
-              fontSize: inTable ? "12.5px" : "13.5px",
-              lineHeight: 1.6,
-              overflowX: "auto"
-            } satisfies CSSProperties
-          }
-          codeTagProps={{
-            style: {
-              fontFamily:
-                '"SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace'
-            }
-          }}
-        >
-          {code}
-        </SyntaxHighlighter>
-      </div>
-    );
+    return <HighlightedCodeBlock code={code} inTable={inTable} language={lang} />;
   }
 };
 
