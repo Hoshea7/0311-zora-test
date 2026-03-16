@@ -11,9 +11,9 @@ import {
 import { completeAwakeningAtom } from "../../store/zora";
 import { clearAllHitlAtom } from "../../store/hitl";
 import { getErrorMessage } from "../../utils/message";
-import { ChatInput } from "../chat/ChatInput";
 import { Button } from "../ui/Button";
 import { AwakeningMessage } from "./AwakeningMessage";
+import { AwakeningInput } from "./AwakeningInput";
 
 export function AwakeningDialogue() {
   const startConversation = useSetAtom(startConversationAtom);
@@ -25,40 +25,12 @@ export function AwakeningDialogue() {
   const clearAllHitl = useSetAtom(clearAllHitlAtom);
   const isRunning = useAtomValue(isRunningAtom);
 
-  const userMessageCount = useMemo(
-    () => messages.filter((m) => m.role === "user").length,
-    [messages]
-  );
-
-  const bgStyle = useMemo(() => {
-    const backgrounds = [
-      "#e6e1d8",
-      "#ebe7df",
-      "#f0ece6",
-      "#f5f3f0",
-      "#f5f3f0",
-    ];
-    const idx = Math.min(userMessageCount, backgrounds.length - 1);
-    return { backgroundColor: backgrounds[idx] };
-  }, [userMessageCount]);
-
-  const textColor = "text-stone-800";
-
-  const handleSubmit = async () => {
-    const text = draft.trim();
+  const handleSubmit = async (text: string) => {
     if (!text) return;
     startConversation(text);
     setDraft("");
     try {
       await window.zora.awaken(text);
-    } catch (error) {
-      failConversation(getErrorMessage(error));
-    }
-  };
-
-  const handleStop = async () => {
-    try {
-      await window.zora.stopAgent("__awakening__");
     } catch (error) {
       failConversation(getErrorMessage(error));
     }
@@ -77,10 +49,15 @@ export function AwakeningDialogue() {
     completeAwakening();
   };
 
+  const filteredMessages = useMemo(() => {
+    return messages.filter(
+      (m) => m.role === "user" || (m.role === "assistant" && m.type !== "tool_use" && m.type !== "thinking")
+    );
+  }, [messages]);
+
   return (
     <main
-      className="h-screen overflow-hidden relative flex flex-col transition-colors duration-1000"
-      style={bgStyle}
+      className="h-screen overflow-hidden relative flex flex-col transition-colors duration-1000 bg-[#f5f3f0]"
     >
       <div
         className="titlebar-drag-region fixed left-0 right-0 top-0 z-50 h-[50px]"
@@ -100,22 +77,28 @@ export function AwakeningDialogue() {
 
       <div className="flex-1 overflow-y-auto pt-[60px] pb-4">
         <div className="mx-auto w-full max-w-xl px-6 space-y-6 flex flex-col">
-          {messages
-            .filter((m) => m.type !== "tool_use")
-            .map((msg) => (
+          {filteredMessages.map((msg, idx) => {
+            const isLast = idx === filteredMessages.length - 1;
+            const isWaiting = isLast && msg.role === "user" && isRunning;
+            
+            return (
               <AwakeningMessage
                 key={msg.id}
                 message={msg}
-                textColorClass={textColor}
+                isWaiting={isWaiting}
               />
-            ))}
+            );
+          })}
+          {isRunning && filteredMessages.length > 0 && filteredMessages[filteredMessages.length - 1].role !== "user" && (
+            <div className="flex flex-col items-start w-full">
+              <span className="inline-block w-2 h-2 rounded-full bg-stone-300 animate-pulse mt-2" />
+            </div>
+          )}
         </div>
       </div>
 
       <footer className="titlebar-no-drag shrink-0 px-6 py-4">
-        <div className="mx-auto w-full max-w-xl">
-          <ChatInput onSubmit={handleSubmit} onStop={handleStop} />
-        </div>
+        <AwakeningInput onSubmit={handleSubmit} disabled={isRunning} />
       </footer>
     </main>
   );
