@@ -9,7 +9,7 @@ export const isAwakenedAtom = atom<boolean | null>(null);
 export const checkAwakeningAtom = atom(null, async (_get, set) => {
   const awakened = await window.zora.isAwakened();
   set(isAwakenedAtom, awakened);
-  set(appPhaseAtom, awakened ? "chat" : "awakening");
+  set(appPhaseAtom, awakened ? "chat" : "awakening-visual");
 });
 
 // Write atom: transition from awakening to chat

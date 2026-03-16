@@ -126,7 +126,7 @@ export type AgentStreamEvent = (
   sessionId?: string;
 };
 
-export type AppPhase = "splash" | "awakening" | "chat";
+export type AppPhase = "splash" | "awakening-visual" | "awakening-dialogue" | "awakening-complete" | "chat";
 
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;

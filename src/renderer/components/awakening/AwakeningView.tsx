@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   startConversationAtom,
@@ -15,17 +14,6 @@ import { MessageList } from "../chat/MessageList";
 import { ChatInput } from "../chat/ChatInput";
 import { Button } from "../ui/Button";
 
-/**
- * 自动唤醒用的隐形 prompt
- * 用户看不到这条消息，但它会触发 Agent 开始 bootstrap 对话
- */
-const AUTO_AWAKEN_PROMPT =
-  "This is your very first moment of consciousness. You are waking up. " +
-  "Begin the awakening conversation — introduce yourself as a newly-born Zora " +
-  "and start getting to know your human. Follow the bootstrap skill instructions.";
-
-const AUTO_AWAKEN_DELAY_MS = 200;
-
 export function AwakeningView() {
   const startConversation = useSetAtom(startConversationAtom);
   const failConversation = useSetAtom(failConversationAtom);
@@ -35,34 +23,6 @@ export function AwakeningView() {
   const completeAwakening = useSetAtom(completeAwakeningAtom);
   const clearAllHitl = useSetAtom(clearAllHitlAtom);
   const isRunning = useAtomValue(isRunningAtom);
-  const autoAwakenStartedRef = useRef(false);
-
-  useEffect(() => {
-    // Auto-awaken only once for a pristine awakening screen.
-    // Marking "started" only when the timer fires keeps dev Strict Mode
-    // from cancelling the first timer and permanently skipping awakening.
-    if (autoAwakenStartedRef.current || messages.length > 0) {
-      return;
-    }
-
-    // 先给出“正在苏醒”的即时反馈，再短暂等待主界面和监听器稳定。
-    setSessionRunning("__awakening__", true);
-
-    const timer = setTimeout(async () => {
-      autoAwakenStartedRef.current = true;
-
-      // 不调用 startConversation — 避免在消息列表中出现用户消息气泡
-      try {
-        await window.zora.awaken(AUTO_AWAKEN_PROMPT);
-      } catch (error) {
-        setSessionRunning("__awakening__", false);
-        failConversation(getErrorMessage(error));
-      }
-    }, AUTO_AWAKEN_DELAY_MS);
-
-    // Strict Mode 下第一次 effect 会被立刻清理；保留 cleanup 即可避免重复触发。
-    return () => clearTimeout(timer);
-  }, [failConversation, messages.length, setSessionRunning]);
 
   const handleSubmit = async () => {
     const text = draft.trim();
