@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   startConversationAtom,
@@ -24,6 +24,7 @@ export function AwakeningDialogue() {
   const completeAwakening = useSetAtom(completeAwakeningAtom);
   const clearAllHitl = useSetAtom(clearAllHitlAtom);
   const isRunning = useAtomValue(isRunningAtom);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const handleSubmit = async (text: string) => {
     if (!text) return;
@@ -55,6 +56,33 @@ export function AwakeningDialogue() {
     );
   }, [messages]);
 
+  const shouldShowThinkingIndicator = (() => {
+    const last = messages[messages.length - 1];
+
+    if (!isRunning || !last) {
+      return false;
+    }
+
+    if (last.role === "user") {
+      return true;
+    }
+
+    return last.role === "assistant" && (last.type === "thinking" || last.type === "tool_use");
+  })();
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [filteredMessages, shouldShowThinkingIndicator]);
+
   return (
     <main
       className="h-screen overflow-hidden relative flex flex-col transition-colors duration-1000 bg-[#f5f3f0]"
@@ -75,23 +103,24 @@ export function AwakeningDialogue() {
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto pt-[60px] pb-4">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-[60px] pb-4">
         <div className="mx-auto w-full max-w-xl px-6 space-y-6 flex flex-col">
           {filteredMessages.map((msg, idx) => {
-            const isLast = idx === filteredMessages.length - 1;
-            const isWaiting = isLast && msg.role === "user" && isRunning;
-            
             return (
               <AwakeningMessage
                 key={msg.id}
                 message={msg}
-                isWaiting={isWaiting}
               />
             );
           })}
-          {isRunning && filteredMessages.length > 0 && filteredMessages[filteredMessages.length - 1].role !== "user" && (
-            <div className="flex flex-col items-start w-full">
-              <span className="inline-block w-2 h-2 rounded-full bg-stone-300 animate-pulse mt-2" />
+          {shouldShowThinkingIndicator && (
+            <div className="flex items-center gap-2 px-1 py-3 animate-fade-in">
+              <div className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/70 animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/70 animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/70 animate-bounce [animation-delay:300ms]" />
+              </div>
+              <span className="text-xs text-stone-400">让我想想...</span>
             </div>
           )}
         </div>

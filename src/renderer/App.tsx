@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import {
   startAssistantMessageForSessionAtom,
@@ -49,6 +49,7 @@ import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
  */
 export default function App() {
   const appPhase = useAtomValue(appPhaseAtom);
+  const appPhaseRef = useRef(appPhase);
   const store = useStore();
   const checkAwakening = useSetAtom(checkAwakeningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
@@ -86,6 +87,10 @@ export default function App() {
     console.log(`[app] Current mode: ${appPhase}`);
   }, [appPhase]);
 
+  useEffect(() => {
+    appPhaseRef.current = appPhase;
+  }, [appPhase]);
+
   // 处理 Agent 流式事件（awakening 和 chat 阶段都需要）
   useEffect(() => {
     const zora = window.zora;
@@ -111,11 +116,11 @@ export default function App() {
       const eventSessionId = streamEvent.sessionId;
       const currentSessionId = store.get(currentSessionIdAtom);
       const activeMessageSessionId =
-        appPhase.startsWith("awakening") ? "__awakening__" : currentSessionId;
+        appPhaseRef.current.startsWith("awakening") ? "__awakening__" : currentSessionId;
       const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
       const targetSessionId = eventSessionId ?? activeMessageSessionId;
 
-      console.log(`[renderer event][mode:${appPhase}]`, JSON.stringify(streamEvent).slice(0, 500));
+      console.log(`[renderer event][mode:${appPhaseRef.current}]`, JSON.stringify(streamEvent).slice(0, 500));
 
       // ─── HITL 事件分发 ───
       if (streamEvent.type === "permission_request" && "request" in streamEvent) {
@@ -203,7 +208,7 @@ export default function App() {
             setIsAgentIdle(false);
           }
 
-          if (appPhase.startsWith("awakening") && isCurrentSessionEvent) {
+          if (appPhaseRef.current.startsWith("awakening") && isCurrentSessionEvent) {
             void zora.isAwakened().then((awakened) => {
               if (awakened) {
                 void zora.awakeningComplete().then(() => {
@@ -359,7 +364,6 @@ export default function App() {
     hydrateAssistant,
     startToolUse,
     setIsAgentIdle,
-    appPhase,
     store,
     completeAwakening,
     setMessages,

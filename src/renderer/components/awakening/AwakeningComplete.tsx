@@ -7,8 +7,8 @@ export function AwakeningComplete() {
   const [fadeOut, setFadeOut] = useState(false);
 
   useEffect(() => {
-    const showTimer = setTimeout(() => setFadeOut(true), 1500);
-    const transTimer = setTimeout(() => setAppPhase("chat"), 2100);
+    const showTimer = setTimeout(() => setFadeOut(true), 700);
+    const transTimer = setTimeout(() => setAppPhase("chat"), 1100);
     return () => {
       clearTimeout(showTimer);
       clearTimeout(transTimer);
@@ -32,7 +32,7 @@ export function AwakeningComplete() {
       />
 
       <p className="text-stone-500 text-[15px] animate-fade-in">
-        我醒了。
+        开始我们的旅程吧。
       </p>
     </main>
   );

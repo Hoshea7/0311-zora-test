@@ -7,9 +7,15 @@ export const isAwakenedAtom = atom<boolean | null>(null);
 
 // Write atom: check awakening status via IPC
 export const checkAwakeningAtom = atom(null, async (_get, set) => {
-  const awakened = await window.zora.isAwakened();
-  set(isAwakenedAtom, awakened);
-  set(appPhaseAtom, awakened ? "chat" : "awakening-visual");
+  try {
+    const awakened = await window.zora.isAwakened();
+    set(isAwakenedAtom, awakened);
+    set(appPhaseAtom, awakened ? "chat" : "awakening-visual");
+  } catch (error) {
+    console.error("[zora] Failed to check awakening status, defaulting to awakening:", error);
+    set(isAwakenedAtom, false);
+    set(appPhaseAtom, "awakening-visual");
+  }
 });
 
 // Write atom: transition from awakening to chat

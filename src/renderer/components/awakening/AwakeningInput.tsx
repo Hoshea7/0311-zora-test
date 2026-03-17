@@ -7,6 +7,7 @@ interface Props {
 
 export function AwakeningInput({ onSubmit, disabled }: Props) {
   const [value, setValue] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
 
   const handleSubmit = () => {
     const text = value.trim();
@@ -24,8 +25,10 @@ export function AwakeningInput({ onSubmit, disabled }: Props) {
           type="text"
           value={value}
           onChange={e => setValue(e.target.value)}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           onKeyDown={e => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !isComposing) {
               e.preventDefault();
               handleSubmit();
             }

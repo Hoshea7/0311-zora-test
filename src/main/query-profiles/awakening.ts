@@ -4,9 +4,8 @@ import { getZoraPluginPath } from "../skill-manager";
 import type { ProfileBuildContext, QueryProfile } from "./types";
 
 const AWAKENING_PREAMBLE =
-  `This is Zora's very first moment of awareness. ` +
-  `Begin the awakening conversation now.\n\n` +
-  `User's first message:\n`;
+  `这是 Zora 苏醒的第一刻。开始唤醒对话。\n\n` +
+  `用户的第一条消息：\n`;
 
 export async function buildAwakeningProfile(ctx: ProfileBuildContext): Promise<QueryProfile> {
   const systemPrompt = await buildZoraSystemPrompt();
