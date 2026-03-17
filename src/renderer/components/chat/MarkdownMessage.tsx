@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, createContext, useContext, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { marked } from "marked";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,6 +19,11 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
 type SyntaxHighlighterAssets = {
   SyntaxHighlighter: typeof import("react-syntax-highlighter")["Prism"];
   syntaxTheme: Record<string, CSSProperties>;
+};
+
+type SvgSize = {
+  width: number;
+  height: number;
 };
 
 const TableContext = createContext(false);
@@ -123,6 +129,57 @@ function sanitizeMermaidSvg(svg: string) {
   });
 
   return doc.documentElement.tagName.toLowerCase() === "svg" ? doc.documentElement.outerHTML : null;
+}
+
+function getSvgSize(svg: string): SvgSize | null {
+  if (typeof DOMParser === "undefined") {
+    return null;
+  }
+
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  if (doc.querySelector("parsererror")) {
+    return null;
+  }
+
+  const svgElement = doc.documentElement;
+  const viewBox = svgElement.getAttribute("viewBox");
+
+  if (viewBox) {
+    const values = viewBox
+      .trim()
+      .split(/[\s,]+/)
+      .map((value) => Number.parseFloat(value))
+      .filter((value) => Number.isFinite(value));
+
+    if (values.length === 4 && values[2] > 0 && values[3] > 0) {
+      return {
+        width: values[2],
+        height: values[3]
+      };
+    }
+  }
+
+  const width = Number.parseFloat(svgElement.getAttribute("width") ?? "");
+  const height = Number.parseFloat(svgElement.getAttribute("height") ?? "");
+
+  if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+    return { width, height };
+  }
+
+  return null;
+}
+
+async function renderMermaidSvg(code: string, renderId: string) {
+  const cleanCode = code.trim();
+  const mermaid = await loadMermaid();
+  const { svg } = await mermaid.render(renderId, cleanCode);
+  const sanitizedSvg = sanitizeMermaidSvg(svg);
+
+  if (!sanitizedSvg || svg.includes("Syntax error")) {
+    throw new Error("Mermaid rendering rejected");
+  }
+
+  return sanitizedSvg;
 }
 
 export function CopyButton({ content, className }: { content: string, className?: string }) {
@@ -290,23 +347,34 @@ function MermaidBlock({ code }: { code: string }) {
   const [svgContent, setSvgContent] = useState<string>("");
   const [hasError, setHasError] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSvgContent, setFullscreenSvgContent] = useState<string>("");
+  const [isFullscreenLoading, setIsFullscreenLoading] = useState(false);
+  const [fullscreenRenderFailed, setFullscreenRenderFailed] = useState(false);
   const inTable = useContext(TableContext);
-  const idRef = useRef(`mermaid-svg-${Math.random().toString(36).substr(2, 9)}`);
+  const previewIdRef = useRef(`mermaid-preview-${Math.random().toString(36).slice(2, 11)}`);
+  const fullscreenIdRef = useRef(`mermaid-fullscreen-${Math.random().toString(36).slice(2, 11)}`);
+  const fullscreenSvgSize = useMemo(
+    () => getSvgSize(fullscreenSvgContent || svgContent),
+    [fullscreenSvgContent, svgContent]
+  );
+  const fullscreenWidth = useMemo(() => {
+    if (!fullscreenSvgSize) {
+      return "min(calc(100vw - 5rem), 72rem)";
+    }
+
+    return `min(calc(100vw - 5rem), max(${Math.ceil(fullscreenSvgSize.width)}px, 72rem))`;
+  }, [fullscreenSvgSize]);
 
   useEffect(() => {
     let isMounted = true;
     setHasError(false);
+    setSvgContent("");
+    setFullscreenSvgContent("");
+    setFullscreenRenderFailed(false);
 
     const renderMermaid = async () => {
       try {
-        const cleanCode = code.trim();
-        const mermaid = await loadMermaid();
-        const { svg } = await mermaid.render(idRef.current, cleanCode);
-        const sanitizedSvg = sanitizeMermaidSvg(svg);
-
-        if (!sanitizedSvg || svg.includes("Syntax error")) {
-          throw new Error("Mermaid rendering rejected");
-        }
+        const sanitizedSvg = await renderMermaidSvg(code, previewIdRef.current);
 
         if (isMounted) {
           setSvgContent(sanitizedSvg);
@@ -326,6 +394,62 @@ function MermaidBlock({ code }: { code: string }) {
     };
   }, [code]);
 
+  useEffect(() => {
+    if (!isFullscreen || !svgContent) {
+      return;
+    }
+
+    let isMounted = true;
+    const renderId = `${fullscreenIdRef.current}-${Date.now().toString(36)}`;
+
+    setIsFullscreenLoading(true);
+    setFullscreenSvgContent("");
+    setFullscreenRenderFailed(false);
+
+    void renderMermaidSvg(code, renderId)
+      .then((renderedSvg) => {
+        if (isMounted) {
+          setFullscreenSvgContent(renderedSvg);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setFullscreenSvgContent("");
+          setFullscreenRenderFailed(true);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsFullscreenLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [code, isFullscreen, svgContent]);
+
+  useEffect(() => {
+    if (!isFullscreen || typeof document === "undefined") {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsFullscreen(false);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isFullscreen]);
+
   if (hasError || !svgContent) {
     return (
       <PlainCodeBlock
@@ -340,26 +464,60 @@ function MermaidBlock({ code }: { code: string }) {
     <div dangerouslySetInnerHTML={{ __html: svgContent }} className="[&>svg]:max-w-full [&>svg]:h-auto" />
   );
 
-  return (
-    <>
-      {isFullscreen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/90 backdrop-blur-md p-8" onClick={() => setIsFullscreen(false)}>
-          <button 
-            className="absolute top-6 right-6 p-2 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors shadow-sm"
-            onClick={(e) => { e.stopPropagation(); setIsFullscreen(false); }}
+  const fullscreenModal = isFullscreen && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-[200] bg-white/92 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-label="时序图全屏预览"
+          onClick={() => setIsFullscreen(false)}
+        >
+          <button
+            className="fixed right-6 top-6 flex h-11 w-11 items-center justify-center rounded-full border border-stone-200/80 bg-white/95 text-stone-600 shadow-lg transition-colors hover:bg-white hover:text-stone-900"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsFullscreen(false);
+            }}
+            title="关闭全屏"
+            aria-label="关闭全屏"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <div 
-            className="w-full h-full flex items-center justify-center overflow-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div dangerouslySetInnerHTML={{ __html: svgContent }} className="[&>svg]:max-w-none [&>svg]:w-auto [&>svg]:h-auto bg-white p-8 rounded-2xl shadow-xl border border-stone-100" />
+
+          <div className="h-full w-full overflow-auto px-6 py-8 sm:px-10 sm:py-12" onClick={(event) => event.stopPropagation()}>
+            <div className="flex min-h-full items-center justify-center">
+              {isFullscreenLoading ? (
+                <div className="rounded-3xl border border-stone-200/80 bg-white px-6 py-4 text-sm text-stone-500 shadow-xl">
+                  正在放大时序图...
+                </div>
+              ) : fullscreenRenderFailed || !fullscreenSvgContent ? (
+                <div className="rounded-3xl border border-rose-200/80 bg-white px-6 py-4 text-sm text-rose-600 shadow-xl">
+                  时序图放大失败，请关闭后重试。
+                </div>
+              ) : (
+                <div
+                  className="rounded-[28px] border border-stone-200/80 bg-white p-5 shadow-[0_24px_80px_rgba(28,25,23,0.12)] sm:p-7"
+                  style={{ width: fullscreenWidth, minWidth: "20rem" }}
+                >
+                  <div
+                    dangerouslySetInnerHTML={{ __html: fullscreenSvgContent }}
+                    className="[&>svg]:block [&>svg]:h-auto [&>svg]:w-full [&>svg]:max-w-none"
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <>
+      {fullscreenModal}
 
       <div
         className={cn("relative group overflow-x-auto bg-white border border-stone-200/80 rounded-xl p-4 shadow-sm hover:border-stone-300 transition-colors cursor-pointer", inTable ? "my-1.5" : "my-5")}

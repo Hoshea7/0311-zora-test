@@ -25,7 +25,7 @@ import {
   resolvePermissionAtom,
   pushAskUserAtom,
   resolveAskUserAtom,
-  clearAllHitlAtom,
+  clearHitlForSessionAtom,
 } from "./store/hitl";
 import { loadProvidersAtom } from "./store/provider";
 import { currentSessionIdAtom } from "./store/workspace";
@@ -71,7 +71,7 @@ export default function App() {
   const resolvePermission = useSetAtom(resolvePermissionAtom);
   const pushAskUser = useSetAtom(pushAskUserAtom);
   const resolveAskUser = useSetAtom(resolveAskUserAtom);
-  const clearAllHitl = useSetAtom(clearAllHitlAtom);
+  const clearHitlForSession = useSetAtom(clearHitlForSessionAtom);
 
   // 启动阶段：检查唤醒状态
   useEffect(() => {
@@ -125,7 +125,9 @@ export default function App() {
           toolName: request.toolName,
           description: request.description,
         });
-        pushPermission(request);
+        if (targetSessionId) {
+          pushPermission({ request, sessionId: targetSessionId });
+        }
         return;
       }
       if (streamEvent.type === "permission_resolved" && "requestId" in streamEvent) {
@@ -141,7 +143,9 @@ export default function App() {
           requestId: request.requestId,
           questionCount: request.questions.length,
         });
-        pushAskUser(request);
+        if (targetSessionId) {
+          pushAskUser({ request, sessionId: targetSessionId });
+        }
         return;
       }
       if (streamEvent.type === "ask_user_resolved" && "requestId" in streamEvent) {
@@ -162,6 +166,7 @@ export default function App() {
             targetSessionId,
             getAgentErrorText(isRecord(streamEvent) ? streamEvent.error : undefined)
           );
+          clearHitlForSession(targetSessionId);
         }
 
         if (isCurrentSessionEvent) {
@@ -190,12 +195,12 @@ export default function App() {
 
           if (targetSessionId) {
             completeConversation(targetSessionId, "done");
+            clearHitlForSession(targetSessionId);
           }
 
           if (isCurrentSessionEvent) {
             clearIdleTimer();
             setIsAgentIdle(false);
-            clearAllHitl();
           }
 
           if (appPhase.startsWith("awakening") && isCurrentSessionEvent) {
@@ -220,12 +225,12 @@ export default function App() {
 
           if (targetSessionId) {
             completeConversation(targetSessionId, "stopped");
+            clearHitlForSession(targetSessionId);
           }
 
           if (isCurrentSessionEvent) {
             clearIdleTimer();
             setIsAgentIdle(false);
-            clearAllHitl();
           }
         }
 
@@ -363,7 +368,7 @@ export default function App() {
     resolvePermission,
     pushAskUser,
     resolveAskUser,
-    clearAllHitl
+    clearHitlForSession
   ]);
 
   if (appPhase === "splash") {

@@ -11,8 +11,85 @@ import { appPhaseAtom } from "./zora";
 
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
-export const draftAtom = atom("");
-export const draftAttachmentsAtom = atom<FileAttachment[]>([]);
+type SessionMessages = Record<string, ChatMessage[]>;
+type SessionDrafts = Record<string, string>;
+type SessionDraftAttachments = Record<string, FileAttachment[]>;
+type MessageUpdate = ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]);
+
+const EMPTY_DRAFT = "";
+const EMPTY_ATTACHMENTS: FileAttachment[] = [];
+
+function resolveActiveSessionKey(get: Getter): string {
+  if (get(appPhaseAtom).startsWith("awakening")) {
+    return "__awakening__";
+  }
+
+  return get(currentSessionIdAtom) ?? "__draft__";
+}
+
+function applyScopedValueUpdate<T>(
+  current: Record<string, T>,
+  sessionId: string,
+  update: T | ((currentValue: T) => T),
+  fallbackValue: T,
+  isEmpty: (value: T) => boolean
+): Record<string, T> {
+  const previous = current[sessionId] ?? fallbackValue;
+  const next =
+    typeof update === "function"
+      ? (update as (currentValue: T) => T)(previous)
+      : update;
+
+  if (Object.is(next, previous)) {
+    return current;
+  }
+
+  if (isEmpty(next)) {
+    if (!(sessionId in current)) {
+      return current;
+    }
+
+    const trimmed = { ...current };
+    delete trimmed[sessionId];
+    return trimmed;
+  }
+
+  return {
+    ...current,
+    [sessionId]: next,
+  };
+}
+
+function removeScopedValue<T>(current: Record<string, T>, sessionId: string): Record<string, T> {
+  if (!(sessionId in current)) {
+    return current;
+  }
+
+  const next = { ...current };
+  delete next[sessionId];
+  return next;
+}
+
+export const sessionDraftsAtom = atom<SessionDrafts>({});
+export const sessionDraftAttachmentsAtom = atom<SessionDraftAttachments>({});
+
+export const draftAtom = atom(
+  (get) => {
+    const sessionId = resolveActiveSessionKey(get);
+    return get(sessionDraftsAtom)[sessionId] ?? EMPTY_DRAFT;
+  },
+  (get, set, update: string) => {
+    const sessionId = resolveActiveSessionKey(get);
+    set(sessionDraftsAtom, (current) =>
+      applyScopedValueUpdate(current, sessionId, update, EMPTY_DRAFT, (value) => value.length === 0)
+    );
+  }
+);
+
+export const draftAttachmentsAtom = atom((get) => {
+  const sessionId = resolveActiveSessionKey(get);
+  return get(sessionDraftAttachmentsAtom)[sessionId] ?? EMPTY_ATTACHMENTS;
+});
 
 export const addDraftAttachmentsAtom = atom(
   null,
@@ -35,26 +112,48 @@ export const addDraftAttachmentsAtom = atom(
       )
       .slice(0, remaining);
 
-    set(draftAttachmentsAtom, [...current, ...toAdd]);
+    if (toAdd.length === 0) {
+      return;
+    }
+
+    const sessionId = resolveActiveSessionKey(get);
+    set(sessionDraftAttachmentsAtom, (drafts) =>
+      applyScopedValueUpdate(
+        drafts,
+        sessionId,
+        [...current, ...toAdd],
+        EMPTY_ATTACHMENTS,
+        (value) => value.length === 0
+      )
+    );
   }
 );
 
 export const removeDraftAttachmentAtom = atom(
   null,
   (get, set, attachmentId: string) => {
-    set(
-      draftAttachmentsAtom,
-      get(draftAttachmentsAtom).filter((attachment) => attachment.id !== attachmentId)
+    const sessionId = resolveActiveSessionKey(get);
+    const nextAttachments = get(draftAttachmentsAtom).filter(
+      (attachment) => attachment.id !== attachmentId
+    );
+    set(sessionDraftAttachmentsAtom, (drafts) =>
+      applyScopedValueUpdate(
+        drafts,
+        sessionId,
+        nextAttachments,
+        EMPTY_ATTACHMENTS,
+        (value) => value.length === 0
+      )
     );
   }
 );
 
-export const clearDraftAttachmentsAtom = atom(null, (_get, set) => {
-  set(draftAttachmentsAtom, []);
+export const clearDraftAttachmentsAtom = atom(null, (get, set) => {
+  const sessionId = resolveActiveSessionKey(get);
+  set(sessionDraftAttachmentsAtom, (current) =>
+    removeScopedValue(current, sessionId)
+  );
 });
-
-type SessionMessages = Record<string, ChatMessage[]>;
-type MessageUpdate = ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]);
 
 function applyMessageUpdate(
   current: SessionMessages,
@@ -90,23 +189,15 @@ function removeSessionMessages(
   return next;
 }
 
-function resolveActiveMessagesKey(get: Getter): string {
-  if (get(appPhaseAtom).startsWith("awakening")) {
-    return "__awakening__";
-  }
-
-  return get(currentSessionIdAtom) ?? "__draft__";
-}
-
 export const sessionMessagesAtom = atom<SessionMessages>({});
 
 export const messagesAtom = atom(
   (get) => {
-    const sessionId = resolveActiveMessagesKey(get);
+    const sessionId = resolveActiveSessionKey(get);
     return get(sessionMessagesAtom)[sessionId] ?? [];
   },
   (get, set, update: MessageUpdate) => {
-    const sessionId = resolveActiveMessagesKey(get);
+    const sessionId = resolveActiveSessionKey(get);
     set(sessionMessagesAtom, (current) => applyMessageUpdate(current, sessionId, update));
   }
 );
@@ -122,6 +213,16 @@ export const clearSessionMessagesAtom = atom(
   null,
   (_get, set, sessionId: string) => {
     set(sessionMessagesAtom, (current) => removeSessionMessages(current, sessionId));
+  }
+);
+
+export const clearDraftStateForSessionAtom = atom(
+  null,
+  (_get, set, sessionId: string) => {
+    set(sessionDraftsAtom, (current) => removeScopedValue(current, sessionId));
+    set(sessionDraftAttachmentsAtom, (current) =>
+      removeScopedValue(current, sessionId)
+    );
   }
 );
 

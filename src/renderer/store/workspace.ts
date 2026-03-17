@@ -1,8 +1,8 @@
 import { atom, type Setter } from "jotai";
 import type { Workspace, Session, GroupedSessions } from "../types";
 import {
+  clearDraftStateForSessionAtom,
   clearSessionMessagesAtom,
-  draftAtom,
   messagesAtom,
   sessionMessagesAtom,
   setSessionMessagesAtom,
@@ -50,7 +50,7 @@ function resetWorkspaceSurface(set: Setter): void {
   set(sessionsAtom, []);
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
-  set(draftAtom, "");
+  set(clearDraftStateForSessionAtom, "__draft__");
   set(pinnedSessionIdsAtom, new Set<string>());
 }
 
@@ -246,7 +246,7 @@ export const deleteWorkspaceAtom = atom(
 export const startNewChatAtom = atom(null, (_get, set) => {
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
-  set(draftAtom, "");
+  set(clearDraftStateForSessionAtom, "__draft__");
 });
 
 /**
@@ -256,6 +256,7 @@ export const createSessionAtom = atom(
   null,
   async (get, set, title: string = "新会话") => {
     const workspaceId = get(currentWorkspaceIdAtom);
+    const previousSessionId = get(currentSessionIdAtom);
     const meta = await window.zora.createSession(title, workspaceId);
 
     if (get(currentWorkspaceIdAtom) !== workspaceId) {
@@ -263,6 +264,9 @@ export const createSessionAtom = atom(
     }
 
     set(sessionsAtom, (current) => [meta, ...current]);
+    if (previousSessionId === null) {
+      set(clearDraftStateForSessionAtom, "__draft__");
+    }
     set(currentSessionIdAtom, meta.id);
     return meta.id;
   }
@@ -306,10 +310,12 @@ export const deleteSessionAtom = atom(
       return next;
     });
     set(clearSessionMessagesAtom, sessionId);
+    set(clearDraftStateForSessionAtom, sessionId);
 
     if (get(currentSessionIdAtom) === sessionId) {
       set(currentSessionIdAtom, null);
       set(messagesAtom, []);
+      set(clearDraftStateForSessionAtom, "__draft__");
     }
 
     window.zora.deleteSession(sessionId, workspaceId).catch((error) => {
