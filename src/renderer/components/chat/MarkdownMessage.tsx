@@ -78,7 +78,7 @@ function sanitizeMermaidSvg(svg: string) {
   return doc.documentElement.tagName.toLowerCase() === "svg" ? doc.documentElement.outerHTML : null;
 }
 
-function CopyButton({ content, className }: { content: string, className?: string }) {
+export function CopyButton({ content, className }: { content: string, className?: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
