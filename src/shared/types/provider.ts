@@ -51,7 +51,7 @@ export const PROVIDER_PRESETS: Record<
   },
   volcengine: {
     label: "火山引擎",
-    defaultUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    defaultUrl: "https://ark.cn-beijing.volces.com/api/compatible",
   },
   zhipu: {
     label: "智谱AI",
