@@ -10,6 +10,7 @@ import type {
   PermissionMode,
   PermissionResponse,
 } from "../shared/zora";
+import type { ProviderCreateInput, ProviderUpdateInput } from "../shared/types/provider";
 import {
   isAgentRunningForSession,
   MissingSdkSessionError,
@@ -28,7 +29,7 @@ import {
   buildAwakeningProfile,
   buildProductivityProfile,
 } from "./query-profiles";
-import { ProviderManager } from "./provider-manager";
+import { providerManager } from "./provider-manager";
 import {
   appendMessageRecord,
   clearSdkSessionId,
@@ -54,7 +55,6 @@ import {
 import { GLOBAL_SKILLS_DIR, listSkills, seedBundledSkills } from "./skill-manager";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const providerManager = new ProviderManager();
 
 function isPermissionMode(value: unknown): value is PermissionMode {
   return value === "ask" || value === "smart" || value === "yolo";
@@ -346,7 +346,7 @@ app.whenReady().then(async () => {
       throw new Error("A valid provider payload is required.");
     }
 
-    return providerManager.create(input as Parameters<ProviderManager["create"]>[0]);
+    return providerManager.create(input as ProviderCreateInput);
   });
 
   ipcMain.handle("provider:update", async (_event, id: unknown, input: unknown) => {
@@ -357,7 +357,7 @@ app.whenReady().then(async () => {
       throw new Error("A valid provider payload is required.");
     }
 
-    return providerManager.update(id, input as Parameters<ProviderManager["update"]>[1]);
+    return providerManager.update(id, input as ProviderUpdateInput);
   });
 
   ipcMain.handle("provider:delete", async (_event, id: unknown) => {
@@ -376,9 +376,34 @@ app.whenReady().then(async () => {
     await providerManager.setDefault(providerId);
   });
 
+  ipcMain.handle("provider:get-api-key", async (_event, providerId: unknown) => {
+    if (typeof providerId !== "string" || providerId.trim().length === 0) {
+      throw new Error("A valid providerId is required.");
+    }
+
+    return providerManager.decryptApiKey(providerId);
+  });
+
   ipcMain.handle("provider:has-configured", () => {
     return providerManager.hasConfigured();
   });
+
+  ipcMain.handle(
+    "provider:test",
+    async (_event, baseUrl: unknown, apiKey: unknown, modelId?: unknown) => {
+      if (typeof baseUrl !== "string" || baseUrl.trim().length === 0) {
+        throw new Error("A valid baseUrl is required.");
+      }
+      if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+        throw new Error("A valid apiKey is required.");
+      }
+      if (modelId !== undefined && typeof modelId !== "string") {
+        throw new Error("modelId must be a string when provided.");
+      }
+
+      return providerManager.testConnection(baseUrl, apiKey, modelId);
+    }
+  );
 
   ipcMain.handle("skill:list", () => {
     return listSkills();

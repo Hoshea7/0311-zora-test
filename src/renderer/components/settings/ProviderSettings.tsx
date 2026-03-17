@@ -4,6 +4,7 @@ import {
   PROVIDER_PRESETS,
   type ProviderConfig,
   type ProviderCreateInput,
+  type ProviderTestResult,
   type ProviderType,
   type ProviderUpdateInput,
 } from "../../../shared/types/provider";
@@ -23,7 +24,13 @@ interface ProviderFormState {
   modelId: string;
 }
 
+interface ConnectionTestState {
+  status: "success" | "error";
+  message: string;
+}
+
 const DEFAULT_PROVIDER_TYPE: ProviderType = "anthropic";
+const MASKED_API_KEY_DISPLAY = "••••••••••••••••••••";
 const inputClassName = [
   "w-full rounded-[10px] border border-stone-200 bg-white px-3.5 py-2.5 text-[14px] text-stone-900",
   "outline-none transition-all placeholder:text-stone-400",
@@ -85,17 +92,35 @@ export function ProviderSettings() {
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formState, setFormState] = useState<ProviderFormState>(createEmptyFormState);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isLoadingApiKey, setIsLoadingApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [activeCardActionId, setActiveCardActionId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [connectionTestState, setConnectionTestState] = useState<ConnectionTestState | null>(null);
 
   const isEditing = formMode?.type === "edit";
+  const isApiKeyLocked = isEditing && !showApiKey;
+  const canTestConnection =
+    formState.baseUrl.trim().length > 0 && formState.apiKey.trim().length > 0 && !isTestingConnection;
+
+  const updateFormState = (
+    updater:
+      | Partial<ProviderFormState>
+      | ((current: ProviderFormState) => ProviderFormState)
+  ) => {
+    setConnectionTestState(null);
+    setFormState((current) =>
+      typeof updater === "function" ? updater(current) : { ...current, ...updater }
+    );
+  };
 
   const openCreateForm = () => {
     setFormMode({ type: "create" });
     setFormState(createEmptyFormState());
     setShowApiKey(false);
     setErrorMessage(null);
+    setConnectionTestState(null);
   };
 
   const openEditForm = (provider: ProviderConfig) => {
@@ -103,6 +128,7 @@ export function ProviderSettings() {
     setFormState(createEditFormState(provider));
     setShowApiKey(false);
     setErrorMessage(null);
+    setConnectionTestState(null);
   };
 
   const closeForm = () => {
@@ -110,6 +136,7 @@ export function ProviderSettings() {
     setFormState(createEmptyFormState());
     setShowApiKey(false);
     setErrorMessage(null);
+    setConnectionTestState(null);
   };
 
   const refreshProviders = async () => {
@@ -204,6 +231,76 @@ export function ProviderSettings() {
     } finally {
       setActiveCardActionId(null);
     }
+  };
+
+  const handleTestConnection = async () => {
+    if (!canTestConnection) {
+      return;
+    }
+
+    if (typeof window.zora.testProvider !== "function") {
+      setConnectionTestState({
+        status: "error",
+        message: "当前应用仍在使用旧的 preload，请重启 Electron 开发进程后再试。",
+      });
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setErrorMessage(null);
+    setConnectionTestState(null);
+
+    try {
+      const result: ProviderTestResult = await window.zora.testProvider(
+        formState.baseUrl.trim(),
+        formState.apiKey.trim(),
+        formState.modelId.trim() || undefined
+      );
+
+      setConnectionTestState({
+        status: result.success ? "success" : "error",
+        message: result.message,
+      });
+    } catch (error) {
+      setConnectionTestState({
+        status: "error",
+        message: getErrorMessage(error),
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleToggleApiKeyVisibility = async () => {
+    if (showApiKey) {
+      setShowApiKey(false);
+      return;
+    }
+
+    if (isEditing && formMode && formState.apiKey.trim().length === 0) {
+      setIsLoadingApiKey(true);
+      setErrorMessage(null);
+
+      try {
+        const currentApiKey = await window.zora.getProviderApiKey(formMode.providerId);
+
+        if (!currentApiKey) {
+          setErrorMessage("未能读取当前 API Key，请重新填写后保存。");
+          return;
+        }
+
+        updateFormState({
+          apiKey: currentApiKey,
+        });
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+        return;
+      } finally {
+        setIsLoadingApiKey(false);
+      }
+    }
+
+    setShowApiKey(true);
   };
 
   return (
@@ -380,10 +477,9 @@ export function ProviderSettings() {
                   className={inputClassName}
                   value={formState.name}
                   onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
+                    updateFormState({
                       name: event.target.value,
-                    }))
+                    })
                   }
                   placeholder="例如：Anthropic 官方"
                 />
@@ -396,7 +492,7 @@ export function ProviderSettings() {
                   value={formState.providerType}
                   onChange={(event) => {
                     const nextType = event.target.value as ProviderType;
-                    setFormState((current) => ({
+                    updateFormState((current) => ({
                       ...current,
                       providerType: nextType,
                       baseUrl: PROVIDER_PRESETS[nextType].defaultUrl,
@@ -417,41 +513,121 @@ export function ProviderSettings() {
                   className={inputClassName}
                   value={formState.baseUrl}
                   onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
+                    updateFormState({
                       baseUrl: event.target.value,
-                    }))
+                    })
                   }
                   placeholder="https://api.anthropic.com"
                 />
               </label>
 
               <label className="block sm:col-span-2">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[13px] font-medium text-stone-700">API Key</span>
-                  {isEditing && <span className="text-[11px] text-stone-400">留空则保持不变</span>}
-                </div>
+                <span className="mb-1.5 block text-[13px] font-medium text-stone-700">API Key</span>
                 <div className="relative">
                   <input
                     type={showApiKey ? "text" : "password"}
-                    className={`${inputClassName} pr-10`}
-                    value={formState.apiKey}
+                    className={[
+                      `${inputClassName} pr-10`,
+                      isApiKeyLocked ? "pointer-events-none cursor-not-allowed select-none text-stone-500" : ""
+                    ].join(" ")}
+                    value={isApiKeyLocked ? MASKED_API_KEY_DISPLAY : formState.apiKey}
                     onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
+                      updateFormState({
                         apiKey: event.target.value,
-                      }))
+                      })
                     }
-                    placeholder={isEditing ? "••••••••••••••••" : "sk-..."}
+                    placeholder={isEditing ? "" : "sk-..."}
+                    readOnly={isApiKeyLocked}
+                    tabIndex={isApiKeyLocked ? -1 : 0}
                   />
                   <button
                     type="button"
-                    onClick={() => setShowApiKey((current) => !current)}
-                    className="absolute inset-y-0 right-3 flex items-center text-stone-400 transition hover:text-stone-700"
+                    onClick={() => {
+                      void handleToggleApiKeyVisibility();
+                    }}
+                    disabled={isLoadingApiKey}
+                    className="absolute inset-y-0 right-3 flex items-center text-stone-400 transition hover:text-stone-700 disabled:cursor-wait disabled:opacity-60"
                   >
-                    <VisibilityIcon visible={showApiKey} />
+                    {isLoadingApiKey ? (
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                    ) : (
+                      <VisibilityIcon visible={showApiKey} />
+                    )}
                   </button>
                 </div>
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[12px] text-stone-400">
+                    使用当前表单中的 Base URL 和 API Key 进行真实连接验证。
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!canTestConnection || isSaving}
+                    onClick={() => {
+                      void handleTestConnection();
+                    }}
+                    className="min-w-[108px] justify-center"
+                  >
+                    {isTestingConnection ? (
+                      <span className="flex items-center gap-2">
+                        <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
+                        </svg>
+                        测试中…
+                      </span>
+                    ) : (
+                      "测试连接"
+                    )}
+                  </Button>
+                </div>
+                {connectionTestState ? (
+                  <div
+                    className={[
+                      "mt-3 flex items-start gap-2.5 rounded-[10px] px-4 py-3 text-[13px] ring-1 ring-inset",
+                      connectionTestState.status === "success"
+                        ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                        : "bg-rose-50 text-rose-700 ring-rose-200"
+                    ].join(" ")}
+                  >
+                    {connectionTestState.status === "success" ? (
+                      <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                    <p className="font-medium">{connectionTestState.message}</p>
+                  </div>
+                ) : null}
               </label>
 
               <label className="block sm:col-span-2">
@@ -460,10 +636,9 @@ export function ProviderSettings() {
                   className={inputClassName}
                   value={formState.modelId}
                   onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
+                    updateFormState({
                       modelId: event.target.value,
-                    }))
+                    })
                   }
                   placeholder="留空使用系统默认模型"
                 />

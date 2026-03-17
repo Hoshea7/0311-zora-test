@@ -14,6 +14,7 @@ import type {
 import type {
   ProviderConfig,
   ProviderCreateInput,
+  ProviderTestResult,
   ProviderUpdateInput,
 } from "../shared/types/provider";
 
@@ -29,6 +30,10 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("provider:delete", id) as Promise<void>,
   setDefaultProvider: (providerId: string) =>
     ipcRenderer.invoke("provider:set-default", providerId) as Promise<void>,
+  getProviderApiKey: (providerId: string) =>
+    ipcRenderer.invoke("provider:get-api-key", providerId) as Promise<string | null>,
+  testProvider: (baseUrl: string, apiKey: string, modelId?: string) =>
+    ipcRenderer.invoke("provider:test", baseUrl, apiKey, modelId) as Promise<ProviderTestResult>,
   hasConfiguredProvider: () =>
     ipcRenderer.invoke("provider:has-configured") as Promise<boolean>,
   chat: (

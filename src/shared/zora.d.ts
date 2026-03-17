@@ -1,6 +1,7 @@
 import type {
   ProviderConfig,
   ProviderCreateInput,
+  ProviderTestResult,
   ProviderUpdateInput,
 } from "./types/provider";
 
@@ -141,6 +142,12 @@ export interface ZoraApi {
   updateProvider: (id: string, input: ProviderUpdateInput) => Promise<ProviderConfig>;
   deleteProvider: (id: string) => Promise<void>;
   setDefaultProvider: (providerId: string) => Promise<void>;
+  getProviderApiKey: (providerId: string) => Promise<string | null>;
+  testProvider: (
+    baseUrl: string,
+    apiKey: string,
+    modelId?: string
+  ) => Promise<ProviderTestResult>;
   hasConfiguredProvider: () => Promise<boolean>;
   chat: (
     text: string,

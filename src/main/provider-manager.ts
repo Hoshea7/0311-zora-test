@@ -9,7 +9,8 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { safeStorage } from "electron";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { app, safeStorage } from "electron";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -17,10 +18,13 @@ import type {
   ProviderType,
   ProviderUpdateInput,
 } from "../shared/types/provider";
+import { resolveSDKCliPath } from "./agent";
 
 const MASKED_API_KEY = "••••••";
 const ZORA_DIR = path.join(homedir(), ".zora");
 const PROVIDERS_FILE = path.join(ZORA_DIR, "providers.json");
+const TEST_CONNECTION_TIMEOUT_MS = 30_000;
+const OFFICIAL_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 const PROVIDER_TYPES = new Set<ProviderType>([
   "anthropic",
   "volcengine",
@@ -29,6 +33,8 @@ const PROVIDER_TYPES = new Set<ProviderType>([
   "deepseek",
   "custom",
 ]);
+
+type StringRecord = Record<string, string>;
 
 async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
   const tmpPath = `${filePath}.tmp`;
@@ -82,6 +88,84 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
 function isProviderType(value: unknown): value is ProviderType {
   return typeof value === "string" && PROVIDER_TYPES.has(value as ProviderType);
+}
+
+function toStringRecord(source: NodeJS.ProcessEnv | Record<string, string>): StringRecord {
+  const result: StringRecord = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+function getResultErrorMessage(message: SDKMessage): string | null {
+  if (message.type !== "result" || message.subtype === "success") {
+    return null;
+  }
+
+  if (Array.isArray(message.errors) && message.errors.length > 0) {
+    return message.errors.join(" | ");
+  }
+
+  return `连接失败 (${message.subtype})`;
+}
+
+function stringifyError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === "string" ? error : String(error);
+}
+
+function stringifyValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === undefined) {
+    return "undefined";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+export function buildProviderSdkEnv({
+  apiKey,
+  baseUrl,
+  modelId,
+  baseEnv = process.env,
+}: {
+  apiKey: string;
+  baseUrl: string;
+  modelId?: string;
+  baseEnv?: NodeJS.ProcessEnv | Record<string, string>;
+}): StringRecord {
+  const env = toStringRecord(baseEnv);
+  const normalizedBaseUrl = baseUrl.trim();
+  const normalizedModelId = normalizeOptionalString(modelId);
+
+  env.ANTHROPIC_API_KEY = apiKey;
+  delete env.ANTHROPIC_BASE_URL;
+  delete env.ANTHROPIC_MODEL;
+
+  if (normalizedBaseUrl.length > 0 && normalizedBaseUrl !== OFFICIAL_ANTHROPIC_BASE_URL) {
+    env.ANTHROPIC_BASE_URL = normalizedBaseUrl;
+  }
+
+  if (normalizedModelId) {
+    env.ANTHROPIC_MODEL = normalizedModelId;
+  }
+
+  return env;
 }
 
 export class ProviderManager {
@@ -310,10 +394,115 @@ export class ProviderManager {
     return providers.some((provider) => provider.enabled);
   }
 
-  async testConnection(): Promise<ProviderTestResult> {
-    return {
-      success: false,
-      message: "Provider connection testing is not implemented yet.",
+  async testConnection(
+    baseUrl: string,
+    apiKey: string,
+    modelId?: string
+  ): Promise<ProviderTestResult> {
+    const normalizedBaseUrl = normalizeRequiredString(baseUrl, "Base URL");
+    const normalizedApiKey = normalizeRequiredString(apiKey, "API Key");
+    const normalizedModelId = normalizeOptionalString(modelId);
+    const abortController = new AbortController();
+    const prompt = "hi";
+    const queryOptions = {
+      cwd: app.getAppPath(),
+      pathToClaudeCodeExecutable: resolveSDKCliPath(),
+      executable: "node" as const,
+      executableArgs: [] as string[],
+      maxTurns: 1,
+      persistSession: false,
+      includePartialMessages: false,
+      permissionMode: "bypassPermissions" as const,
+      allowDangerouslySkipPermissions: true,
+      env: buildProviderSdkEnv({
+        apiKey: normalizedApiKey,
+        baseUrl: normalizedBaseUrl,
+        modelId: normalizedModelId,
+      }),
+      abortController,
     };
+
+    console.log("[provider:test] Triggered connection test.");
+    console.log(
+      "[provider:test] Normalized inputs:",
+      stringifyValue({
+        baseUrl: normalizedBaseUrl,
+        apiKey: normalizedApiKey,
+        modelId: normalizedModelId,
+      })
+    );
+    console.log(
+      "[provider:test] Query payload:",
+      stringifyValue({
+        prompt,
+        options: {
+          ...queryOptions,
+          abortController: "[AbortController]",
+        },
+      })
+    );
+
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+    const response = query({
+      prompt,
+      options: queryOptions,
+    });
+
+    let timedOut = false;
+    let sawSuccessResult = false;
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      console.warn(
+        `[provider:test] Timed out after ${TEST_CONNECTION_TIMEOUT_MS}ms. Aborting query.`
+      );
+      abortController.abort();
+      response.close();
+    }, TEST_CONNECTION_TIMEOUT_MS);
+
+    try {
+      for await (const message of response) {
+        console.log("[provider:test] SDK message:", stringifyValue(message));
+        const resultErrorMessage = getResultErrorMessage(message);
+
+        if (resultErrorMessage) {
+          console.warn("[provider:test] Test failed from SDK result:", resultErrorMessage);
+          return {
+            success: false,
+            message: resultErrorMessage,
+          };
+        }
+
+        if (message.type === "result" && message.subtype === "success") {
+          sawSuccessResult = true;
+        }
+      }
+
+      if (!sawSuccessResult) {
+        console.warn("[provider:test] Stream completed without a success result message.");
+        return {
+          success: false,
+          message: "未收到测试结果，请检查 Provider 配置后重试。",
+        };
+      }
+
+      console.log("[provider:test] Test completed successfully.");
+      return {
+        success: true,
+        message: "连接成功",
+      };
+    } catch (error) {
+      console.error("[provider:test] Query threw an error:", error);
+      return {
+        success: false,
+        message: timedOut ? "连接超时，请检查网络或 Provider 配置。" : stringifyError(error),
+      };
+    } finally {
+      clearTimeout(timeoutId);
+      console.log("[provider:test] Closing SDK response stream.");
+      response.close();
+    }
   }
 }
+
+export const providerManager = new ProviderManager();
