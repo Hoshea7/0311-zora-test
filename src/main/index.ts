@@ -340,17 +340,32 @@ async function startProductivityRun(
   const currentPrompt = text.trim();
   const existingSDKSessionId = await getSdkSessionId(sessionId, workspaceId);
   const workspacePath = await getWorkspacePath(workspaceId);
+  const persistedMessages = existingSDKSessionId
+    ? []
+    : await loadMessages(sessionId, workspaceId);
+  const shouldRecoverFromTranscript =
+    !existingSDKSessionId && persistedMessages.length > 1;
+  const initialPrompt = shouldRecoverFromTranscript
+    ? buildRecoveredPromptFromMessages(persistedMessages, currentPrompt)
+    : currentPrompt;
+
+  if (shouldRecoverFromTranscript) {
+    console.warn(
+      `[index] Local session ${sessionId} has persisted history but no stored SDK session. Rebuilding context from local transcript.`
+    );
+  }
+
   const profile = await buildProductivityProfile({
-    userPrompt: currentPrompt,
+    userPrompt: initialPrompt,
     cwd: workspacePath,
     sdkCliPath,
     onEvent: forwardEvent,
-    isFirstTurn: !existingSDKSessionId,
+    isFirstTurn: !existingSDKSessionId && !shouldRecoverFromTranscript,
     sessionId: existingSDKSessionId,
   });
 
   try {
-    await runAgentWithProfile(sessionId, profile, forwardEvent, attachments);
+    await runAgentWithProfile(sessionId, profile, forwardEvent, attachments, workspaceId);
   } catch (error) {
     if (!(error instanceof MissingSdkSessionError) || !existingSDKSessionId) {
       throw error;
@@ -361,8 +376,9 @@ async function startProductivityRun(
     );
 
     await clearSdkSessionId(sessionId, workspaceId);
-    const persistedMessages = await loadMessages(sessionId, workspaceId);
-    const rebuiltPrompt = buildRecoveredPromptFromMessages(persistedMessages, currentPrompt);
+    const recoveredMessages =
+      persistedMessages.length > 0 ? persistedMessages : await loadMessages(sessionId, workspaceId);
+    const rebuiltPrompt = buildRecoveredPromptFromMessages(recoveredMessages, currentPrompt);
     const recoveredProfile = await buildProductivityProfile({
       userPrompt: rebuiltPrompt,
       cwd: workspacePath,
@@ -372,7 +388,13 @@ async function startProductivityRun(
       sessionId: undefined,
     });
 
-    await runAgentWithProfile(sessionId, recoveredProfile, forwardEvent);
+    await runAgentWithProfile(
+      sessionId,
+      recoveredProfile,
+      forwardEvent,
+      attachments,
+      workspaceId
+    );
   }
 }
 

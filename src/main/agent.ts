@@ -252,7 +252,8 @@ export async function runAgentWithProfile(
   sessionId: string,
   profile: QueryProfile,
   onEvent: AgentEventForwarder,
-  attachments?: FileAttachment[]
+  attachments?: FileAttachment[],
+  workspaceId = "default"
 ): Promise<void> {
   if (activeAgentRuns.has(sessionId)) {
     throw new Error(`An agent is already running for session ${sessionId}.`);
@@ -286,7 +287,7 @@ export async function runAgentWithProfile(
           if (sessionId === "__awakening__") {
             setSessionId(profile.name, sid);
           } else {
-            void setSdkSessionId(sessionId, sid);
+            void setSdkSessionId(sessionId, sid, workspaceId);
           }
         }
       }
@@ -297,7 +298,7 @@ export async function runAgentWithProfile(
           if (sessionId === "__awakening__") {
             setSessionId(profile.name, sid);
           } else {
-            void setSdkSessionId(sessionId, sid);
+            void setSdkSessionId(sessionId, sid, workspaceId);
           }
         }
 
