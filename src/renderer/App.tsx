@@ -117,18 +117,35 @@ export default function App() {
 
       // ─── HITL 事件分发 ───
       if (streamEvent.type === "permission_request" && "request" in streamEvent) {
-        pushPermission(streamEvent.request as PermissionRequest);
+        const request = streamEvent.request as PermissionRequest;
+        console.log("[renderer][hitl] Received permission_request.", {
+          requestId: request.requestId,
+          toolName: request.toolName,
+          description: request.description,
+        });
+        pushPermission(request);
         return;
       }
       if (streamEvent.type === "permission_resolved" && "requestId" in streamEvent) {
+        console.log("[renderer][hitl] Received permission_resolved.", {
+          requestId: streamEvent.requestId,
+        });
         resolvePermission(streamEvent.requestId as string);
         return;
       }
       if (streamEvent.type === "ask_user_request" && "request" in streamEvent) {
-        pushAskUser(streamEvent.request as AskUserRequest);
+        const request = streamEvent.request as AskUserRequest;
+        console.log("[renderer][hitl] Received ask_user_request.", {
+          requestId: request.requestId,
+          questionCount: request.questions.length,
+        });
+        pushAskUser(request);
         return;
       }
       if (streamEvent.type === "ask_user_resolved" && "requestId" in streamEvent) {
+        console.log("[renderer][hitl] Received ask_user_resolved.", {
+          requestId: streamEvent.requestId,
+        });
         resolveAskUser(streamEvent.requestId as string);
         return;
       }
@@ -261,6 +278,12 @@ export default function App() {
       const chunks = extractStreamChunks(streamEvent);
       if (chunks.blockStart) {
         if (chunks.blockStart.type === "tool_use") {
+          console.log("[renderer][tool] tool_use started.", {
+            sessionId: targetSessionId,
+            toolName: chunks.blockStart.toolName,
+            toolUseId: chunks.blockStart.toolUseId,
+            initialInput: chunks.blockStart.toolInput,
+          });
           startToolUse(
             targetSessionId,
             chunks.blockStart.toolName,
@@ -293,6 +316,11 @@ export default function App() {
       }
 
       if (chunks.toolInputDelta) {
+        console.log("[renderer][tool] tool_use input delta.", {
+          sessionId: targetSessionId,
+          chunkLength: chunks.toolInputDelta.length,
+          chunkPreview: chunks.toolInputDelta.slice(0, 120),
+        });
         appendToolInput(targetSessionId, chunks.toolInputDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
