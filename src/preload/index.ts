@@ -11,9 +11,26 @@ import type {
   WorkspaceMeta,
   ZoraApi,
 } from "../shared/zora";
+import type {
+  ProviderConfig,
+  ProviderCreateInput,
+  ProviderUpdateInput,
+} from "../shared/types/provider";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
+  listProviders: () =>
+    ipcRenderer.invoke("provider:list") as Promise<ProviderConfig[]>,
+  createProvider: (input: ProviderCreateInput) =>
+    ipcRenderer.invoke("provider:create", input) as Promise<ProviderConfig>,
+  updateProvider: (id: string, input: ProviderUpdateInput) =>
+    ipcRenderer.invoke("provider:update", id, input) as Promise<ProviderConfig>,
+  deleteProvider: (id: string) =>
+    ipcRenderer.invoke("provider:delete", id) as Promise<void>,
+  setDefaultProvider: (providerId: string) =>
+    ipcRenderer.invoke("provider:set-default", providerId) as Promise<void>,
+  hasConfiguredProvider: () =>
+    ipcRenderer.invoke("provider:has-configured") as Promise<boolean>,
   chat: (
     text: string,
     sessionId: string,

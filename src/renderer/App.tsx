@@ -27,6 +27,7 @@ import {
   resolveAskUserAtom,
   clearAllHitlAtom,
 } from "./store/hitl";
+import { loadProvidersAtom } from "./store/provider";
 import { currentSessionIdAtom } from "./store/workspace";
 import type { PermissionRequest, AskUserRequest } from "../shared/zora";
 import {
@@ -49,6 +50,7 @@ export default function App() {
   const store = useStore();
   const checkAwakening = useSetAtom(checkAwakeningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
+  const loadProviders = useSetAtom(loadProvidersAtom);
   const setMessages = useSetAtom(messagesAtom);
 
   const startAssistantMessage = useSetAtom(startAssistantMessageForSessionAtom);
@@ -73,6 +75,10 @@ export default function App() {
   useEffect(() => {
     checkAwakening();
   }, [checkAwakening]);
+
+  useEffect(() => {
+    void loadProviders();
+  }, [loadProviders]);
 
   useEffect(() => {
     console.log(`[app] Current mode: ${appPhase}`);
