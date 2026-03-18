@@ -42,86 +42,6 @@ import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
 import { AwakeningCanvas } from "./components/awakening/AwakeningCanvas";
 import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
 
-function describeStreamEvent(streamEvent: Record<string, unknown>) {
-  const summary: Record<string, unknown> = {
-    type: streamEvent.type,
-    sessionId: streamEvent.sessionId ?? null,
-  };
-
-  if (streamEvent.type === "stream_event" && isRecord(streamEvent.event)) {
-    const event = streamEvent.event;
-    summary.eventType = event.type;
-
-    if (event.type === "content_block_start" && isRecord(event.content_block)) {
-      summary.blockType = event.content_block.type;
-
-      if (event.content_block.type === "tool_use") {
-        summary.toolName = event.content_block.name;
-        summary.toolUseId = event.content_block.id;
-      }
-    }
-
-    if (event.type === "content_block_delta" && isRecord(event.delta)) {
-      summary.deltaType = event.delta.type;
-
-      if (typeof event.delta.text === "string") {
-        summary.textLength = event.delta.text.length;
-      }
-
-      if (typeof event.delta.thinking === "string") {
-        summary.thinkingLength = event.delta.thinking.length;
-      }
-
-      if (typeof event.delta.partial_json === "string") {
-        summary.partialJsonLength = event.delta.partial_json.length;
-      }
-    }
-
-    return summary;
-  }
-
-  if (streamEvent.type === "user" && isRecord(streamEvent.message)) {
-    const content = Array.isArray(streamEvent.message.content) ? streamEvent.message.content : [];
-    const toolUseIds = content
-      .filter(
-        (block): block is Record<string, unknown> =>
-          isRecord(block) &&
-          block.type === "tool_result" &&
-          typeof block.tool_use_id === "string"
-      )
-      .map((block) => block.tool_use_id);
-
-    if (toolUseIds.length > 0) {
-      summary.toolResultCount = toolUseIds.length;
-      summary.toolUseIds = toolUseIds;
-    }
-
-    return summary;
-  }
-
-  if (streamEvent.type === "assistant" && isRecord(streamEvent.message)) {
-    const firstBlock = Array.isArray(streamEvent.message.content)
-      ? streamEvent.message.content[0]
-      : null;
-
-    if (isRecord(firstBlock)) {
-      summary.blockType = firstBlock.type;
-
-      if (firstBlock.type === "tool_use") {
-        summary.toolName = firstBlock.name;
-        summary.toolUseId = firstBlock.id;
-      }
-    }
-  }
-
-  if (streamEvent.type === "permission_request" && isRecord(streamEvent.request)) {
-    summary.toolName = streamEvent.request.toolName;
-    summary.requestId = streamEvent.request.requestId;
-  }
-
-  return summary;
-}
-
 /**
  * 应用根组件
  * 管理 App 生命周期阶段（splash → awakening → chat）
@@ -130,6 +50,8 @@ function describeStreamEvent(streamEvent: Record<string, unknown>) {
 export default function App() {
   const appPhase = useAtomValue(appPhaseAtom);
   const appPhaseRef = useRef(appPhase);
+  const toolInputBufferRef = useRef(new Map<string, string>());
+  const toolInputFlushTimerRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const store = useStore();
   const checkAwakening = useSetAtom(checkAwakeningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
@@ -192,6 +114,46 @@ export default function App() {
       idleTimer = setTimeout(() => setIsAgentIdle(true), 450);
     };
 
+    const flushToolInput = (sessionId: string) => {
+      const pending = toolInputBufferRef.current.get(sessionId);
+      if (!pending) {
+        return;
+      }
+
+      toolInputBufferRef.current.delete(sessionId);
+
+      const timer = toolInputFlushTimerRef.current.get(sessionId);
+      if (timer) {
+        clearTimeout(timer);
+        toolInputFlushTimerRef.current.delete(sessionId);
+      }
+
+      appendToolInput(targetSessionIdFromFlush(sessionId), pending);
+    };
+
+    const targetSessionIdFromFlush = (sessionId: string) => sessionId;
+
+    const scheduleToolInputFlush = (sessionId: string, chunk: string) => {
+      const previous = toolInputBufferRef.current.get(sessionId) ?? "";
+      toolInputBufferRef.current.set(sessionId, `${previous}${chunk}`);
+
+      if (toolInputFlushTimerRef.current.has(sessionId)) {
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        flushToolInput(sessionId);
+      }, 48);
+
+      toolInputFlushTimerRef.current.set(sessionId, timer);
+    };
+
+    const flushAllToolInput = () => {
+      Array.from(toolInputBufferRef.current.keys()).forEach((sessionId) => {
+        flushToolInput(sessionId);
+      });
+    };
+
     const unsubscribe = zora.onStream((streamEvent) => {
       const eventSessionId = streamEvent.sessionId;
       const currentSessionId = store.get(currentSessionIdAtom);
@@ -200,10 +162,7 @@ export default function App() {
       const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
       const targetSessionId = eventSessionId ?? activeMessageSessionId;
 
-      console.log(
-        `[renderer event][mode:${appPhaseRef.current}]`,
-        describeStreamEvent(streamEvent as Record<string, unknown>)
-      );
+      console.log(`[renderer event][mode:${appPhaseRef.current}]`, streamEvent);
 
       // ─── HITL 事件分发 ───
       if (streamEvent.type === "permission_request" && "request" in streamEvent) {
@@ -245,6 +204,8 @@ export default function App() {
       }
 
       if (streamEvent.type === "agent_error") {
+        flushAllToolInput();
+
         if (eventSessionId) {
           setSessionRunning(eventSessionId, false);
         }
@@ -277,6 +238,8 @@ export default function App() {
         }
 
         if (streamEvent.status === "finished") {
+          flushAllToolInput();
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
@@ -307,6 +270,8 @@ export default function App() {
         }
 
         if (streamEvent.status === "stopped") {
+          flushAllToolInput();
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
@@ -330,6 +295,8 @@ export default function App() {
       }
 
       if (streamEvent.type === "user" && isRecord(streamEvent.message)) {
+        flushToolInput(targetSessionId);
+
         const content = streamEvent.message.content;
         if (Array.isArray(content)) {
           content.forEach((block) => {
@@ -354,6 +321,7 @@ export default function App() {
       }
 
       if (streamEvent.type === "assistant") {
+        flushToolInput(targetSessionId);
         hydrateAssistant(targetSessionId, extractAssistantPayload(streamEvent.message));
         if (isCurrentSessionEvent) {
           bumpContentActivity();
@@ -362,6 +330,7 @@ export default function App() {
       }
 
       if (streamEvent.type === "result") {
+        flushToolInput(targetSessionId);
         completeConversation(targetSessionId, "done");
         if (isCurrentSessionEvent) {
           clearIdleTimer();
@@ -416,7 +385,7 @@ export default function App() {
           chunkLength: chunks.toolInputDelta.length,
           chunkPreview: chunks.toolInputDelta.slice(0, 120),
         });
-        appendToolInput(targetSessionId, chunks.toolInputDelta);
+        scheduleToolInputFlush(targetSessionId, chunks.toolInputDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
         }
@@ -427,11 +396,15 @@ export default function App() {
         isRecord(streamEvent.event) &&
         streamEvent.event.type === "content_block_stop"
       ) {
+        flushToolInput(targetSessionId);
         completeStreamingMessage(targetSessionId);
       }
     });
 
     return () => {
+      flushAllToolInput();
+      toolInputFlushTimerRef.current.forEach((timer) => clearTimeout(timer));
+      toolInputFlushTimerRef.current.clear();
       clearIdleTimer();
       unsubscribe();
     };

@@ -168,7 +168,7 @@ export class FeishuBridge {
       return;
     }
 
-    this.sender.initBuffer(binding.sessionId, chatId, userMessageId);
+    await this.sender.onAgentStart(chatId, userMessageId, binding.sessionId);
     this.busySessions.add(binding.sessionId);
 
     try {
@@ -183,12 +183,12 @@ export class FeishuBridge {
           binding.workspaceId
         ),
       });
-      await this.sender.sendFinalReply(binding.sessionId, "success");
+      await this.sender.onAgentEnd(binding.sessionId, "success");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Feishu] Agent error:", error);
       this.sender.markError(binding.sessionId, `❌ 出错了: ${errorMessage}`);
-      await this.sender.sendFinalReply(binding.sessionId, "error");
+      await this.sender.onAgentEnd(binding.sessionId, "error");
     } finally {
       this.busySessions.delete(binding.sessionId);
     }

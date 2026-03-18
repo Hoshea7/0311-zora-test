@@ -1,59 +1,173 @@
 import type { AgentStreamEvent } from "../../shared/zora";
 import type { FeishuGateway } from "./gateway";
 
-type FeishuGatewayLike = Pick<FeishuGateway, "replyMessage" | "sendMessage">;
+const STREAM_UPDATE_INTERVAL_MS = 200;
+const MAX_CARD_TEXT_LENGTH = 25_000;
 
-type ReplyBuffer = {
-  text: string;
+type FeishuGatewayLike = Pick<
+  FeishuGateway,
+  | "addTypingReaction"
+  | "createStreamingCard"
+  | "finalizeStreamingCard"
+  | "removeTypingReaction"
+  | "replyMessage"
+  | "sendMessage"
+  | "streamCardContent"
+>;
+
+type StreamState = {
+  cardId: string | null;
+  messageId: string;
   chatId: string;
   userMessageId: string;
+  text: string;
+  sequence: number;
   toolCalls: number;
+  lastUpdateTime: number;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  activeFlush: Promise<void> | null;
+  needsFlush: boolean;
+  isStreamingMode: boolean;
   error: string | null;
+  typingReactionId: string | null;
+  lastStreamedContent: string;
+  seenToolUseIds: Set<string>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function normalizeTextChunk(value: unknown): string {
-  return typeof value === "string" ? value : "";
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
-function appendChunk(existing: string, next: string): string {
-  if (!next.trim()) {
+function extractAssistantSnapshot(message: unknown): {
+  text: string;
+  toolUseIds: string[];
+  toolUseCount: number;
+} {
+  if (!isRecord(message) || !Array.isArray(message.content)) {
+    return { text: "", toolUseIds: [], toolUseCount: 0 };
+  }
+
+  const textParts: string[] = [];
+  const toolUseIds: string[] = [];
+  let toolUseCount = 0;
+
+  for (const block of message.content) {
+    if (!isRecord(block) || typeof block.type !== "string") {
+      continue;
+    }
+
+    if (block.type === "text" && isNonEmptyString(block.text)) {
+      textParts.push(block.text);
+      continue;
+    }
+
+    if (block.type === "tool_use") {
+      toolUseCount += 1;
+      if (isNonEmptyString(block.id)) {
+        toolUseIds.push(block.id);
+      }
+    }
+  }
+
+  return {
+    text: textParts.join(""),
+    toolUseIds,
+    toolUseCount,
+  };
+}
+
+function appendTextDelta(existing: string, delta: string): string {
+  if (!delta) {
     return existing;
   }
 
-  if (!existing.trim()) {
-    return next.trim();
+  return `${existing}${delta}`;
+}
+
+function normalizeBodyText(
+  text: string,
+  error: string | null,
+  status: "success" | "error"
+): string {
+  const trimmedText = text.trim();
+  if (trimmedText.length > 0) {
+    return trimmedText;
   }
 
-  return `${existing.trimEnd()}\n\n${next.trimStart()}`;
+  const trimmedError = error?.trim();
+  if (trimmedError) {
+    return trimmedError;
+  }
+
+  return status === "error" ? "❌ Zora 在处理这条消息时出错了。" : "(无内容)";
 }
 
 export class FeishuMessageSender {
-  private buffers = new Map<string, ReplyBuffer>();
+  private streamStates = new Map<string, StreamState>();
 
   constructor(private gateway: FeishuGatewayLike) {}
 
-  initBuffer(sessionId: string, chatId: string, userMessageId: string): void {
-    this.buffers.set(sessionId, {
-      text: "",
+  async onAgentStart(chatId: string, userMessageId: string, sessionId: string): Promise<void> {
+    const typingReactionId = await this.gateway.addTypingReaction(userMessageId);
+    const streamHandle = await this.gateway.createStreamingCard(chatId, userMessageId);
+
+    this.streamStates.set(sessionId, {
+      cardId: streamHandle?.cardId ?? null,
+      messageId: streamHandle?.messageId ?? "",
       chatId,
       userMessageId,
+      text: "",
+      sequence: streamHandle?.sequence ?? 0,
       toolCalls: 0,
+      lastUpdateTime: 0,
+      flushTimer: null,
+      activeFlush: null,
+      needsFlush: false,
+      isStreamingMode: streamHandle !== null,
       error: null,
+      typingReactionId,
+      lastStreamedContent: "思考中...",
+      seenToolUseIds: new Set<string>(),
     });
   }
 
   handleAgentEvent(sessionId: string, event: AgentStreamEvent): void {
-    const buffer = this.buffers.get(sessionId);
-    if (!buffer || !isRecord(event) || typeof event.type !== "string") {
+    const state = this.streamStates.get(sessionId);
+    if (!state || !isRecord(event) || typeof event.type !== "string") {
       return;
     }
 
-    if (event.type === "agent_error" && typeof event.error === "string") {
-      buffer.error = event.error;
+    if (event.type === "agent_error" && isNonEmptyString(event.error)) {
+      state.error = event.error;
+      return;
+    }
+
+    if (event.type === "stream_event" && isRecord(event.event) && typeof event.event.type === "string") {
+      const streamEvent = event.event;
+
+      if (
+        streamEvent.type === "content_block_delta" &&
+        isRecord(streamEvent.delta) &&
+        streamEvent.delta.type === "text_delta" &&
+        isNonEmptyString(streamEvent.delta.text)
+      ) {
+        state.text = appendTextDelta(state.text, streamEvent.delta.text);
+        this.requestStreamFlush(sessionId, state);
+        return;
+      }
+
+      if (
+        streamEvent.type === "content_block_start" &&
+        isRecord(streamEvent.content_block) &&
+        streamEvent.content_block.type === "tool_use"
+      ) {
+        this.trackToolUse(state, streamEvent.content_block.id);
+      }
+
       return;
     }
 
@@ -61,80 +175,103 @@ export class FeishuMessageSender {
       return;
     }
 
-    const content = Array.isArray(event.message.content) ? event.message.content : [];
-
-    for (const block of content) {
-      if (!isRecord(block) || typeof block.type !== "string") {
-        continue;
-      }
-
-      if (block.type === "text") {
-        buffer.text = appendChunk(buffer.text, normalizeTextChunk(block.text));
-        continue;
-      }
-
-      if (block.type === "tool_use") {
-        buffer.toolCalls += 1;
-      }
+    const snapshot = extractAssistantSnapshot(event.message);
+    if (snapshot.text.trim().length > 0) {
+      state.text = snapshot.text;
+      this.requestStreamFlush(sessionId, state);
     }
+
+    for (const toolUseId of snapshot.toolUseIds) {
+      this.trackToolUse(state, toolUseId);
+    }
+
+    state.toolCalls = Math.max(state.toolCalls, snapshot.toolUseCount);
   }
 
   markError(sessionId: string, errorText: string): void {
-    const buffer = this.buffers.get(sessionId);
-    if (!buffer) {
+    const state = this.streamStates.get(sessionId);
+    if (!state) {
       return;
     }
 
-    buffer.error = errorText;
+    state.error = errorText;
   }
 
-  async sendFinalReply(
-    sessionId: string,
-    status: "success" | "error"
-  ): Promise<void> {
-    const buffer = this.buffers.get(sessionId);
-    if (!buffer) {
+  async onAgentEnd(sessionId: string, status: "success" | "error"): Promise<void> {
+    const state = this.streamStates.get(sessionId);
+    if (!state) {
       return;
     }
 
-    const bodyText =
-      buffer.text.trim() ||
-      buffer.error?.trim() ||
-      (status === "error" ? "❌ Zora 在处理这条消息时出错了。" : "(无内容)");
+    if (state.flushTimer) {
+      clearTimeout(state.flushTimer);
+      state.flushTimer = null;
+    }
 
     try {
-      const chunks = this.splitText(bodyText, 25_000);
+      if (state.activeFlush) {
+        await state.activeFlush.catch(() => undefined);
+      }
+
+      if (state.isStreamingMode && state.cardId) {
+        await this.flushStreamUpdate(sessionId, state);
+      }
+
+      const bodyText = normalizeBodyText(state.text, state.error, status);
+      const chunks = this.splitText(bodyText, MAX_CARD_TEXT_LENGTH);
+
+      if (state.cardId) {
+        state.sequence = await this.gateway.finalizeStreamingCard(
+          state.cardId,
+          this.buildFinalCard(chunks[0] ?? bodyText, state.toolCalls, status),
+          state.sequence
+        );
+
+        for (const extraChunk of chunks.slice(1)) {
+          await this.gateway.sendMessage(
+            state.chatId,
+            "interactive",
+            JSON.stringify(this.buildFinalCard(extraChunk, state.toolCalls, status))
+          );
+        }
+        return;
+      }
 
       if (chunks.length <= 1) {
         await this.gateway.replyMessage(
-          buffer.userMessageId,
+          state.userMessageId,
           "interactive",
-          JSON.stringify(this.buildReplyCard(bodyText, buffer.toolCalls, status))
+          JSON.stringify(this.buildFinalCard(bodyText, state.toolCalls, status))
         );
         return;
       }
 
       for (const chunk of chunks) {
         await this.gateway.sendMessage(
-          buffer.chatId,
+          state.chatId,
           "interactive",
-          JSON.stringify(this.buildReplyCard(chunk, buffer.toolCalls, status))
+          JSON.stringify(this.buildFinalCard(chunk, state.toolCalls, status))
         );
       }
     } catch (error) {
-      console.error("[Feishu Sender] Failed to send reply card:", error);
+      console.error("[Feishu Sender] Final send error:", error);
 
       try {
         await this.gateway.sendMessage(
-          buffer.chatId,
+          state.chatId,
           "text",
-          JSON.stringify({ text: bodyText || "(Zora 回复失败)" })
+          JSON.stringify({
+            text: normalizeBodyText(state.text, state.error, status),
+          })
         );
       } catch (fallbackError) {
         console.error("[Feishu Sender] Fallback text send failed:", fallbackError);
       }
     } finally {
-      this.buffers.delete(sessionId);
+      await this.gateway
+        .removeTypingReaction(state.userMessageId, state.typingReactionId)
+        .catch(() => undefined);
+      this.streamStates.delete(sessionId);
     }
   }
 
@@ -146,7 +283,99 @@ export class FeishuMessageSender {
     );
   }
 
-  private buildReplyCard(
+  private trackToolUse(state: StreamState, toolUseId: unknown): void {
+    if (isNonEmptyString(toolUseId)) {
+      if (state.seenToolUseIds.has(toolUseId)) {
+        return;
+      }
+
+      state.seenToolUseIds.add(toolUseId);
+    }
+
+    state.toolCalls += 1;
+  }
+
+  private requestStreamFlush(sessionId: string, state: StreamState): void {
+    if (!state.isStreamingMode || !state.cardId) {
+      return;
+    }
+
+    if (state.activeFlush) {
+      state.needsFlush = true;
+      return;
+    }
+
+    const elapsed = Date.now() - state.lastUpdateTime;
+    if (elapsed >= STREAM_UPDATE_INTERVAL_MS) {
+      void this.flushStreamUpdate(sessionId, state);
+      return;
+    }
+
+    if (state.flushTimer) {
+      clearTimeout(state.flushTimer);
+    }
+
+    state.flushTimer = setTimeout(() => {
+      state.flushTimer = null;
+      void this.flushStreamUpdate(sessionId, state);
+    }, STREAM_UPDATE_INTERVAL_MS - elapsed);
+    state.flushTimer.unref?.();
+  }
+
+  private async flushStreamUpdate(sessionId: string, state: StreamState): Promise<void> {
+    if (!state.isStreamingMode || !state.cardId) {
+      return;
+    }
+
+    const content = this.buildStreamingContent(state.text);
+    if (content === state.lastStreamedContent && state.lastUpdateTime > 0) {
+      return;
+    }
+
+    if (state.activeFlush) {
+      state.needsFlush = true;
+      return state.activeFlush;
+    }
+
+    const task = (async () => {
+      const current = this.streamStates.get(sessionId);
+      if (current !== state || !state.cardId || !state.isStreamingMode) {
+        return;
+      }
+
+      const nextSequence = state.sequence + 1;
+      const success = await this.gateway.streamCardContent(state.cardId, content, nextSequence);
+      if (!success) {
+        state.isStreamingMode = false;
+        console.warn("[Feishu Sender] Stream update failed, falling back to final batch mode.");
+        return;
+      }
+
+      state.sequence = nextSequence;
+      state.lastUpdateTime = Date.now();
+      state.lastStreamedContent = content;
+    })();
+
+    state.activeFlush = task.finally(() => {
+      if (state.activeFlush === task) {
+        state.activeFlush = null;
+      }
+
+      if (state.needsFlush && state.isStreamingMode && state.cardId) {
+        state.needsFlush = false;
+        this.requestStreamFlush(sessionId, state);
+      }
+    });
+
+    return state.activeFlush;
+  }
+
+  private buildStreamingContent(text: string): string {
+    const trimmed = text.trim();
+    return trimmed.length > 0 ? trimmed : "思考中...";
+  }
+
+  private buildFinalCard(
     text: string,
     toolCalls: number,
     status: "success" | "error"
@@ -161,13 +390,9 @@ export class FeishuMessageSender {
     if (toolCalls > 0) {
       elements.push({ tag: "hr" });
       elements.push({
-        tag: "note",
-        elements: [
-          {
-            tag: "plain_text",
-            content: `🔧 ${toolCalls} tool calls`,
-          },
-        ],
+        tag: "markdown",
+        content: `🔧 ${toolCalls} tool calls`,
+        text_size: "notation",
       });
     }
 
