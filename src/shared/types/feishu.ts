@@ -1,0 +1,31 @@
+export interface FeishuConfig {
+  enabled: boolean;
+  appId: string;
+  appSecret: string;
+  autoStart: boolean;
+  defaultWorkspaceId?: string;
+}
+
+export interface FeishuBridgeStatus {
+  status: "stopped" | "starting" | "running" | "error";
+  error: string | null;
+  botName: string | null;
+}
+
+export interface FeishuConnectionTestResult {
+  success: boolean;
+  error: string | null;
+  botName: string | null;
+}
+
+export const FEISHU_IPC = {
+  GET_CONFIG: "feishu:get-config",
+  SAVE_CONFIG: "feishu:save-config",
+  TEST_CONNECTION: "feishu:test-connection",
+  START_BRIDGE: "feishu:start-bridge",
+  STOP_BRIDGE: "feishu:stop-bridge",
+  GET_STATUS: "feishu:get-status",
+  STATUS_CHANGED: "feishu:status-changed",
+  LIST_BINDINGS: "feishu:list-bindings",
+  REMOVE_BINDING: "feishu:remove-binding",
+} as const;

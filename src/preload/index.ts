@@ -11,6 +11,11 @@ import type {
   WorkspaceMeta,
   ZoraApi,
 } from "../shared/zora";
+import {
+  FEISHU_IPC,
+  type FeishuConfig,
+  type FeishuConnectionTestResult,
+} from "../shared/types/feishu";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -38,6 +43,14 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("provider:test-default") as Promise<ProviderTestResult>,
   hasConfiguredProvider: () =>
     ipcRenderer.invoke("provider:has-configured") as Promise<boolean>,
+  feishu: {
+    getConfig: () =>
+      ipcRenderer.invoke(FEISHU_IPC.GET_CONFIG) as Promise<FeishuConfig | null>,
+    saveConfig: (config: FeishuConfig) =>
+      ipcRenderer.invoke(FEISHU_IPC.SAVE_CONFIG, config) as Promise<FeishuConfig>,
+    testConnection: (params: { appId: string; appSecret: string }) =>
+      ipcRenderer.invoke(FEISHU_IPC.TEST_CONNECTION, params) as Promise<FeishuConnectionTestResult>,
+  },
   chat: (
     text: string,
     sessionId: string,

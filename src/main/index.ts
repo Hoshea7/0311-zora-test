@@ -10,6 +10,7 @@ import type {
   PermissionMode,
   PermissionResponse,
 } from "../shared/zora";
+import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
 import type { ProviderCreateInput, ProviderUpdateInput } from "../shared/types/provider";
 import {
   isAgentRunningForSession,
@@ -25,6 +26,11 @@ import {
 } from "./hitl";
 import { memoryAgent } from "./memory-agent";
 import { ensureBootstrapScaffold } from "./memory-store";
+import {
+  loadFeishuConfig,
+  saveFeishuConfig,
+  testFeishuConnection,
+} from "./feishu";
 import { isBootstrapMode } from "./prompt-builder";
 import {
   buildAwakeningProfile,
@@ -85,6 +91,14 @@ function assertRequiredString(value: unknown, fieldName: string): string {
   return value;
 }
 
+function assertRequiredBoolean(value: unknown, fieldName: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean.`);
+  }
+
+  return value;
+}
+
 function assertOptionalString(value: unknown, fieldName: string): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -138,6 +152,37 @@ function parseProviderUpdateInput(input: unknown): ProviderUpdateInput {
     apiKey: assertOptionalString(input.apiKey, "provider.apiKey"),
     modelId: assertOptionalString(input.modelId, "provider.modelId"),
     enabled: assertOptionalBoolean(input.enabled, "provider.enabled"),
+  };
+}
+
+function parseFeishuConfig(input: unknown): FeishuConfig {
+  if (!isRecord(input)) {
+    throw new Error("A valid feishu payload is required.");
+  }
+
+  return {
+    enabled: assertRequiredBoolean(input.enabled, "feishu.enabled"),
+    appId: assertRequiredString(input.appId, "feishu.appId"),
+    appSecret: assertRequiredString(input.appSecret, "feishu.appSecret"),
+    autoStart:
+      input.autoStart === undefined
+        ? false
+        : assertRequiredBoolean(input.autoStart, "feishu.autoStart"),
+    defaultWorkspaceId: assertOptionalString(
+      input.defaultWorkspaceId,
+      "feishu.defaultWorkspaceId"
+    ),
+  };
+}
+
+function parseFeishuConnectionInput(input: unknown): { appId: string; appSecret: string } {
+  if (!isRecord(input)) {
+    throw new Error("A valid feishu test payload is required.");
+  }
+
+  return {
+    appId: assertRequiredString(input.appId, "feishu.appId"),
+    appSecret: assertRequiredString(input.appSecret, "feishu.appSecret"),
   };
 }
 
@@ -492,6 +537,19 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("provider:test-default", () => {
     return providerManager.testDefaultConnection();
+  });
+
+  ipcMain.handle(FEISHU_IPC.GET_CONFIG, () => {
+    return loadFeishuConfig();
+  });
+
+  ipcMain.handle(FEISHU_IPC.SAVE_CONFIG, async (_event, input: unknown) => {
+    return saveFeishuConfig(parseFeishuConfig(input));
+  });
+
+  ipcMain.handle(FEISHU_IPC.TEST_CONNECTION, async (_event, input: unknown) => {
+    const { appId, appSecret } = parseFeishuConnectionInput(input);
+    return testFeishuConnection(appId, appSecret);
   });
 
   ipcMain.handle("skill:list", () => {

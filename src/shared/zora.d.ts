@@ -1,4 +1,8 @@
 import type {
+  FeishuConfig,
+  FeishuConnectionTestResult,
+} from "./types/feishu";
+import type {
   ProviderConfig,
   ProviderCreateInput,
   ProviderTestResult,
@@ -150,6 +154,14 @@ export interface ZoraApi {
   ) => Promise<ProviderTestResult>;
   testDefaultProvider: () => Promise<ProviderTestResult>;
   hasConfiguredProvider: () => Promise<boolean>;
+  feishu: {
+    getConfig: () => Promise<FeishuConfig | null>;
+    saveConfig: (config: FeishuConfig) => Promise<FeishuConfig>;
+    testConnection: (params: {
+      appId: string;
+      appSecret: string;
+    }) => Promise<FeishuConnectionTestResult>;
+  };
   chat: (
     text: string,
     sessionId: string,
