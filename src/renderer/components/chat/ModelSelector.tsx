@@ -57,7 +57,7 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
         >
           {enabledProviders.length > 0 ? (
             <>
-              <div className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-400">
+              <div className="px-3 pb-2 pt-1 text-xs font-medium uppercase tracking-[0.14em] text-stone-400">
                 当前可用模型渠道
               </div>
 
@@ -83,7 +83,7 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
                     <div className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5">
                       <span
                         className={cn(
-                          "text-[13px] font-semibold transition-colors",
+                          "text-sm font-semibold transition-colors",
                           isActive ? "text-stone-900" : "text-stone-300 group-hover:text-stone-500"
                         )}
                       >
@@ -92,10 +92,10 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium text-stone-900">
+                      <div className="truncate text-sm font-medium text-stone-900">
                         {provider.name}
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-stone-500">
+                      <div className="mt-0.5 flex items-center gap-2 text-xs text-stone-500">
                         <span className="rounded-full bg-stone-100 px-2 py-0.5 font-medium text-stone-600">
                           {presetLabel}
                         </span>
@@ -106,7 +106,7 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
                     </div>
 
                     {isSwitchingId === provider.id ? (
-                      <div className="shrink-0 pt-0.5 text-[11px] text-stone-400">
+                      <div className="shrink-0 pt-0.5 text-xs text-stone-400">
                         切换中…
                       </div>
                     ) : null}
@@ -122,7 +122,7 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
             onSelect={openProviderSettings}
             className={cn(
               "flex cursor-pointer select-none items-center justify-between rounded-[12px] px-3 py-2.5 outline-none transition-colors",
-              "text-[13px] font-medium text-stone-700 hover:bg-stone-50 focus:bg-stone-50"
+              "text-sm font-medium text-stone-700 hover:bg-stone-50 focus:bg-stone-50"
             )}
           >
             <span>前往设置配置</span>

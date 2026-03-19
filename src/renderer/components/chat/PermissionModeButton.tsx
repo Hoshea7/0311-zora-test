@@ -124,7 +124,7 @@ export function PermissionModeButton() {
     <div className="relative z-20">
       {isTooltipOpen ? (
         <div className="pointer-events-none absolute bottom-full left-0 z-[120] mb-2 w-max max-w-60">
-          <div className="rounded-lg border border-stone-200/60 bg-white/95 backdrop-blur-sm px-2.5 py-1.5 text-[12px] font-medium leading-tight text-stone-600 shadow-[0_4px_12px_rgba(0,0,0,0.06)]">
+          <div className="rounded-lg border border-stone-200/60 bg-white/95 backdrop-blur-sm px-2.5 py-1.5 text-xs font-medium leading-tight text-stone-600 shadow-[0_4px_12px_rgba(0,0,0,0.06)]">
             {meta.tooltip}
           </div>
         </div>
@@ -142,7 +142,7 @@ export function PermissionModeButton() {
         disabled={isUpdating}
         aria-label={`当前权限模式：${meta.label}`}
         className={cn(
-          "inline-flex h-7 items-center justify-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium tracking-wide transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex h-7 items-center justify-center gap-1.5 rounded-full border px-2.5 text-xs font-medium tracking-wide transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
           meta.buttonClassName
         )}
       >
