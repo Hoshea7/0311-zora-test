@@ -9,7 +9,7 @@ export const sidebarCollapsedAtom = atom(false);
 /**
  * 侧边栏展开宽度
  */
-export const sidebarWidthAtom = atom(304);
+export const sidebarWidthAtom = atom(292);
 
 /**
  * 当前模式（Chat 或 Agent）

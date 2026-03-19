@@ -20,7 +20,7 @@ import { SessionList } from "../sidebar/SessionList";
 import { SidebarFooter } from "../sidebar/SidebarFooter";
 
 const COLLAPSED_SIDEBAR_WIDTH = 76;
-const MIN_SIDEBAR_WIDTH = 312;
+const MIN_SIDEBAR_WIDTH = 292;
 const MAX_SIDEBAR_WIDTH = 520;
 const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH;
 
