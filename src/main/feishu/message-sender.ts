@@ -162,13 +162,13 @@ function findEarliestBreakAfter(text: string, minIndex: number): number {
 }
 
 function getLastStreamedPreview(state: StreamState): string {
-  return state.lastStreamedContent === "思考中..." ? "" : state.lastStreamedContent;
+  return state.lastStreamedContent === "..." ? "" : state.lastStreamedContent;
 }
 
 function buildStreamingPreviewText(state: StreamState): string {
   const raw = state.text.trim();
   if (!raw) {
-    return "思考中...";
+    return "...";
   }
 
   const safe = trimIncompleteMarkdownTail(raw) || raw;
@@ -193,14 +193,14 @@ function buildStreamingPreviewText(state: StreamState): string {
     if (idleMs >= INITIAL_STREAM_BATCH_DELAY_MS || safe.length <= INITIAL_STREAM_MAX_CHARS) {
       return safe.slice(0, Math.min(safe.length, INITIAL_STREAM_MAX_CHARS)).trimEnd();
     }
-    return "思考中...";
+    return "...";
   }
 
   if (idleMs >= FORCE_STREAM_PREVIEW_IDLE_MS && safe.length > previousLength) {
     return safe;
   }
 
-  return previousPreview || "思考中...";
+  return previousPreview || "...";
 }
 
 function normalizeBodyText(
@@ -219,6 +219,18 @@ function normalizeBodyText(
   }
 
   return status === "error" ? "❌ Zora 在处理这条消息时出错了。" : "(无内容)";
+}
+
+function buildTextContent(text: string): string {
+  return JSON.stringify({ text });
+}
+
+function buildPostContent(text: string): string {
+  return JSON.stringify({
+    zh_cn: {
+      content: [[{ tag: "md", text }]],
+    },
+  });
 }
 
 export class FeishuMessageSender {
@@ -247,7 +259,7 @@ export class FeishuMessageSender {
       isStreamingMode: streamHandle !== null,
       error: null,
       typingReactionId,
-      lastStreamedContent: "思考中...",
+      lastStreamedContent: "...",
       seenToolUseIds: new Set<string>(),
       firstTextDeltaAt: null,
       lastTextDeltaAt: null,
@@ -345,46 +357,34 @@ export class FeishuMessageSender {
       if (state.cardId) {
         state.sequence = await this.gateway.finalizeStreamingCard(
           state.cardId,
-          this.buildFinalCard(chunks[0] ?? bodyText, state.toolCalls, status),
+          this.buildFinalCard(chunks[0] ?? bodyText, state.toolCalls),
           state.sequence
         );
 
         for (const extraChunk of chunks.slice(1)) {
-          await this.gateway.sendMessage(
-            state.chatId,
-            "interactive",
-            JSON.stringify(this.buildFinalCard(extraChunk, state.toolCalls, status))
-          );
+          await this.sendFinalContent(state.chatId, extraChunk);
         }
         return;
       }
 
-      if (chunks.length <= 1) {
-        await this.gateway.replyMessage(
-          state.userMessageId,
-          "interactive",
-          JSON.stringify(this.buildFinalCard(bodyText, state.toolCalls, status))
-        );
+      if (status === "error" && state.text.trim().length === 0) {
+        await this.sendText(state.chatId, bodyText, state.userMessageId);
         return;
       }
 
+      let replyToMessageId: string | undefined = state.userMessageId;
       for (const chunk of chunks) {
-        await this.gateway.sendMessage(
-          state.chatId,
-          "interactive",
-          JSON.stringify(this.buildFinalCard(chunk, state.toolCalls, status))
-        );
+        await this.sendFinalContent(state.chatId, chunk, replyToMessageId);
+        replyToMessageId = undefined;
       }
     } catch (error) {
       console.error("[Feishu Sender] Final send error:", error);
 
       try {
-        await this.gateway.sendMessage(
+        await this.sendText(
           state.chatId,
-          "text",
-          JSON.stringify({
-            text: normalizeBodyText(state.text, state.error, status),
-          })
+          normalizeBodyText(state.text, state.error, status),
+          state.userMessageId
         );
       } catch (fallbackError) {
         console.error("[Feishu Sender] Fallback text send failed:", fallbackError);
@@ -397,12 +397,13 @@ export class FeishuMessageSender {
     }
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
-    await this.gateway.sendMessage(
-      chatId,
-      "interactive",
-      JSON.stringify(this.buildFinalCard(text, 0, "success"))
-    );
+  async sendText(chatId: string, text: string, replyToMessageId?: string): Promise<void> {
+    if (replyToMessageId) {
+      await this.gateway.replyMessage(replyToMessageId, "text", buildTextContent(text));
+      return;
+    }
+
+    await this.gateway.sendMessage(chatId, "text", buildTextContent(text));
   }
 
   private trackToolUse(state: StreamState, toolUseId: unknown): void {
@@ -515,8 +516,7 @@ export class FeishuMessageSender {
 
   private buildFinalCard(
     text: string,
-    toolCalls: number,
-    status: "success" | "error"
+    toolCalls: number
   ): object {
     const elements: object[] = [
       {
@@ -537,12 +537,49 @@ export class FeishuMessageSender {
     return {
       schema: "2.0",
       config: { wide_screen_mode: true },
-      header: {
-        title: { tag: "plain_text", content: "✨ Zora" },
-        template: status === "error" ? "red" : "indigo",
-      },
       body: { elements },
     };
+  }
+
+  private async sendAsPost(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string
+  ): Promise<void> {
+    const content = buildPostContent(text);
+
+    if (replyToMessageId) {
+      await this.gateway.replyMessage(replyToMessageId, "post", content);
+      return;
+    }
+
+    await this.gateway.sendMessage(chatId, "post", content);
+  }
+
+  private async sendFinalContent(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string
+  ): Promise<void> {
+    try {
+      await this.sendAsPost(chatId, text, replyToMessageId);
+      return;
+    } catch (error) {
+      console.warn("[Feishu Sender] Post send failed, trying text:", error);
+    }
+
+    try {
+      if (replyToMessageId) {
+        await this.gateway.replyMessage(replyToMessageId, "text", buildTextContent(text));
+      } else {
+        await this.gateway.sendMessage(chatId, "text", buildTextContent(text));
+      }
+      return;
+    } catch (error) {
+      console.warn("[Feishu Sender] Text reply failed, trying plain send:", error);
+    }
+
+    await this.gateway.sendMessage(chatId, "text", buildTextContent(text));
   }
 
   private splitText(text: string, maxLen: number): string[] {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AgentRunInfo,
   AgentStreamEvent,
   AskUserResponse,
   ChatMessage,
@@ -13,6 +14,7 @@ import type {
 } from "../shared/zora";
 import {
   FEISHU_IPC,
+  type FeishuAgentStatePayload,
   type FeishuBridgeStatus,
   type FeishuConfig,
   type FeishuConnectionTestResult,
@@ -65,6 +67,20 @@ const zoraApi: ZoraApi = {
         ipcRenderer.removeListener(FEISHU_IPC.STATUS_CHANGED, handler);
       };
     },
+    onAgentStateChanged: (callback: (payload: FeishuAgentStatePayload) => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: FeishuAgentStatePayload
+      ) => {
+        callback(payload);
+      };
+
+      ipcRenderer.on(FEISHU_IPC.AGENT_STATE, handler);
+
+      return () => {
+        ipcRenderer.removeListener(FEISHU_IPC.AGENT_STATE, handler);
+      };
+    },
   },
   chat: (
     text: string,
@@ -75,6 +91,8 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("agent:chat", text, sessionId, workspaceId, attachments) as Promise<void>,
   isAgentRunning: (sessionId: string) =>
     ipcRenderer.invoke("agent:is-running", sessionId) as Promise<boolean>,
+  getAgentRunInfo: (sessionId: string) =>
+    ipcRenderer.invoke("agent:get-run-info", sessionId) as Promise<AgentRunInfo>,
   listSkills: () =>
     ipcRenderer.invoke("skill:list") as Promise<SkillMeta[]>,
   openSkillsDir: () =>

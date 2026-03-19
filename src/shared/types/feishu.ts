@@ -23,6 +23,11 @@ export interface FeishuBridgeStatus {
   botName: string | null;
 }
 
+export interface FeishuAgentStatePayload {
+  sessionId: string;
+  running: boolean;
+}
+
 export interface FeishuConnectionTestResult {
   success: boolean;
   error: string | null;
@@ -37,6 +42,7 @@ export const FEISHU_IPC = {
   STOP_BRIDGE: "feishu:stop-bridge",
   GET_STATUS: "feishu:get-status",
   STATUS_CHANGED: "feishu:status-changed",
+  AGENT_STATE: "feishu:agent-state",
   LIST_BINDINGS: "feishu:list-bindings",
   REMOVE_BINDING: "feishu:remove-binding",
 } as const;

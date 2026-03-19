@@ -12,6 +12,7 @@ import type {
 import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
 import type { ProviderCreateInput, ProviderUpdateInput } from "../shared/types/provider";
 import {
+  getAgentRunInfo,
   isAgentRunningForSession,
   resolveSDKCliPath,
   runAgentWithProfile,
@@ -723,6 +724,7 @@ app.whenReady().then(async () => {
         forwardEvent,
         workspaceId: targetWorkspaceId,
         attachments,
+        source: "desktop",
       }).catch((err) => {
         console.error(`[index] Agent run failed for session ${sessionId}:`, err);
       });
@@ -759,7 +761,7 @@ app.whenReady().then(async () => {
       sessionId: existingSessionId,
     });
 
-    await runAgentWithProfile("__awakening__", profile, forwardEvent);
+    await runAgentWithProfile("__awakening__", profile, forwardEvent, undefined, "default", "awakening");
   });
 
   ipcMain.handle("agent:awakening-complete", async () => {
@@ -787,6 +789,14 @@ app.whenReady().then(async () => {
     }
 
     return isAgentRunningForSession(sessionId.trim());
+  });
+
+  ipcMain.handle("agent:get-run-info", async (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+      throw new Error("A valid sessionId is required.");
+    }
+
+    return getAgentRunInfo(sessionId.trim());
   });
 
   ipcMain.handle("zora:is-awakened", async () => {

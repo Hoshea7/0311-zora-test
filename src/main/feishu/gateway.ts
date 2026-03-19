@@ -69,15 +69,8 @@ function buildStreamingCardSkeleton(markdown: string): object {
       wide_screen_mode: true,
       streaming_mode: true,
       summary: {
-        content: "思考中...",
+        content: "...",
       },
-    },
-    header: {
-      title: {
-        tag: "plain_text",
-        content: "✨ Zora",
-      },
-      template: "indigo",
     },
     body: {
       elements: [
@@ -440,7 +433,7 @@ export class FeishuGateway {
       const createResponse = await this.restClient.cardkit.v1.card.create({
         data: {
           type: "card_json",
-          data: JSON.stringify(buildStreamingCardSkeleton("思考中...")),
+          data: JSON.stringify(buildStreamingCardSkeleton("...")),
         },
       });
       const createError = getLarkResponseErrorMessage(createResponse, "创建飞书流式卡片失败");

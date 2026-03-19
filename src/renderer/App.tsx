@@ -29,7 +29,7 @@ import {
 } from "./store/hitl";
 import { loadProvidersAtom } from "./store/provider";
 import { currentSessionIdAtom } from "./store/workspace";
-import type { PermissionRequest, AskUserRequest } from "../shared/zora";
+import type { AgentRunSource, PermissionRequest, AskUserRequest } from "../shared/zora";
 import {
   extractStreamChunks,
   extractAssistantPayload,
@@ -41,6 +41,12 @@ import { AppShell } from "./components/layout/AppShell";
 import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
 import { AwakeningCanvas } from "./components/awakening/AwakeningCanvas";
 import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
+
+function normalizeRunSource(value: unknown): AgentRunSource | undefined {
+  return value === "desktop" || value === "feishu" || value === "awakening" || value === "memory"
+    ? value
+    : undefined;
+}
 
 /**
  * 应用根组件
@@ -102,13 +108,13 @@ export default function App() {
     let cancelled = false;
 
     void window.zora
-      .isAgentRunning(currentSessionId)
-      .then((isRunning) => {
+      .getAgentRunInfo(currentSessionId)
+      .then((runInfo) => {
         if (cancelled) {
           return;
         }
 
-        setSessionRunning(currentSessionId, isRunning);
+        setSessionRunning(currentSessionId, runInfo.running, runInfo.source);
       })
       .catch((error) => {
         console.warn("[app] Failed to sync agent state for session.", {
@@ -121,6 +127,16 @@ export default function App() {
       cancelled = true;
     };
   }, [appPhase, currentSessionId, setSessionRunning]);
+
+  useEffect(() => {
+    const unsubscribe = window.zora.feishu.onAgentStateChanged((payload) => {
+      setSessionRunning(payload.sessionId, payload.running, payload.running ? "feishu" : undefined);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [setSessionRunning]);
 
   // 处理 Agent 流式事件（awakening 和 chat 阶段都需要）
   useEffect(() => {
@@ -257,7 +273,7 @@ export default function App() {
       if (streamEvent.type === "agent_status") {
         if (streamEvent.status === "started") {
           if (eventSessionId) {
-            setSessionRunning(eventSessionId, true);
+            setSessionRunning(eventSessionId, true, normalizeRunSource(streamEvent.source));
           }
 
           if (isCurrentSessionEvent) {

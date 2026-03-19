@@ -1,4 +1,9 @@
-import type { AgentStreamEvent, ChatMessage, FileAttachment } from "../shared/zora";
+import type {
+  AgentRunSource,
+  AgentStreamEvent,
+  ChatMessage,
+  FileAttachment,
+} from "../shared/zora";
 import {
   MissingSdkSessionError,
   resolveSDKCliPath,
@@ -23,6 +28,7 @@ export interface RunProductivitySessionParams {
   workspaceId?: string;
   attachments?: FileAttachment[];
   permissionMode?: "default" | "bypassPermissions";
+  source?: AgentRunSource;
 }
 
 function truncateForRecovery(value: string, maxChars: number): string {
@@ -125,6 +131,7 @@ export async function runProductivitySession({
   workspaceId = "default",
   attachments,
   permissionMode = "default",
+  source = "desktop",
 }: RunProductivitySessionParams): Promise<void> {
   const sdkCliPath = resolveSDKCliPath();
   const currentPrompt = text.trim();
@@ -156,7 +163,14 @@ export async function runProductivitySession({
   applyPermissionMode(profile, permissionMode);
 
   try {
-    await runAgentWithProfile(sessionId, profile, forwardEvent, attachments, workspaceId);
+    await runAgentWithProfile(
+      sessionId,
+      profile,
+      forwardEvent,
+      attachments,
+      workspaceId,
+      source
+    );
   } catch (error) {
     if (!(error instanceof MissingSdkSessionError) || !existingSDKSessionId) {
       throw error;
@@ -190,7 +204,8 @@ export async function runProductivitySession({
       recoveredProfile,
       forwardEvent,
       attachments,
-      workspaceId
+      workspaceId,
+      source
     );
   }
 }

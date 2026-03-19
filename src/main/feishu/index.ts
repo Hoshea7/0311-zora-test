@@ -3,11 +3,12 @@ import { BrowserWindow } from "electron";
 import type { AgentStreamEvent } from "../../shared/zora";
 import {
   FEISHU_IPC,
+  type FeishuAgentStatePayload,
   type FeishuBridgeStatus,
   type FeishuChatBinding,
   type FeishuChatType,
 } from "../../shared/types/feishu";
-import { isAgentRunningForSession } from "../agent";
+import { getAgentRunInfo } from "../agent";
 import { memoryAgent } from "../memory-agent";
 import { runProductivitySession } from "../productivity-runner";
 import {
@@ -103,6 +104,14 @@ export class FeishuBridge {
     }
   }
 
+  private notifyAgentStateChange(payload: FeishuAgentStatePayload): void {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(FEISHU_IPC.AGENT_STATE, payload);
+      }
+    }
+  }
+
   private createFeishuForwarder(
     sessionId: string,
     workspaceId: string
@@ -152,17 +161,20 @@ export class FeishuBridge {
     userMessageId: string
   ): Promise<void> {
     const binding = await this.binder.resolveBinding(chatId, senderId, chatType);
+    const runInfo = getAgentRunInfo(binding.sessionId);
 
-    if (
-      this.busySessions.has(binding.sessionId) ||
-      isAgentRunningForSession(binding.sessionId)
-    ) {
-      await this.sender.sendText(chatId, "⏳ Zora 正在处理上一条消息，请稍候…");
+    if (this.busySessions.has(binding.sessionId) || runInfo.running) {
+      const busyText =
+        runInfo.running && runInfo.source === "desktop"
+          ? "⏳ Zora 正在桌面端处理任务…"
+          : "⏳ Zora 正在处理上一条消息，请稍候…";
+      await this.sender.sendText(chatId, busyText, userMessageId);
       return;
     }
 
     await this.sender.onAgentStart(chatId, userMessageId, binding.sessionId);
     this.busySessions.add(binding.sessionId);
+    this.notifyAgentStateChange({ sessionId: binding.sessionId, running: true });
 
     try {
       await this.persistIncomingMessage(binding, text, userMessageId);
@@ -171,6 +183,7 @@ export class FeishuBridge {
         text,
         workspaceId: binding.workspaceId,
         permissionMode: "bypassPermissions",
+        source: "feishu",
         forwardEvent: this.createFeishuForwarder(
           binding.sessionId,
           binding.workspaceId
@@ -184,6 +197,7 @@ export class FeishuBridge {
       await this.sender.onAgentEnd(binding.sessionId, "error");
     } finally {
       this.busySessions.delete(binding.sessionId);
+      this.notifyAgentStateChange({ sessionId: binding.sessionId, running: false });
     }
   }
 }

@@ -11,6 +11,11 @@ import type {
 } from "./types/provider";
 
 export type AgentStatus = "started" | "finished" | "stopped";
+export type AgentRunSource = "desktop" | "feishu" | "awakening" | "memory";
+export interface AgentRunInfo {
+  running: boolean;
+  source?: AgentRunSource;
+}
 export type PermissionMode = "ask" | "smart" | "yolo";
 
 export interface SkillMeta {
@@ -70,6 +75,7 @@ export type AgentControlEvent =
   | {
       type: "agent_status";
       status: AgentStatus;
+      source?: AgentRunSource;
     }
   | {
       type: "agent_error";
@@ -166,6 +172,9 @@ export interface ZoraApi {
     stopBridge: () => Promise<void>;
     getStatus: () => Promise<FeishuBridgeStatus>;
     onStatusChanged: (callback: (status: FeishuBridgeStatus) => void) => () => void;
+    onAgentStateChanged: (
+      callback: (payload: { sessionId: string; running: boolean }) => void
+    ) => () => void;
   };
   chat: (
     text: string,
@@ -174,6 +183,7 @@ export interface ZoraApi {
     attachments?: FileAttachment[]
   ) => Promise<void>;
   isAgentRunning: (sessionId: string) => Promise<boolean>;
+  getAgentRunInfo: (sessionId: string) => Promise<AgentRunInfo>;
   listSkills: () => Promise<SkillMeta[]>;
   openSkillsDir: () => Promise<void>;
   openSkillDir: (dirName: string) => Promise<void>;

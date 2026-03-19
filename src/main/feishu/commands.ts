@@ -13,35 +13,23 @@ type CommandContext = {
 
 type CommandHandler = (ctx: CommandContext) => Promise<void>;
 
-function buildCard(options: {
-  title: string;
-  template: "blue" | "green" | "orange" | "indigo" | "red";
-  content: string;
-}): object {
+function buildCard(content: string): object {
   return {
     schema: "2.0",
     config: { wide_screen_mode: true },
-    header: {
-      title: { tag: "plain_text", content: options.title },
-      template: options.template,
-    },
     body: {
       elements: [
         {
           tag: "markdown",
-          content: options.content,
+          content,
         },
       ],
     },
   };
 }
 
-function buildSimpleCard(text: string): object {
-  return buildCard({
-    title: "✨ Zora",
-    template: "indigo",
-    content: text,
-  });
+function buildTextContent(text: string): string {
+  return JSON.stringify({ text });
 }
 
 async function replyWithCard(
@@ -52,27 +40,31 @@ async function replyWithCard(
   await gateway.replyMessage(messageId, "interactive", JSON.stringify(card));
 }
 
+async function replyWithText(
+  gateway: Pick<FeishuGateway, "replyMessage">,
+  messageId: string,
+  text: string
+): Promise<void> {
+  await gateway.replyMessage(messageId, "text", buildTextContent(text));
+}
+
 const COMMANDS: Record<string, CommandHandler> = {
   "/help": async (ctx) => {
     await replyWithCard(
       ctx.gateway,
       ctx.messageId,
-      buildCard({
-        title: "📖 Zora 使用帮助",
-        template: "blue",
-        content: [
-          "**可用命令：**",
+      buildCard(
+        [
+          "**📖 Zora 使用帮助**",
           "",
-          "`/new` — 创建新对话（重置当前会话上下文）",
-          "`/stop` — 中断 Zora 正在执行的任务",
-          "`/status` — 查看当前会话状态",
-          "`/help` — 显示此帮助信息",
+          "`/new` — 创建新对话",
+          "`/stop` — 中断当前任务",
+          "`/status` — 查看状态",
+          "`/help` — 显示帮助",
           "",
-          "---",
-          "",
-          "直接发送文字消息即可与 Zora 对话 ✨",
-        ].join("\n"),
-      })
+          "直接发送消息即可对话 ✨",
+        ].join("\n")
+      )
     );
   },
 
@@ -84,48 +76,24 @@ const COMMANDS: Record<string, CommandHandler> = {
 
     await ctx.binder.resetBinding(ctx.chatId, ctx.senderId);
 
-    await replyWithCard(
-      ctx.gateway,
-      ctx.messageId,
-      buildCard({
-        title: "🔄 新对话已创建",
-        template: "green",
-        content: "已创建全新对话，之前的上下文已重置。\n直接发送消息开始新的对话吧！",
-      })
-    );
+    await replyWithText(ctx.gateway, ctx.messageId, "🔄 新对话已创建，之前的上下文已重置。");
   },
 
   "/stop": async (ctx) => {
     const binding = ctx.binder.getBindingByChatId(ctx.chatId);
     if (!binding) {
-      await replyWithCard(
-        ctx.gateway,
-        ctx.messageId,
-        buildSimpleCard("当前没有活跃的对话。")
-      );
+      await replyWithText(ctx.gateway, ctx.messageId, "当前没有活跃的对话。");
       return;
     }
 
     if (!isAgentRunningForSession(binding.sessionId)) {
-      await replyWithCard(
-        ctx.gateway,
-        ctx.messageId,
-        buildSimpleCard("当前没有正在执行的任务。")
-      );
+      await replyWithText(ctx.gateway, ctx.messageId, "当前没有正在执行的任务。");
       return;
     }
 
     await stopAgentForSession(binding.sessionId);
 
-    await replyWithCard(
-      ctx.gateway,
-      ctx.messageId,
-      buildCard({
-        title: "⏹ 任务已中断",
-        template: "orange",
-        content: "已中断当前任务。你可以发送新消息继续对话。",
-      })
-    );
+    await replyWithText(ctx.gateway, ctx.messageId, "⏹ 已中断当前任务。");
   },
 
   "/status": async (ctx) => {
@@ -142,11 +110,13 @@ const COMMANDS: Record<string, CommandHandler> = {
     await replyWithCard(
       ctx.gateway,
       ctx.messageId,
-      buildCard({
-        title: "📊 当前状态",
-        template: "indigo",
-        content,
-      })
+      buildCard(
+        [
+          "**📊 当前状态**",
+          "",
+          content,
+        ].join("\n")
+      )
     );
   },
 };
