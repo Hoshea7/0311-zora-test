@@ -1,6 +1,7 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { ConversationMessage, FileAttachment } from "../../types";
 import { formatFileSize } from "../../utils/format";
+import { AttachmentImageLightbox } from "./AttachmentImageLightbox";
 
 export function ZoraAvatar() {
   return (
@@ -18,6 +19,11 @@ export function ZoraAvatar() {
 }
 
 function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) {
+  const [previewImage, setPreviewImage] = useState<{
+    alt: string;
+    src: string;
+  } | null>(null);
+
   if (!attachments || attachments.length === 0) {
     return null;
   }
@@ -33,70 +39,95 @@ function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) 
   };
 
   return (
-    <div className="flex flex-col gap-2 w-full max-w-[280px]">
-      {attachments.map((attachment) => {
-        const hasImagePreview =
-          attachment.category === "image" && Boolean(attachment.base64Data);
-        const isImagePlaceholder =
-          attachment.category === "image" && !attachment.base64Data;
-        const FileIcon = attachment.category === "image" ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <circle cx="8.5" cy="9" r="1.5" />
-            <path d="m21 15-4.5-4.5L7 20" />
-          </svg>
-        ) : attachment.category === "document" ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-            <path d="M14 2v5h5" />
-            <path d="M9 13h6M9 17h4" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-            <path d="M14 2v5h5" />
-            <path d="M9 13h6M9 17h6M9 9h1" />
-          </svg>
-        );
+    <>
+      {previewImage ? (
+        <AttachmentImageLightbox
+          alt={previewImage.alt}
+          src={previewImage.src}
+          onClose={() => setPreviewImage(null)}
+        />
+      ) : null}
 
-        return (
-          <div
-            key={attachment.id}
-            className="flex w-full items-center gap-3.5 rounded-2xl bg-[#EBE4DC] p-2 pr-4 transition-all"
-            title={attachment.name}
-          >
-            <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white shadow-sm ring-1 ring-inset ring-black/5">
-              {hasImagePreview ? (
-                <img
-                  src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
-                  alt={attachment.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="text-stone-400">
-                  {FileIcon}
+      <div className="flex w-full max-w-[250px] flex-col gap-1.5">
+        {attachments.map((attachment) => {
+          const hasImagePreview =
+            attachment.category === "image" && Boolean(attachment.base64Data);
+          const isImagePlaceholder =
+            attachment.category === "image" && !attachment.base64Data;
+          const imageSrc = hasImagePreview
+            ? `data:${attachment.mimeType};base64,${attachment.base64Data}`
+            : null;
+          const FileIcon = attachment.category === "image" ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <circle cx="8.5" cy="9" r="1.5" />
+              <path d="m21 15-4.5-4.5L7 20" />
+            </svg>
+          ) : attachment.category === "document" ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
+              <path d="M14 2v5h5" />
+              <path d="M9 13h6M9 17h4" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
+              <path d="M14 2v5h5" />
+              <path d="M9 13h6M9 17h6M9 9h1" />
+            </svg>
+          );
+
+          return (
+            <div
+              key={attachment.id}
+              className="flex w-full items-center gap-2.5 rounded-[18px] bg-[#EBE4DC] p-1.5 pr-3 transition-all"
+              title={attachment.name}
+            >
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[12px] bg-white shadow-sm ring-1 ring-inset ring-black/5">
+                {imageSrc ? (
+                  <button
+                    type="button"
+                    className="h-full w-full cursor-zoom-in"
+                    onClick={() =>
+                      setPreviewImage({
+                        alt: attachment.name,
+                        src: imageSrc,
+                      })
+                    }
+                    title={`查看图片 ${attachment.name}`}
+                  >
+                    <img
+                      src={imageSrc}
+                      alt={attachment.name}
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ) : (
+                  <div className="text-stone-400">
+                    {FileIcon}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex min-w-0 flex-col justify-center">
+                <div className="truncate text-[13px] font-medium leading-snug text-stone-900">
+                  {truncateAttachmentName(attachment.name, 20)}
                 </div>
-              )}
-            </div>
-
-            <div className="flex min-w-0 flex-col justify-center">
-              <div className="truncate text-[14px] font-medium leading-snug text-stone-900">
-                {truncateAttachmentName(attachment.name, 22)}
-              </div>
-              <div className="mt-0.5 text-[12px] leading-tight text-stone-500">
-                {isImagePlaceholder
-                  ? `图片过大 • ${formatFileSize(attachment.size)}`
-                  : `${attachment.category === "image"
-                      ? "Image"
-                      : attachment.category === "document"
-                        ? "PDF"
-                        : "Text"} • ${formatFileSize(attachment.size)}`}
+                <div className="mt-0.5 text-[11px] leading-tight text-stone-500">
+                  {isImagePlaceholder
+                    ? `图片过大 • ${formatFileSize(attachment.size)}`
+                    : `${attachment.category === "image"
+                        ? "Image"
+                        : attachment.category === "document"
+                          ? "PDF"
+                          : "Text"} • ${formatFileSize(attachment.size)}`}
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
