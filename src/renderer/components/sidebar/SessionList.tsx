@@ -63,18 +63,14 @@ export function SessionList() {
     <div
       key={session.id}
       className={cn(
-        "group relative flex items-center gap-2 rounded-xl px-3 py-2.5 backdrop-blur-[2px] transition",
-        "ring-1 ring-inset",
-        "before:pointer-events-none before:absolute before:bottom-2.5 before:left-1 before:top-2.5 before:w-[2px] before:rounded-full before:transition-opacity",
+        "group relative flex items-center gap-2 rounded-[15px] border px-3 py-2 transition-all duration-200",
         currentSessionId === session.id
           ? cn(
-              "bg-white/70 ring-stone-200/80 shadow-sm shadow-stone-900/5",
-              "before:bg-stone-900/35 before:opacity-100"
+              "border-stone-200/80 bg-white shadow-[0_2px_10px_rgba(28,25,23,0.05)]"
             )
           : cn(
-              "bg-transparent ring-transparent",
-              "hover:bg-white/55 hover:ring-stone-200/70",
-              "before:bg-stone-900/15 before:opacity-0 hover:before:opacity-100"
+              "border-transparent bg-transparent",
+              "hover:border-stone-200/55 hover:bg-white/50"
             )
       )}
       onMouseEnter={() => setHoveredId(session.id)}
@@ -102,22 +98,22 @@ export function SessionList() {
         }}
         className={cn(
           "flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left",
-          "rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+          "rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
         )}
       >
-        <div className="flex h-5 w-5 items-center justify-center">
+        <div className="flex h-4 w-4 items-center justify-center">
           {runningSessions.has(session.id) ? (
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400/80 opacity-75"></span>
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-500 ring-1 ring-inset ring-sky-600/20"></span>
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400/70 opacity-75"></span>
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-500"></span>
             </span>
           ) : (
             <div
               className={cn(
-                "h-2 w-2 rounded-full border-2",
+                "h-2 w-2 rounded-full border",
                 currentSessionId === session.id
-                  ? "border-stone-500/70"
-                  : "border-stone-300/80 group-hover:border-stone-400/70"
+                  ? "border-orange-500 bg-orange-500"
+                  : "border-stone-300/90 group-hover:border-stone-400/80"
               )}
             ></div>
           )}
@@ -153,15 +149,15 @@ export function SessionList() {
             <>
               <div
                 className={cn(
-                  "truncate text-sm",
+                  "truncate text-[13px]",
                   currentSessionId === session.id
-                    ? "font-semibold text-stone-900"
-                    : "font-medium text-stone-800"
+                    ? "font-medium text-stone-900"
+                    : "font-normal text-stone-700 group-hover:text-stone-900"
                 )}
               >
                 {session.title}
               </div>
-              <div className="mt-0.5 text-[11px] leading-4 text-stone-500">
+              <div className="mt-0.5 text-[11px] leading-none text-stone-400">
                 {new Date(session.createdAt).toLocaleString("zh-CN", {
                   month: "numeric",
                   day: "numeric",
@@ -191,17 +187,16 @@ export function SessionList() {
                 <button
                   type="button"
                   className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-xl transition",
-                    "text-stone-400 ring-1 ring-inset ring-transparent",
-                    "hover:bg-white/60 hover:text-stone-700 hover:ring-stone-200/70",
+                    "flex h-6 w-6 items-center justify-center rounded-lg text-stone-400 opacity-0 transition",
+                    "group-hover:opacity-100 hover:bg-stone-900/[0.05] hover:text-stone-700",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10",
                     menuOpenId === session.id &&
-                      "bg-white/80 text-stone-800 ring-stone-200/80 shadow-sm shadow-stone-900/5"
+                      "bg-white/80 text-stone-800 opacity-100 ring-1 ring-stone-200/70 shadow-sm shadow-stone-900/5"
                   )}
                   aria-label={`打开${session.title}的操作菜单`}
                 >
                   <svg
-                    className="h-4 w-4"
+                    className="h-3.5 w-3.5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -263,20 +258,20 @@ export function SessionList() {
   );
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-0">
       {/* 置顶会话 */}
       {groupedSessions.pinned.length > 0 && (
-        <div className="space-y-1.5">{groupedSessions.pinned.map(renderSession)}</div>
+        <div className="space-y-0">{groupedSessions.pinned.map(renderSession)}</div>
       )}
 
       {/* 今天的会话 */}
       {groupedSessions.today.length > 0 && (
-        <div className="space-y-1.5">{groupedSessions.today.map(renderSession)}</div>
+        <div className="space-y-0">{groupedSessions.today.map(renderSession)}</div>
       )}
 
       {/* 更早的会话 */}
       {groupedSessions.earlier.length > 0 && (
-        <div className="space-y-1.5">{groupedSessions.earlier.map(renderSession)}</div>
+        <div className="space-y-0">{groupedSessions.earlier.map(renderSession)}</div>
       )}
     </div>
   );

@@ -9,22 +9,24 @@ import { UserMessage, ZoraAvatar } from "./UserMessage";
 
 function PendingAssistantRow() {
   return (
-    <div className="mr-auto mt-8 flex w-full max-w-[95%] items-start gap-4">
+    <div className="mr-auto mt-8 flex w-full items-start gap-4">
       <div className="mt-1 flex w-8 shrink-0 justify-center">
         <ZoraAvatar />
       </div>
       <div className="flex-1 overflow-hidden">
-        <div className="mb-2 mt-0.5 flex items-center gap-2">
-          <span className="text-[14px] font-semibold tracking-tight text-stone-800">Zora</span>
-          <span className="mt-[2px] text-[11px] font-medium text-stone-400">
-            {new Date().toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })}
-          </span>
+        <div className="max-w-[980px]">
+          <div className="mb-2 mt-0.5 flex items-center gap-2">
+            <span className="text-[14px] font-semibold tracking-tight text-stone-800">Zora</span>
+            <span className="mt-[2px] text-[11px] font-medium text-stone-400">
+              {new Date().toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })}
+            </span>
+          </div>
+          <BouncingDots />
         </div>
-        <BouncingDots />
       </div>
     </div>
   );
@@ -107,7 +109,7 @@ export function MessageList() {
         }}
         className="h-full w-full overflow-y-auto px-5 py-5 sm:px-8 custom-scrollbar overscroll-none"
       >
-        <div className="mx-auto flex max-w-4xl flex-col pb-4">
+        <div className="mx-auto flex max-w-[1380px] flex-col pb-4">
           {messages.map((message) =>
             message.role === "user" ? (
               <UserMessage key={message.id} message={message} />

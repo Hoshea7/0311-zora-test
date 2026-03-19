@@ -42,7 +42,7 @@ export function ProcessCollapsible({
         onClick={() =>
           setUserExpanded((current) => (current === null ? !expanded : !current))
         }
-        className="mx-[-6px] flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-stone-500 transition-colors duration-200 hover:bg-stone-50/80 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="flex w-full items-center gap-2 rounded-md py-1 text-left text-stone-500 transition-colors duration-200 hover:bg-stone-50/80 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -53,7 +53,7 @@ export function ProcessCollapsible({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
 
-        <span className="min-w-0 flex-1 truncate text-[13px] text-stone-500">
+        <span className="min-w-0 flex-1 truncate pr-3 text-[13px] text-stone-500">
           {summaryText}
         </span>
 

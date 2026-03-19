@@ -18,9 +18,8 @@ export function SidebarFooter() {
   }, [loadSkills]);
 
   return (
-    <div className="space-y-3 border-stone-900/8 pt-4">
-      {/* MCP 和 Skills 状态 */}
-      <div className="flex items-center gap-4 px-3 text-xs text-stone-500">
+    <div className="space-y-4 pt-1">
+      <div className="flex items-center gap-3 px-1 text-[12px] text-stone-500">
         <div className="flex items-center gap-1.5">
           <svg
             className="h-3.5 w-3.5"
@@ -37,6 +36,7 @@ export function SidebarFooter() {
           </svg>
           <span>0 MCP</span>
         </div>
+        <span className="h-1 w-1 rounded-full bg-stone-300"></span>
         <div className="flex items-center gap-1.5">
           <svg
             className="h-3.5 w-3.5"
@@ -55,12 +55,13 @@ export function SidebarFooter() {
         </div>
       </div>
 
-      {/* 设置按钮 */}
       <button
         type="button"
         onClick={() => setSettingsOpen(true)}
-        className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[13px] transition ${
-          isSettingsOpen ? "bg-stone-200/50 text-stone-900 font-medium" : "hover:bg-stone-900/[0.04] text-stone-600"
+        className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
+          isSettingsOpen
+            ? "bg-white/70 font-medium text-stone-900 shadow-[0_2px_8px_rgba(28,25,23,0.04)] ring-1 ring-stone-200/70"
+            : "text-stone-600 hover:bg-white/45 hover:text-stone-900"
         }`}
       >
         <svg

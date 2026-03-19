@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom, useAtomValue } from "jotai";
-import { isSettingsOpenAtom, sidebarCollapsedAtom } from "../../store/ui";
+import {
+  isSettingsOpenAtom,
+  sidebarCollapsedAtom,
+  sidebarWidthAtom,
+} from "../../store/ui";
 import {
   createWorkspaceAtom,
   currentWorkspaceAtom,
@@ -15,8 +19,14 @@ import { getErrorMessage } from "../../utils/message";
 import { SessionList } from "../sidebar/SessionList";
 import { SidebarFooter } from "../sidebar/SidebarFooter";
 
+const COLLAPSED_SIDEBAR_WIDTH = 52;
+const DEFAULT_SIDEBAR_WIDTH = 392;
+const MIN_SIDEBAR_WIDTH = 304;
+const MAX_SIDEBAR_WIDTH = 520;
+
 export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
+  const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [workspaces] = useAtom(workspacesAtom);
@@ -33,7 +43,10 @@ export function LeftSidebar() {
   const [workspacePath, setWorkspacePath] = useState("");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isSubmittingWorkspace, setIsSubmittingWorkspace] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH);
 
   useEffect(() => {
     void loadWorkspaces().catch((error) => {
@@ -69,8 +82,51 @@ export function LeftSidebar() {
     };
   }, [isCreateModalOpen]);
 
+  useEffect(() => {
+    if (!isResizing) {
+      return;
+    }
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextWidth =
+        resizeStartWidthRef.current + (event.clientX - resizeStartXRef.current);
+
+      setSidebarWidth(
+        Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, nextWidth))
+      );
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing, setSidebarWidth]);
+
   const toggleSidebar = () => {
     setCollapsed(!collapsed);
+  };
+
+  const handleResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsWorkspaceMenuOpen(false);
+    resizeStartXRef.current = event.clientX;
+    resizeStartWidthRef.current = sidebarWidth;
+    setIsResizing(true);
   };
 
   const resetWorkspaceForm = () => {
@@ -151,216 +207,59 @@ export function LeftSidebar() {
 
   return (
     <>
-      <aside
+      <div
         className={cn(
-          "relative flex h-full flex-col overflow-hidden border-r border-stone-200/50 bg-[#f5f3f0] text-stone-900 shadow-sm transition-[width] duration-300 z-40",
-          collapsed ? "w-12" : "w-[260px]"
+          "group/sidebar relative z-40 h-full shrink-0",
+          !isResizing && "transition-[width] duration-200 ease-out"
         )}
+        style={{ width: collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
-        <div className="titlebar-drag-region h-[50px] shrink-0 bg-transparent" />
+        <aside className="relative flex h-full w-full flex-col overflow-hidden border-r border-stone-200/60 bg-[#f7f4ef] text-stone-900 shadow-sm">
+          <div className="titlebar-drag-region h-[50px] shrink-0 bg-transparent" />
 
-        <div className="titlebar-no-drag flex min-h-0 flex-1 flex-col">
-        {!collapsed ? (
-          <>
-            <div className="px-3 pb-2 pt-3">
-              <div className="flex items-start justify-between gap-1">
-                <div ref={menuRef} className="relative min-w-0 flex-1">
-                  <button
-                    type="button"
-                    className={cn(
-                      "group w-full rounded-lg px-2 py-1.5 text-left",
-                      "transition hover:bg-stone-200/60",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
-                    )}
-                    onClick={() => setIsWorkspaceMenuOpen((current) => !current)}
-                    aria-haspopup="menu"
-                    aria-expanded={isWorkspaceMenuOpen}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-stone-200/50 text-stone-600 transition group-hover:bg-stone-300/50">
-                          <svg
-                            className="h-[15px] w-[15px]"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                            />
-                          </svg>
-                        </div>
-
+          <div className="titlebar-no-drag flex min-h-0 flex-1 flex-col">
+          {!collapsed ? (
+            <>
+              <div className="px-4 pb-2 pt-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div ref={menuRef} className="relative min-w-0 flex-1">
+                    <button
+                      type="button"
+                      className={cn(
+                        "group w-full rounded-2xl px-1.5 py-1 text-left",
+                        "transition hover:bg-white/45",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+                      )}
+                      onClick={() => setIsWorkspaceMenuOpen((current) => !current)}
+                      aria-haspopup="menu"
+                      aria-expanded={isWorkspaceMenuOpen}
+                    >
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="truncate text-sm font-semibold text-stone-900">
+                            <span className="truncate text-[15px] font-semibold tracking-tight text-stone-900">
                               {currentWorkspace?.name ?? "加载工作区..."}
                             </span>
                             {currentWorkspace?.id === "default" && (
-                              <span className="rounded bg-stone-200/50 px-1.5 py-0.5 text-[10px] font-medium text-stone-600">
+                              <span className="rounded-full border border-stone-200/80 bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-stone-500">
                                 默认
                               </span>
                             )}
                           </div>
                           <div
-                            className="truncate text-[11px] leading-tight text-stone-500"
+                            className="mt-1 truncate text-[12px] leading-tight text-stone-400"
                             title={currentWorkspace?.path}
                           >
                             {currentWorkspace?.path ?? "正在读取..."}
                           </div>
                         </div>
-                      </div>
 
-                      <svg
-                        className={cn(
-                          "h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform duration-200",
-                          isWorkspaceMenuOpen && "rotate-180"
-                        )}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                    </div>
-                  </button>
-
-                  {isWorkspaceMenuOpen && (
-                    <div
-                      className={cn(
-                        "absolute left-0 right-[-10px] top-[calc(100%+4px)] z-50 overflow-hidden",
-                        "rounded-xl bg-white shadow-xl ring-1 ring-black/5"
-                      )}
-                      role="menu"
-                    >
-                      <div className="border-b border-stone-100 px-3 py-2.5">
-                        <div className="text-xs font-semibold text-stone-900">
-                          工作区
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-stone-500">
-                          切换将自动加载对应会话列表
-                        </div>
-                      </div>
-
-                      <div className="max-h-[280px] overflow-y-auto p-1.5">
-                        {workspaces.map((workspace) => {
-                          const isActive = workspace.id === currentWorkspace?.id;
-                          const isDefaultWorkspace = workspace.id === "default";
-
-                          return (
-                            <div
-                              key={workspace.id}
-                              className={cn(
-                                "group relative flex items-center justify-between rounded-lg px-2 py-2 transition",
-                                isActive ? "bg-stone-50" : "hover:bg-stone-100/60"
-                              )}
-                            >
-                              <button
-                                type="button"
-                                className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none"
-                                onClick={() => void handleSwitchWorkspace(workspace.id)}
-                                aria-current={isActive ? "true" : undefined}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={cn(
-                                      "truncate text-sm",
-                                      isActive ? "font-semibold text-stone-900" : "font-medium text-stone-700"
-                                    )}
-                                  >
-                                    {workspace.name}
-                                  </span>
-                                  {isDefaultWorkspace && (
-                                    <span className="rounded bg-stone-200/40 px-1.5 py-0.5 text-[10px] font-medium text-stone-600">
-                                      默认
-                                    </span>
-                                  )}
-                                </div>
-                                <div
-                                  className="mt-0.5 truncate text-[11px] text-stone-500"
-                                  title={workspace.path}
-                                >
-                                  {workspace.path}
-                                </div>
-                              </button>
-
-                              <div className="flex shrink-0 items-center gap-1 pl-2">
-                                {isActive && (
-                                  <svg
-                                    className="h-4 w-4 text-stone-900"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                    aria-hidden="true"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2.5}
-                                      d="M5 13l4 4L19 7"
-                                    />
-                                  </svg>
-                                )}
-
-                                {!isDefaultWorkspace && (
-                                  <button
-                                    type="button"
-                                    className={cn(
-                                      "rounded p-1 text-stone-400 opacity-0 transition",
-                                      "group-hover:opacity-100 hover:bg-red-50 hover:text-red-600",
-                                      "focus-visible:opacity-100 focus-visible:outline-none"
-                                    )}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleDeleteWorkspace(workspace.id, workspace.name);
-                                    }}
-                                    aria-label={`删除工作区 ${workspace.name}`}
-                                  >
-                                    <svg
-                                      className="h-3.5 w-3.5"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-7 0h8"
-                                      />
-                                    </svg>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="border-t border-stone-100 p-1.5">
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-medium text-stone-700",
-                            "transition hover:bg-stone-100/60",
-                            "focus-visible:outline-none"
-                          )}
-                          onClick={() => {
-                            setIsWorkspaceMenuOpen(false);
-                            setIsCreateModalOpen(true);
-                            setWorkspaceError(null);
-                          }}
-                        >
+                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-stone-400 transition group-hover:bg-stone-900/[0.05] group-hover:text-stone-600">
                           <svg
-                            className="h-4 w-4 text-stone-500"
+                            className={cn(
+                              "h-3.5 w-3.5 transition-transform duration-200",
+                              isWorkspaceMenuOpen && "rotate-180"
+                            )}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -369,27 +268,239 @@ export function LeftSidebar() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M12 4v16m8-8H4"
+                              d="M19 9l-7 7-7-7"
                             />
                           </svg>
-                          新建工作区
-                        </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
+                    </button>
 
+                    {isWorkspaceMenuOpen && (
+                      <div
+                        className={cn(
+                          "absolute left-0 right-[-12px] top-[calc(100%+6px)] z-50 overflow-hidden",
+                          "rounded-2xl bg-white/95 shadow-[0_18px_60px_rgba(28,25,23,0.16)] ring-1 ring-stone-200/70 backdrop-blur-md"
+                        )}
+                        role="menu"
+                      >
+                        <div className="border-b border-stone-100 px-3 py-2.5">
+                          <div className="text-xs font-semibold text-stone-900">
+                            工作区
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-stone-500">
+                            切换将自动加载对应会话列表
+                          </div>
+                        </div>
+
+                        <div className="max-h-[280px] overflow-y-auto p-1.5">
+                          {workspaces.map((workspace) => {
+                            const isActive = workspace.id === currentWorkspace?.id;
+                            const isDefaultWorkspace = workspace.id === "default";
+
+                            return (
+                              <div
+                                key={workspace.id}
+                                className={cn(
+                                  "group relative flex items-center justify-between rounded-lg px-2 py-2 transition",
+                                  isActive ? "bg-stone-50" : "hover:bg-stone-100/60"
+                                )}
+                              >
+                                <button
+                                  type="button"
+                                  className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none"
+                                  onClick={() => void handleSwitchWorkspace(workspace.id)}
+                                  aria-current={isActive ? "true" : undefined}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={cn(
+                                        "truncate text-sm",
+                                        isActive ? "font-semibold text-stone-900" : "font-medium text-stone-700"
+                                      )}
+                                    >
+                                      {workspace.name}
+                                    </span>
+                                    {isDefaultWorkspace && (
+                                      <span className="rounded bg-stone-200/40 px-1.5 py-0.5 text-[10px] font-medium text-stone-600">
+                                        默认
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div
+                                    className="mt-0.5 truncate text-[11px] text-stone-500"
+                                    title={workspace.path}
+                                  >
+                                    {workspace.path}
+                                  </div>
+                                </button>
+
+                                <div className="flex shrink-0 items-center gap-1 pl-2">
+                                  {isActive && (
+                                    <svg
+                                      className="h-4 w-4 text-stone-900"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2.5}
+                                        d="M5 13l4 4L19 7"
+                                      />
+                                    </svg>
+                                  )}
+
+                                  {!isDefaultWorkspace && (
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "rounded p-1 text-stone-400 opacity-0 transition",
+                                        "group-hover:opacity-100 hover:bg-red-50 hover:text-red-600",
+                                        "focus-visible:opacity-100 focus-visible:outline-none"
+                                      )}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleDeleteWorkspace(workspace.id, workspace.name);
+                                      }}
+                                      aria-label={`删除工作区 ${workspace.name}`}
+                                    >
+                                      <svg
+                                        className="h-3.5 w-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-7 0h8"
+                                        />
+                                      </svg>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="border-t border-stone-100 p-1.5">
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-medium text-stone-700",
+                              "transition hover:bg-stone-100/60",
+                              "focus-visible:outline-none"
+                            )}
+                            onClick={() => {
+                              setIsWorkspaceMenuOpen(false);
+                              setIsCreateModalOpen(true);
+                              setWorkspaceError(null);
+                            }}
+                          >
+                            <svg
+                              className="h-4 w-4 text-stone-500"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 4v16m8-8H4"
+                              />
+                            </svg>
+                            新建工作区
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={toggleSidebar}
+                    className={cn(
+                      "mt-1 shrink-0 rounded-xl p-2 text-stone-400",
+                      "transition hover:bg-stone-900/[0.05] hover:text-stone-700",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+                    )}
+                    title="折叠侧边栏"
+                  >
+                    <svg
+                      className="h-[18px] w-[18px]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <rect width="18" height="18" x="3" y="3" rx="2" strokeWidth={2} />
+                      <path
+                        d="M9 3v18"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="group flex items-center justify-between px-4 pb-2 pt-2">
+                <h2 className="text-[11px] font-medium text-stone-500">
+                  会话
+                </h2>
                 <button
-                  onClick={toggleSidebar}
+                  onClick={handleNewChat}
                   className={cn(
-                    "mt-1 shrink-0 rounded-lg p-1.5 text-stone-400",
-                    "transition hover:bg-stone-200/60 hover:text-stone-700",
+                    "rounded-lg p-1.5 text-stone-400 opacity-0",
+                    "transition group-hover:opacity-100 hover:bg-stone-900/[0.05] hover:text-stone-900",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
                   )}
-                  title="折叠侧边栏"
+                  title="新建会话"
                 >
                   <svg
                     className="h-[18px] w-[18px]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-3 pb-4 pt-1">
+                <SessionList />
+              </div>
+
+              <div className="mt-auto bg-gradient-to-t from-[#f7f4ef] via-[#f7f4ef] to-transparent px-4 pb-4 pt-5">
+                <SidebarFooter />
+              </div>
+            </>
+          ) : (
+              <div className="flex h-full flex-col justify-between px-0 py-4 pt-3">
+                <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={toggleSidebar}
+                  className={cn(
+                    "rounded-xl p-2 text-stone-500",
+                    "transition hover:bg-stone-900/[0.05] hover:text-stone-800",
+                    "focus-visible:outline-none"
+                  )}
+                  title={`展开侧边栏${
+                    currentWorkspace ? `（当前：${currentWorkspace.name}）` : ""
+                  }`}
+                >
+                  <svg
+                    className="h-5 w-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -403,160 +514,109 @@ export function LeftSidebar() {
                     />
                   </svg>
                 </button>
+
+                <button
+                  onClick={handleNewChat}
+                  className={cn(
+                    "rounded-xl p-2 text-stone-500",
+                    "transition hover:bg-stone-900/[0.05] hover:text-stone-900",
+                    "focus-visible:outline-none"
+                  )}
+                  title="新建会话"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mb-2 flex flex-col items-center gap-2">
+                <button
+                  className={cn(
+                    "mx-auto rounded-xl p-2 text-stone-500",
+                    "transition hover:bg-stone-900/[0.05] hover:text-stone-800",
+                    "focus-visible:outline-none"
+                  )}
+                  title={currentWorkspace?.path ?? "当前工作区"}
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  className={cn(
+                    "rounded-xl p-2 transition",
+                    isSettingsOpen
+                      ? "bg-stone-900/[0.08] text-stone-700"
+                      : "text-stone-400 hover:bg-stone-900/[0.05] hover:text-stone-600"
+                  )}
+                  title="设置"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center justify-between px-4 pb-2 pt-3">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-                会话
-              </h2>
-              <button
-                onClick={handleNewChat}
-                className={cn(
-                  "rounded-md p-1.5 text-stone-500",
-                  "transition hover:bg-stone-200/60 hover:text-stone-900",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
-                )}
-                title="新建会话"
-              >
-                <svg
-                  className="h-[18px] w-[18px]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-3 py-1">
-              <SessionList />
-            </div>
-
-            <div className="border-t border-stone-200/50 p-3">
-              <SidebarFooter />
-            </div>
-          </>
-        ) : (
-            <div className="flex h-full flex-col justify-between px-0 py-4 pt-3">
-              <div className="flex flex-col items-center gap-3">
-              <button
-                onClick={toggleSidebar}
-                className={cn(
-                  "rounded-lg p-2 text-stone-500",
-                  "transition hover:bg-stone-200/60 hover:text-stone-800",
-                  "focus-visible:outline-none"
-                )}
-                title={`展开侧边栏${
-                  currentWorkspace ? `（当前：${currentWorkspace.name}）` : ""
-                }`}
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <rect width="18" height="18" x="3" y="3" rx="2" strokeWidth={2} />
-                  <path
-                    d="M9 3v18"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-
-              <button
-                onClick={handleNewChat}
-                className={cn(
-                  "rounded-lg p-2 text-stone-500",
-                  "transition hover:bg-stone-200/60 hover:text-stone-900",
-                  "focus-visible:outline-none"
-                )}
-                title="新建会话"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div className="mb-2 flex flex-col items-center gap-2">
-              <button
-                className={cn(
-                  "mx-auto rounded-lg p-2 text-stone-500",
-                  "transition hover:bg-stone-200/60 hover:text-stone-800",
-                  "focus-visible:outline-none"
-                )}
-                title={currentWorkspace?.path ?? "当前工作区"}
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                  />
-                </svg>
-              </button>
-
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className={cn(
-                  "rounded-lg p-2 transition",
-                  isSettingsOpen
-                    ? "bg-stone-200 text-stone-700"
-                    : "text-stone-400 hover:bg-stone-200/50 hover:text-stone-600"
-                )}
-                title="设置"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              </button>
-            </div>
+          )}
           </div>
-        )}
-        </div>
-      </aside>
+        </aside>
+
+        {!collapsed ? (
+          <div
+            className="titlebar-no-drag absolute inset-y-0 right-0 z-50 w-3 translate-x-1/2 cursor-col-resize"
+            onMouseDown={handleResizeStart}
+            title="拖拽调整侧边栏宽度"
+          >
+            <div
+              className={cn(
+                "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full transition-colors duration-150",
+                isResizing
+                  ? "bg-orange-400/80"
+                  : "bg-transparent group-hover/sidebar:bg-stone-300/90"
+              )}
+            />
+          </div>
+        ) : null}
+      </div>
 
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-stone-900/20 backdrop-blur-sm transition-opacity">

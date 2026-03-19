@@ -103,7 +103,7 @@ export function MainArea() {
       </div>
 
       <footer className="titlebar-no-drag shrink-0 bg-white px-6 py-4">
-        <div className="mx-auto w-full max-w-4xl">
+        <div className="mx-auto w-full max-w-[1380px]">
           <PermissionBanner />
           <AskUserBanner />
           <ChatInput onSubmit={handleSubmit} onStop={handleStop} />
