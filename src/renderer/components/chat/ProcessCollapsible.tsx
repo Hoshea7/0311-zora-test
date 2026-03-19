@@ -53,7 +53,7 @@ export function ProcessCollapsible({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
 
-        <span className="min-w-0 flex-1 truncate pr-3 text-[13px] text-stone-500">
+        <span className="min-w-0 max-w-[560px] truncate text-[13px] text-stone-500">
           {summaryText}
         </span>
 
@@ -65,13 +65,13 @@ export function ProcessCollapsible({
         ) : null}
 
         {turnCompletedAt ? (
-          <span className="ml-auto shrink-0 text-[11px] text-stone-300">
+          <span className="shrink-0 pl-2 text-[11px] text-stone-300">
             {formatDuration(turnCompletedAt - turnStartedAt)}
           </span>
         ) : isStreaming ? (
           <ElapsedTimer
             startedAt={turnStartedAt}
-            className="ml-auto shrink-0 text-[11px] text-stone-300"
+            className="shrink-0 pl-2 text-[11px] text-stone-300"
           />
         ) : null}
       </button>

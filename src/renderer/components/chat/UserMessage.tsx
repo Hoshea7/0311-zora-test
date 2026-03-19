@@ -144,7 +144,7 @@ export const UserMessage = memo(function UserMessage({
 
       {message.text ? (
         <div className="rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all max-w-full">
-          <div className="whitespace-pre-wrap text-[15px] leading-[1.6] font-normal">
+          <div className="whitespace-pre-wrap text-[14.5px] leading-[1.62] font-normal">
             {message.text}
           </div>
         </div>

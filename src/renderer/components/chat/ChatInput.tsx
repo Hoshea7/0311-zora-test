@@ -450,7 +450,7 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
           placeholder={
             isFeishuRunning ? "飞书端运行中…" : "给 Zora 发消息… Enter 发送，Shift+Enter 换行"
           }
-          className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[15px] leading-[1.6] outline-none placeholder:text-stone-400 custom-scrollbar ${
+          className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[14.5px] leading-[1.62] outline-none placeholder:text-stone-400 custom-scrollbar ${
             isFeishuRunning ? "cursor-not-allowed text-stone-400" : "text-stone-900"
           }`}
           rows={1}

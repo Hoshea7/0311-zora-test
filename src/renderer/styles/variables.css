@@ -1,15 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  /* ============================================
+   * Zora Design System — Tailwind v4 Theme Tokens
+   * ============================================ */
+
+  /* --- Typography Scale --- */
+  --font-family-sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-family-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+
+  --font-size-2xs: 9px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 22px;
+  --font-size-4xl: 24px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  /* --- Spacing Scale --- */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+
+  /* --- Border Radius --- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-full: 9999px;
+
+  /* --- Transitions --- */
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 200ms;
+  --transition-duration-slow: 300ms;
+  --transition-duration-slower: 500ms;
+  --transition-duration-slowest: 600ms;
+  --transition-duration-700: 700ms;
+  --transition-duration-1000: 1000ms;
+
+  /* --- Shadows --- */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 8px 24px rgb(0 0 0 / 0.12);
+
+  /* --- Zora Brand Colors --- */
+  --color-brand: #c97849;
+  --color-brand-muted: #e8c4a0;
+}
+
 :root {
   /* 布局尺寸 */
   --sidebar-width: 240px;
   --sidebar-collapsed-width: 48px;
-
-  /* 圆角 */
-  --radius-list-item: 10px;
-  --radius-input: 17px;
-  --radius-card: 22px;
-
-  /* 字体大小 */
-  --text-sidebar: 13px;
 
   /* 交互状态背景色 */
   --hover-bg: rgba(28, 25, 23, 0.04);

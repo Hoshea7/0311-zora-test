@@ -1,6 +1,25 @@
-@import "tailwindcss";
 @import "./variables.css";
 
+/* ============================================
+ * Zora Design System — Utility Classes
+ * ============================================ */
+
+/* Focus Ring — 统一所有 focus-visible 样式 */
+@utility focus-ring {
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-ring);
+  }
+}
+
+@utility focus-ring-sm {
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-background), 0 0 0 3px var(--color-ring);
+  }
+}
+
+/* Custom Scrollbar */
 @utility custom-scrollbar {
   &::-webkit-scrollbar {
     width: 6px;
@@ -20,11 +39,10 @@
 
 :root {
   color-scheme: light;
-  font-family:
-    "Avenir Next",
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-family-sans);
   background: #f8f1e3;
+  --color-ring: rgb(168 162 158 / 0.5);
+  --color-background: #ffffff;
 }
 
 * {
@@ -105,9 +123,5 @@ body {
 
 .animate-fade-out {
   animation: fade-out 0.4s ease-out both;
-}
-
-.duration-600 {
-  transition-duration: 600ms;
 }
 

@@ -20,9 +20,9 @@ import { SessionList } from "../sidebar/SessionList";
 import { SidebarFooter } from "../sidebar/SidebarFooter";
 
 const COLLAPSED_SIDEBAR_WIDTH = 52;
-const DEFAULT_SIDEBAR_WIDTH = 392;
 const MIN_SIDEBAR_WIDTH = 304;
 const MAX_SIDEBAR_WIDTH = 520;
+const DEFAULT_SIDEBAR_WIDTH = MIN_SIDEBAR_WIDTH;
 
 export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
@@ -247,7 +247,7 @@ export function LeftSidebar() {
                             )}
                           </div>
                           <div
-                            className="mt-1 truncate text-[12px] leading-tight text-stone-400"
+                            className="mt-1 truncate text-[12.5px] leading-tight text-stone-400"
                             title={currentWorkspace?.path}
                           >
                             {currentWorkspace?.path ?? "正在读取..."}
@@ -449,7 +449,7 @@ export function LeftSidebar() {
               </div>
 
               <div className="group flex items-center justify-between px-4 pb-2 pt-2">
-                <h2 className="text-[11px] font-medium text-stone-500">
+                <h2 className="text-[12px] font-medium tracking-[0.01em] text-stone-500">
                   会话
                 </h2>
                 <button

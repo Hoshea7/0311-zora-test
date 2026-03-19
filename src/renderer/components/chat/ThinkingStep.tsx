@@ -58,15 +58,13 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
         <span className="font-medium">Thinking</span>
 
         {!isOpen ? (
-          <span className="ml-1 min-w-0 flex-1 truncate text-stone-300" title={previewText}>
+          <span className="ml-1 min-w-0 max-w-[460px] truncate text-stone-300" title={previewText}>
             {previewText}
           </span>
-        ) : (
-          <span className="flex-1" />
-        )}
+        ) : null}
 
         {duration ? (
-          <span className="ml-auto flex-shrink-0 text-stone-300">{duration}</span>
+          <span className="flex-shrink-0 pl-2 text-stone-300">{duration}</span>
         ) : null}
       </button>
 

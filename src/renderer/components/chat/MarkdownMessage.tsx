@@ -755,7 +755,7 @@ const FullMarkdown = memo(function FullMarkdown({ content }: { content: string }
   const blocks = useMemo(() => splitMarkdownIntoBlocks(content), [content]);
 
   return (
-    <div className="min-w-0 text-[15px] text-stone-800">
+    <div className="min-w-0 text-[14.5px] text-stone-800">
       {blocks.map((block, index) => (
         <MarkdownBlock key={`${index}-${block.slice(0, 20)}`} block={block} />
       ))}

@@ -42,19 +42,19 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
         <span className="text-[12px] font-medium text-stone-600">{displayToolName}</span>
 
         {showSummary ? (
-          <span className="max-w-[300px] truncate text-[12px] text-stone-400">
+          <span className="max-w-[360px] truncate text-[12px] text-stone-400">
             · {summaryText}
           </span>
         ) : null}
 
         {tool.completedAt ? (
-          <span className="ml-auto shrink-0 text-[11px] text-stone-300">
+          <span className="shrink-0 pl-2 text-[11px] text-stone-300">
             {formatDuration(tool.completedAt - tool.startedAt)}
           </span>
         ) : tool.status === "running" ? (
           <ElapsedTimer
             startedAt={tool.startedAt}
-            className="ml-auto shrink-0 text-[11px] text-stone-300"
+            className="shrink-0 pl-2 text-[11px] text-stone-300"
           />
         ) : null}
       </button>

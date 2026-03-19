@@ -59,7 +59,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               {bodySegments.map((segment, index) => (
                 <div
                   key={segment.id}
-                  className="break-words text-[15px] leading-[1.7] text-stone-800"
+                  className="break-words text-[14.5px] leading-[1.72] text-stone-800"
                 >
                   {index > 0 ? <SegmentDivider /> : null}
                   <MarkdownMessage content={segment.text} />

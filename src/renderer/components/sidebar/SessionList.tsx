@@ -149,7 +149,7 @@ export function SessionList() {
             <>
               <div
                 className={cn(
-                  "truncate text-[13px]",
+                  "truncate text-[14px] leading-[1.3]",
                   currentSessionId === session.id
                     ? "font-medium text-stone-900"
                     : "font-normal text-stone-700 group-hover:text-stone-900"
@@ -157,7 +157,7 @@ export function SessionList() {
               >
                 {session.title}
               </div>
-              <div className="mt-0.5 text-[11px] leading-none text-stone-400">
+              <div className="mt-0.5 text-[11.5px] leading-none text-stone-400">
                 {new Date(session.createdAt).toLocaleString("zh-CN", {
                   month: "numeric",
                   day: "numeric",
