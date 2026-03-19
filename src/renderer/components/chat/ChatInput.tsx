@@ -166,8 +166,10 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dragDepthRef = useRef(0);
   const dropNoticeTimerRef = useRef<number | null>(null);
+  const textareaScrollTimerRef = useRef<number | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isTextareaScrolling, setIsTextareaScrolling] = useState(false);
   const [dropNotice, setDropNotice] = useState<string | null>(null);
   const enabledProviders = providers.filter((provider) => provider.enabled);
   const hasAttachmentCapacity = attachments.length < MAX_ATTACHMENTS;
@@ -199,6 +201,10 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
       if (dropNoticeTimerRef.current !== null) {
         window.clearTimeout(dropNoticeTimerRef.current);
       }
+
+      if (textareaScrollTimerRef.current !== null) {
+        window.clearTimeout(textareaScrollTimerRef.current);
+      }
     };
   }, []);
 
@@ -224,6 +230,19 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
         setTimeout(() => setShowToast(false), 2000);
       }
     }
+  };
+
+  const handleTextareaScroll = () => {
+    setIsTextareaScrolling(true);
+
+    if (textareaScrollTimerRef.current !== null) {
+      window.clearTimeout(textareaScrollTimerRef.current);
+    }
+
+    textareaScrollTimerRef.current = window.setTimeout(() => {
+      setIsTextareaScrolling(false);
+      textareaScrollTimerRef.current = null;
+    }, 720);
   };
 
   const handleSelectFiles = async () => {
@@ -401,7 +420,7 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
           </div>
         )}
         {dropNotice && (
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 bg-amber-50 text-amber-800 border border-amber-200 text-[12px] px-4 py-2 rounded-xl shadow-lg max-w-[90%] text-center leading-relaxed backdrop-blur-sm bg-amber-50/95">
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 bg-amber-50 text-amber-800 border border-amber-200 text-xs px-4 py-2 rounded-xl shadow-lg max-w-[90%] text-center leading-relaxed backdrop-blur-sm bg-amber-50/95">
             {dropNotice}
           </div>
         )}
@@ -440,9 +459,11 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
 
         <textarea
           ref={textareaRef}
+          data-scrolling={isTextareaScrolling ? "true" : "false"}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
+          onScroll={handleTextareaScroll}
           onPaste={(event) => {
             void handlePaste(event);
           }}
@@ -450,7 +471,7 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
           placeholder={
             isFeishuRunning ? "飞书端运行中…" : "给 Zora 发消息… Enter 发送，Shift+Enter 换行"
           }
-          className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[14.5px] leading-[1.62] outline-none placeholder:text-stone-400 custom-scrollbar ${
+          className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[14.5px] leading-[1.62] outline-none placeholder:text-stone-400 input-scrollbar ${
             isFeishuRunning ? "cursor-not-allowed text-stone-400" : "text-stone-900"
           }`}
           rows={1}
