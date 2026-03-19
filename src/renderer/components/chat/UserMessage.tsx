@@ -3,21 +3,6 @@ import type { ConversationMessage, FileAttachment } from "../../types";
 import { formatFileSize } from "../../utils/format";
 import { AttachmentImageLightbox } from "./AttachmentImageLightbox";
 
-export function ZoraAvatar() {
-  return (
-    <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-orange-500 text-white shadow-sm">
-      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M13 10V3L4 14h7v7l9-11h-7z"
-        />
-      </svg>
-    </div>
-  );
-}
-
 function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) {
   const [previewImage, setPreviewImage] = useState<{
     alt: string;
@@ -110,10 +95,10 @@ function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) 
               </div>
 
               <div className="flex min-w-0 flex-col justify-center">
-                <div className="truncate text-[13px] font-medium leading-snug text-stone-900">
+                <div className="truncate text-sm font-medium leading-snug text-stone-900">
                   {truncateAttachmentName(attachment.name, 20)}
                 </div>
-                <div className="mt-0.5 text-[11px] leading-tight text-stone-500">
+                <div className="mt-0.5 text-xs leading-tight text-stone-500">
                   {isImagePlaceholder
                     ? `图片过大 • ${formatFileSize(attachment.size)}`
                     : `${attachment.category === "image"
@@ -137,14 +122,14 @@ export const UserMessage = memo(function UserMessage({
   message: ConversationMessage;
 }) {
   return (
-    <article className="ml-auto mt-6 flex max-w-[85%] flex-col items-end gap-1">
+    <article className="ml-auto mt-6 flex w-full flex-col items-end gap-1">
       {message.attachments?.length ? (
         <MessageAttachments attachments={message.attachments} />
       ) : null}
 
       {message.text ? (
-        <div className="rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all max-w-full">
-          <div className="whitespace-pre-wrap text-[14.5px] leading-[1.62] font-normal">
+        <div className="max-w-[min(100%,640px)] rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all">
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[14.5px] leading-[1.62] font-normal">
             {message.text}
           </div>
         </div>
