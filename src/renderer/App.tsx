@@ -1,19 +1,21 @@
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import {
-  startAssistantMessageForSessionAtom,
-  appendAssistantTextForSessionAtom,
-  appendAssistantThinkingForSessionAtom,
-  appendToolInputForSessionAtom,
-  completeStreamingMessageForSessionAtom,
-  completeToolResultForSessionAtom,
-  hydrateAssistantForSessionAtom,
-  completeConversationForSessionAtom,
-  failConversationForSessionAtom,
-  startToolUseForSessionAtom,
+  addThinkingStepAtom,
+  addToolStepAtom,
+  appendBodyTextAtom,
+  appendThinkingAtom,
+  appendToolInputAtom,
+  completeStreamingBlockAtom,
+  completeThinkingStepAtom,
+  completeToolResultAtom,
+  completeTurnAtom,
+  ensureActiveTurnAtom,
+  failTurnAtom,
   isAgentIdleAtom,
   messagesAtom,
-  setSessionRunningAtom
+  setSessionRunningAtom,
+  startBodySegmentAtom,
 } from "./store/chat";
 import {
   appPhaseAtom,
@@ -32,7 +34,6 @@ import { currentSessionIdAtom } from "./store/workspace";
 import type { PermissionRequest, AskUserRequest } from "../shared/zora";
 import {
   extractStreamChunks,
-  extractAssistantPayload,
   extractToolResultContent,
   getAgentErrorText,
   isRecord
@@ -50,22 +51,25 @@ import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
 export default function App() {
   const appPhase = useAtomValue(appPhaseAtom);
   const appPhaseRef = useRef(appPhase);
+  const activeBlockTypeRef = useRef<string | null>(null);
   const store = useStore();
   const checkAwakening = useSetAtom(checkAwakeningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
   const loadProviders = useSetAtom(loadProvidersAtom);
   const setMessages = useSetAtom(messagesAtom);
 
-  const startAssistantMessage = useSetAtom(startAssistantMessageForSessionAtom);
-  const appendAssistantText = useSetAtom(appendAssistantTextForSessionAtom);
-  const appendAssistantThinking = useSetAtom(appendAssistantThinkingForSessionAtom);
-  const appendToolInput = useSetAtom(appendToolInputForSessionAtom);
-  const completeStreamingMessage = useSetAtom(completeStreamingMessageForSessionAtom);
-  const completeToolResult = useSetAtom(completeToolResultForSessionAtom);
-  const hydrateAssistant = useSetAtom(hydrateAssistantForSessionAtom);
-  const completeConversation = useSetAtom(completeConversationForSessionAtom);
-  const failConversation = useSetAtom(failConversationForSessionAtom);
-  const startToolUse = useSetAtom(startToolUseForSessionAtom);
+  const ensureActiveTurn = useSetAtom(ensureActiveTurnAtom);
+  const startBodySegment = useSetAtom(startBodySegmentAtom);
+  const appendBodyText = useSetAtom(appendBodyTextAtom);
+  const addThinkingStep = useSetAtom(addThinkingStepAtom);
+  const appendThinking = useSetAtom(appendThinkingAtom);
+  const completeThinkingStep = useSetAtom(completeThinkingStepAtom);
+  const addToolStep = useSetAtom(addToolStepAtom);
+  const appendToolInput = useSetAtom(appendToolInputAtom);
+  const completeStreamingBlock = useSetAtom(completeStreamingBlockAtom);
+  const completeToolResult = useSetAtom(completeToolResultAtom);
+  const completeTurn = useSetAtom(completeTurnAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const pushPermission = useSetAtom(pushPermissionAtom);
@@ -167,7 +171,8 @@ export default function App() {
         }
 
         if (targetSessionId) {
-          failConversation(
+          activeBlockTypeRef.current = null;
+          failTurn(
             targetSessionId,
             getAgentErrorText(isRecord(streamEvent) ? streamEvent.error : undefined)
           );
@@ -194,12 +199,14 @@ export default function App() {
         }
 
         if (streamEvent.status === "finished") {
+          activeBlockTypeRef.current = null;
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
 
           if (targetSessionId) {
-            completeConversation(targetSessionId, "done");
+            completeTurn(targetSessionId, "done");
             clearHitlForSession(targetSessionId);
           }
 
@@ -224,12 +231,14 @@ export default function App() {
         }
 
         if (streamEvent.status === "stopped") {
+          activeBlockTypeRef.current = null;
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
 
           if (targetSessionId) {
-            completeConversation(targetSessionId, "stopped");
+            completeTurn(targetSessionId, "stopped");
             clearHitlForSession(targetSessionId);
           }
 
@@ -271,15 +280,12 @@ export default function App() {
       }
 
       if (streamEvent.type === "assistant") {
-        hydrateAssistant(targetSessionId, extractAssistantPayload(streamEvent.message));
-        if (isCurrentSessionEvent) {
-          bumpContentActivity();
-        }
         return;
       }
 
       if (streamEvent.type === "result") {
-        completeConversation(targetSessionId, "done");
+        activeBlockTypeRef.current = null;
+        completeTurn(targetSessionId, "done");
         if (isCurrentSessionEvent) {
           clearIdleTimer();
           setIsAgentIdle(false);
@@ -296,17 +302,26 @@ export default function App() {
             toolUseId: chunks.blockStart.toolUseId,
             initialInput: chunks.blockStart.toolInput,
           });
-          startToolUse(
+          ensureActiveTurn(targetSessionId);
+          addToolStep(
             targetSessionId,
             chunks.blockStart.toolName,
             chunks.blockStart.toolUseId,
             chunks.blockStart.toolInput
           );
+          activeBlockTypeRef.current = "tool_use";
           if (isCurrentSessionEvent) {
             bumpContentActivity();
           }
         } else {
-          startAssistantMessage(targetSessionId, chunks.blockStart);
+          ensureActiveTurn(targetSessionId);
+          if (chunks.blockStart.type === "text") {
+            startBodySegment(targetSessionId, chunks.blockStart.text ?? "");
+            activeBlockTypeRef.current = "text";
+          } else {
+            addThinkingStep(targetSessionId, chunks.blockStart.thinking ?? "");
+            activeBlockTypeRef.current = "thinking";
+          }
           if (isCurrentSessionEvent) {
             bumpContentActivity();
           }
@@ -314,14 +329,14 @@ export default function App() {
       }
 
       if (chunks.textDelta) {
-        appendAssistantText(targetSessionId, chunks.textDelta);
+        appendBodyText(targetSessionId, chunks.textDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
         }
       }
 
       if (chunks.thinkingDelta) {
-        appendAssistantThinking(targetSessionId, chunks.thinkingDelta);
+        appendThinking(targetSessionId, chunks.thinkingDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
         }
@@ -344,7 +359,11 @@ export default function App() {
         isRecord(streamEvent.event) &&
         streamEvent.event.type === "content_block_stop"
       ) {
-        completeStreamingMessage(targetSessionId);
+        completeStreamingBlock(targetSessionId);
+        if (activeBlockTypeRef.current === "thinking") {
+          completeThinkingStep(targetSessionId);
+        }
+        activeBlockTypeRef.current = null;
       }
     });
 
@@ -353,16 +372,18 @@ export default function App() {
       unsubscribe();
     };
   }, [
-    startAssistantMessage,
-    appendAssistantText,
-    appendAssistantThinking,
+    ensureActiveTurn,
+    startBodySegment,
+    appendBodyText,
+    addThinkingStep,
+    appendThinking,
+    completeThinkingStep,
+    addToolStep,
     appendToolInput,
-    completeConversation,
-    completeStreamingMessage,
+    completeStreamingBlock,
     completeToolResult,
-    failConversation,
-    hydrateAssistant,
-    startToolUse,
+    completeTurn,
+    failTurn,
     setIsAgentIdle,
     store,
     completeAwakening,

@@ -3,7 +3,7 @@ import {
   clearDraftAttachmentsAtom,
   draftAttachmentsAtom,
   startConversationAtom,
-  failConversationAtom,
+  failTurnAtom,
   draftAtom,
 } from "../../store/chat";
 import {
@@ -22,7 +22,7 @@ import { AskUserBanner } from "../chat/AskUserBanner";
 
 export function MainArea() {
   const startConversation = useSetAtom(startConversationAtom);
-  const failConversation = useSetAtom(failConversationAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const clearAttachments = useSetAtom(clearDraftAttachmentsAtom);
   const [draft, setDraft] = useAtom(draftAtom);
   const attachments = useAtomValue(draftAttachmentsAtom);
@@ -65,7 +65,7 @@ export function MainArea() {
         currentAttachments.length > 0 ? currentAttachments : undefined
       );
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn(sessionId, getErrorMessage(error));
     }
   };
 
@@ -77,7 +77,7 @@ export function MainArea() {
     try {
       await window.zora.stopAgent(currentSessionId);
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn(currentSessionId, getErrorMessage(error));
     }
   };
 

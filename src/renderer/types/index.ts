@@ -1,11 +1,13 @@
 import type { WorkspaceMeta } from "../../shared/zora";
 
 export type {
-  ChatMessageStatus,
-  ChatMessageType,
-  ChatToolStatus,
-  ChatMessage,
+  AssistantTurn,
+  BodySegment,
+  ConversationMessage,
   FileAttachment,
+  ProcessStep,
+  ThinkingBlock,
+  ToolAction,
 } from "../../shared/zora";
 
 // 工作区类型

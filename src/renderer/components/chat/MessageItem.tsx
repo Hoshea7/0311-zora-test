@@ -1,13 +1,11 @@
-import { memo, useState, useEffect, useMemo, type ReactNode } from "react";
-import { useAtom } from "jotai";
-import type { ChatMessage, FileAttachment } from "../../types";
+import { memo, useState, type ReactNode } from "react";
+import type { ConversationMessage, FileAttachment } from "../../types";
 import { formatFileSize } from "../../utils/format";
 import { cn } from "../../utils/cn";
-import { globalThinkingExpandedAtom } from "../../store/ui";
 import { CopyButton, MarkdownMessage } from "./MarkdownMessage";
 
 export interface MessageItemProps {
-  message: ChatMessage;
+  message: ConversationMessage;
   showAvatar?: boolean;
   showCopyButton?: boolean;
   processContent?: ReactNode;
@@ -15,16 +13,10 @@ export interface MessageItemProps {
   onToolToggle?: (messageId: string) => void;
 }
 
-// Zora Avatar Icon
 function ZoraAvatar() {
   return (
-    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-orange-500 text-white shadow-sm mt-0.5">
-      <svg
-        className="h-4 w-4"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
+    <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-orange-500 text-white shadow-sm">
+      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -36,7 +28,6 @@ function ZoraAvatar() {
   );
 }
 
-// Proma-style minimal Process Block wrapper
 function ProcessBlock({
   icon,
   title,
@@ -44,85 +35,66 @@ function ProcessBlock({
   isOpen,
   onToggle,
   children,
-  variant = "tool"
 }: {
-  icon: React.ReactNode;
-  title: React.ReactNode;
+  icon: ReactNode;
+  title: ReactNode;
   isStreaming?: boolean;
   isOpen: boolean;
-  onToggle: (e?: React.MouseEvent) => void;
-  children: React.ReactNode;
-  variant?: "tool" | "thinking";
+  onToggle: () => void;
+  children: ReactNode;
 }) {
   return (
-    <div className="mb-0.5 mt-0.5 w-full max-w-full relative group/block">
-      <div 
-        className="flex cursor-pointer items-center justify-between gap-6 py-1 text-[13.5px] text-stone-500 hover:text-stone-800 transition-colors w-fit group"
+    <div className="group/block relative mb-0.5 mt-0.5 w-full max-w-full">
+      <button
+        type="button"
+        className="group flex w-fit cursor-pointer items-center justify-between gap-6 py-1 text-[13.5px] text-stone-500 transition-colors hover:text-stone-800"
         onClick={onToggle}
       >
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <span className="flex items-center justify-center w-3 h-3 text-stone-400 group-hover:text-stone-500 transition-colors shrink-0">
+          <span className="flex h-3 w-3 shrink-0 items-center justify-center text-stone-400 transition-colors group-hover:text-stone-500">
             {icon}
           </span>
-          <span className="truncate flex items-center gap-1.5 leading-none">{title}</span>
-          {isStreaming && (
-            <span className="flex h-1.5 w-1.5 items-center justify-center shrink-0 ml-1">
-              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-400 opacity-75"></span>
-              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-500"></span>
+          <span className="flex items-center gap-1.5 truncate leading-none">{title}</span>
+          {isStreaming ? (
+            <span className="ml-1 flex h-1.5 w-1.5 items-center justify-center shrink-0">
+              <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-stone-400 opacity-75" />
+              <span className="relative inline-flex h-1 w-1 rounded-full bg-stone-500" />
             </span>
-          )}
+          ) : null}
         </div>
-        <svg 
-          className={cn("h-3.5 w-3.5 opacity-0 group-hover:opacity-60 transition-all shrink-0 ml-1", isOpen ? "rotate-90 opacity-40" : "")} 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          className={cn(
+            "ml-1 h-3.5 w-3.5 shrink-0 transition-all group-hover:opacity-60",
+            isOpen ? "rotate-90 opacity-40" : "opacity-0"
+          )}
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
-      </div>
-      
-      {isOpen && variant === "tool" && (
-        <div className="mt-1.5 px-4 py-3 bg-stone-50 rounded-lg border border-stone-100 max-h-[400px] overflow-y-auto custom-scrollbar shadow-inner w-[calc(100%-1rem)]">
-          {children}
-        </div>
-      )}
-
-      {isOpen && variant === "thinking" && (
-        <div className="mt-1 pl-[18px] pr-4">
-          {children}
-        </div>
-      )}
+      </button>
+      {isOpen ? <div className="mt-1 pl-[18px] pr-4">{children}</div> : null}
     </div>
   );
 }
 
-export function ThinkingTrace({ content, isStreaming }: { content: string, isStreaming: boolean }) {
-  const [globalExpanded, setGlobalExpanded] = useAtom(globalThinkingExpandedAtom);
-  // Auto-expand if streaming, otherwise use global preference
-  const [isOpen, setIsOpen] = useState(isStreaming ? true : globalExpanded);
-
-  // Force open when starting to stream
-  useEffect(() => {
-    if (isStreaming) {
-      setIsOpen(true);
-    }
-  }, [isStreaming]);
-
-  const handleToggle = () => {
-    const next = !isOpen;
-    setIsOpen(next);
-    setGlobalExpanded(next); // remember preference
-  };
+export function ThinkingTrace({
+  content,
+  isStreaming,
+}: {
+  content: string;
+  isStreaming: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(isStreaming);
 
   return (
     <ProcessBlock
-      icon={<span className="text-[10px] leading-none mb-0.5">●</span>}
+      icon={<span className="mb-0.5 text-[10px] leading-none">●</span>}
       title={isStreaming ? "思考中..." : "思考过程"}
       isStreaming={isStreaming}
       isOpen={isOpen}
-      onToggle={handleToggle}
-      variant="thinking"
+      onToggle={() => setIsOpen((current) => !current)}
     >
       <div className="text-[13.5px] leading-relaxed text-stone-500">
         <pre className="m-0 whitespace-pre-wrap font-sans">{content}</pre>
@@ -131,263 +103,137 @@ export function ThinkingTrace({ content, isStreaming }: { content: string, isStr
   );
 }
 
+type ToolCardMessage = ConversationMessage & {
+  turn: NonNullable<ConversationMessage["turn"]>;
+};
+
 export function ToolCard({
   message,
   isOpen,
-  onToggleGroup
+  onToggleGroup,
 }: {
-  message: ChatMessage;
+  message: ToolCardMessage;
   isOpen: boolean;
   onToggleGroup?: (messageId: string) => void;
 }) {
-  const isInputStreaming = message.status === "streaming";
-  const isToolRunning = message.toolStatus === "running";
-  const isToolError = message.toolStatus === "error";
+  const lastToolStep = [...message.turn.processSteps]
+    .reverse()
+    .find((step) => step.type === "tool");
+  const tool = lastToolStep?.type === "tool" ? lastToolStep.tool : null;
 
-  const handleToggle = (e?: React.MouseEvent) => {
-    const targetElement = e?.currentTarget ?? null;
-    const scrollContainer = targetElement?.closest(".custom-scrollbar") as HTMLElement | null;
-    let prevTop = 0;
-
-    if (targetElement && scrollContainer) {
-      prevTop = targetElement.getBoundingClientRect().top;
-    }
-
-    if (onToggleGroup) {
-      onToggleGroup(message.id);
-    }
-
-    if (targetElement && scrollContainer) {
-      requestAnimationFrame(() => {
-        const newTop = targetElement.getBoundingClientRect().top;
-        const diff = newTop - prevTop;
-
-        if (diff !== 0) {
-          scrollContainer.scrollTop += diff;
-        }
-      });
-    }
-  };
-
-  // Generate a brief summary for the collapsed state
-  const summary = useMemo(() => {
-    let result = "";
-    if (message.toolInput) {
-      try {
-        const parsed = JSON.parse(message.toolInput);
-        const toolName = message.toolName || "";
-        if (toolName.includes("bash")) {
-          result = parsed.command || parsed.description || "";
-        } else if (toolName.includes("read") || toolName.includes("write")) {
-          result = parsed.filePath ? parsed.filePath.split('/').pop() : "";
-        } else if (toolName.includes("search") || toolName.includes("grep")) {
-          result = parsed.query || parsed.pattern || "";
-        } else {
-          const val = Object.values(parsed).find(v => typeof v === 'string' && (v as string).trim().length > 0);
-          result = val ? String(val) : "";
-        }
-      } catch {
-        // JSON hasn't finished streaming, use raw text safely
-        result = message.toolInput.replace(/["'{}]/g, "").trim();
-      }
-    }
-    if (!result) result = "等待参数...";
-    if (result.length > 50) result = result.slice(0, 50) + "...";
-    return result;
-  }, [message.toolInput, message.toolName]);
-
-  const cleanToolName = message.toolName?.replace('default_api:', '') || 'Tool';
-  const formattedToolName = cleanToolName.charAt(0).toUpperCase() + cleanToolName.slice(1);
-  
-  const displayTitle = (
-    <>
-      <span className="text-stone-700 font-medium leading-none">
-        {formattedToolName}
-      </span>
-      <span className="text-stone-300 leading-none">·</span>
-      <span className="text-stone-500 truncate max-w-[200px] sm:max-w-[400px] text-[13px] leading-none">{summary}</span>
-      {isToolError && <span className="text-rose-500 text-xs ml-1 font-medium leading-none">失败</span>}
-    </>
-  );
+  if (!tool) {
+    return null;
+  }
 
   return (
     <ProcessBlock
-      icon={
-        isToolRunning ? (
-          <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-orange-500/30 border-t-orange-500" />
-        ) : isToolError ? (
-          <svg className="h-3.5 w-3.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ) : (
-          <svg className="h-3 w-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <circle cx="12" cy="12" r="9" strokeWidth="1.5" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12l3 3 5-5" />
-          </svg>
-        )
-      }
-      title={displayTitle}
-      isStreaming={false} // Loading indicator is handled in the icon itself
+      icon={<span className="text-[10px] leading-none">◌</span>}
+      title={tool.name}
+      isStreaming={tool.status === "running"}
       isOpen={isOpen}
-      onToggle={handleToggle}
-      variant="tool"
+      onToggle={() => onToggleGroup?.(message.id)}
     >
-      <div className="flex flex-col gap-4">
-        {/* Input parameters */}
+      <div className="flex flex-col gap-4 rounded-lg border border-stone-100 bg-stone-50 px-4 py-3 shadow-inner">
         <div className="flex flex-col gap-1.5">
           <div className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
             Input
           </div>
-          <div className="text-[12px] leading-relaxed text-stone-600">
-            <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11.5px]">
-              {message.toolInput || "Waiting..."}
-              {isInputStreaming ? (
-                <span className="ml-[2px] inline-block animate-pulse text-stone-400">|</span>
-              ) : null}
-            </pre>
-          </div>
+          <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11.5px] text-stone-600">
+            {tool.input || "Waiting..."}
+          </pre>
         </div>
-
-        {/* Output results */}
-        {(message.toolResult || isToolError || (!isToolRunning && !message.toolResult)) && (
+        {tool.result || tool.status !== "running" ? (
           <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-stone-400">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
               Output
             </div>
-            <div className={cn(
-              "text-[12px] leading-relaxed",
-              isToolError ? "text-rose-600" : "text-stone-600"
-            )}>
-              <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11.5px]">
-                {message.toolResult || (isToolError ? "The tool returned an error." : "No output.")}
-              </pre>
-            </div>
+            <pre
+              className={cn(
+                "m-0 whitespace-pre-wrap break-words font-mono text-[11.5px]",
+                tool.status === "error" ? "text-rose-600" : "text-stone-600"
+              )}
+            >
+              {tool.result || (tool.status === "error" ? "The tool returned an error." : "No output.")}
+            </pre>
           </div>
-        )}
+        ) : null}
       </div>
     </ProcessBlock>
   );
 }
 
 function MessageAttachments({ attachments }: { attachments: FileAttachment[] }) {
-  if (!attachments || attachments.length === 0) {
+  if (attachments.length === 0) {
     return null;
   }
 
-  const truncateAttachmentName = (name: string, maxLength = 18) => {
-    if (name.length <= maxLength) return name;
-    const extIdx = name.lastIndexOf(".");
-    if (extIdx <= 0) return `${name.slice(0, maxLength - 3)}...`;
-    const ext = name.slice(extIdx);
-    const base = name.slice(0, extIdx);
-    if (base.length + ext.length <= maxLength) return name;
-    return `${base.slice(0, Math.max(0, maxLength - ext.length - 3))}...${ext}`;
-  };
-
   return (
-    <div className="flex flex-col gap-2 w-full max-w-[280px]">
-      {attachments.map((attachment) => {
-        const hasImagePreview =
-          attachment.category === "image" && Boolean(attachment.base64Data);
-        const isImagePlaceholder =
-          attachment.category === "image" && !attachment.base64Data;
-        const FileIcon = attachment.category === "image" ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <circle cx="8.5" cy="9" r="1.5" />
-            <path d="m21 15-4.5-4.5L7 20" />
-          </svg>
-        ) : attachment.category === "document" ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-            <path d="M14 2v5h5" />
-            <path d="M9 13h6M9 17h4" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-            <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-            <path d="M14 2v5h5" />
-            <path d="M9 13h6M9 17h6M9 9h1" />
-          </svg>
-        );
-
-        return (
-          <div
-            key={attachment.id}
-            className="flex w-full items-center gap-3.5 rounded-2xl bg-[#EBE4DC] p-2 pr-4 transition-all"
-            title={attachment.name}
-          >
-            <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white shadow-sm ring-1 ring-inset ring-black/5">
-              {hasImagePreview ? (
-                <img
-                  src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
-                  alt={attachment.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="text-stone-400">
-                  {FileIcon}
-                </div>
-              )}
+    <div className="flex w-full max-w-[280px] flex-col gap-2">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className="flex w-full items-center gap-3.5 rounded-2xl bg-[#EBE4DC] p-2 pr-4 transition-all"
+          title={attachment.name}
+        >
+          <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white shadow-sm ring-1 ring-inset ring-black/5">
+            {attachment.category === "image" && attachment.base64Data ? (
+              <img
+                src={`data:${attachment.mimeType};base64,${attachment.base64Data}`}
+                alt={attachment.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="text-stone-400">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-6 w-6"
+                >
+                  <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
+                  <path d="M14 2v5h5" />
+                  <path d="M9 13h6M9 17h6M9 9h1" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-col justify-center">
+            <div className="truncate text-[14px] font-medium leading-snug text-stone-900">
+              {attachment.name}
             </div>
-
-            <div className="flex min-w-0 flex-col justify-center">
-              <div className="truncate text-[14px] font-medium leading-snug text-stone-900">
-                {truncateAttachmentName(attachment.name, 22)}
-              </div>
-              <div className="mt-0.5 text-[12px] leading-tight text-stone-500">
-                {isImagePlaceholder
-                  ? `图片过大 • ${formatFileSize(attachment.size)}`
-                  : `${attachment.category === "image"
-                      ? "Image"
-                      : attachment.category === "document"
-                        ? "PDF"
-                        : "Text"} • ${formatFileSize(attachment.size)}`}
-              </div>
+            <div className="mt-0.5 text-[12px] leading-tight text-stone-500">
+              {formatFileSize(attachment.size)}
             </div>
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 }
 
-/**
- * 单条消息组件
- * 渲染用户或助手的消息，包括思考内容和错误信息
- */
 export const MessageItem = memo(function MessageItem({
   message,
   showAvatar = true,
   showCopyButton = true,
   processContent,
-  toolOpen = true,
-  onToolToggle
 }: MessageItemProps) {
   const isUser = message.role === "user";
-  const isThinkingMessage = message.type === "thinking" || Boolean(message.thinking);
-  const isToolUse = message.type === "tool_use";
-  
-  // Using status === "streaming" handles both thinking and text streaming
-  const isStreaming = message.status === "streaming";
-  const hasText = Boolean(message.text);
-  const copyContent = message.text.trim();
-  const canCopyAssistantContent =
-    showCopyButton && !isUser && !isToolUse && copyContent.length > 0;
+  const turn = message.turn;
+  const isStreaming = turn?.status === "streaming";
+  const copyContent = turn?.bodySegments.map((segment) => segment.text).join("\n\n").trim() ?? "";
 
-  // For User Message
   if (isUser) {
     const hasAttachments = Boolean(message.attachments?.length);
 
     return (
       <article className="ml-auto mt-6 flex max-w-[85%] flex-col items-end gap-1">
-        {hasAttachments ? (
-          <MessageAttachments attachments={message.attachments!} />
-        ) : null}
-
+        {hasAttachments ? <MessageAttachments attachments={message.attachments!} /> : null}
         {message.text ? (
-          <div className="rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all max-w-full">
-            <div className="whitespace-pre-wrap text-[15px] leading-[1.6] font-normal">
+          <div className="max-w-full rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all">
+            <div className="whitespace-pre-wrap text-[15px] font-normal leading-[1.6]">
               {message.text}
             </div>
           </div>
@@ -396,67 +242,45 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
-  // Agent Avatar and Title Header
-  const AgentHeader = showAvatar ? (
-    <div className="mb-2 mt-0.5 flex items-center gap-2">
-      <span className="text-[14px] font-semibold text-stone-800 tracking-tight">Zora</span>
-      <span className="mt-[2px] text-[11px] font-medium text-stone-400">
-        {new Date().toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        })}
-      </span>
-    </div>
-  ) : null;
-
-  // Spacing class
-  const mtClass = showAvatar ? "mt-8" : "mt-1.5";
-
-  // Tool rendering check
-  if (isToolUse) {
-    return (
-      <article className={cn("mr-auto flex w-full max-w-[95%] items-start gap-4 group", mtClass)}>
-        <div className="mt-1 shrink-0 w-8 flex justify-center transition-opacity">
-          {showAvatar ? <ZoraAvatar /> : null}
-        </div>
-        
-        <div className="flex-1 overflow-hidden w-full max-w-full">
-          {AgentHeader}
-          <ToolCard message={message} isOpen={toolOpen} onToggleGroup={onToolToggle} />
-        </div>
-      </article>
-    );
-  }
+  const hasThinking = Boolean(
+    turn?.processSteps.some(
+      (step) => step.type === "thinking" && step.thinking.content.trim().length > 0
+    )
+  );
+  const thinkingText =
+    turn?.processSteps.reduce<string[]>((parts, step) => {
+      if (step.type === "thinking" && step.thinking.content.trim().length > 0) {
+        parts.push(step.thinking.content);
+      }
+      return parts;
+    }, []).join("\n\n") ?? "";
 
   return (
-    <article className={cn("mr-auto flex w-full max-w-[95%] items-start gap-4 group", mtClass)}>
-      <div className="mt-1 shrink-0 w-8 flex justify-center transition-opacity">
+    <article className="group mr-auto mt-8 flex w-full max-w-[95%] items-start gap-4">
+      <div className="mt-1 flex w-8 shrink-0 justify-center transition-opacity">
         {showAvatar ? <ZoraAvatar /> : null}
       </div>
-      
-        <div className="flex-1 overflow-hidden w-full max-w-full">
-          {AgentHeader}
 
-        {processContent ? (
-          <div className="mb-3">{processContent}</div>
+      <div className="w-full max-w-full flex-1 overflow-hidden">
+        {showAvatar ? (
+          <div className="mb-2 mt-0.5 flex items-center gap-2">
+            <span className="text-[14px] font-semibold tracking-tight text-stone-800">Zora</span>
+          </div>
         ) : null}
 
-        {isThinkingMessage ? (
-          <ThinkingTrace 
-            content={message.thinking} 
-            // the trace is streaming only if we have no text yet AND the message overall is streaming
-            isStreaming={isStreaming && !hasText} 
-          />
+        {processContent ? <div className="mb-3">{processContent}</div> : null}
+
+        {hasThinking ? (
+          <ThinkingTrace content={thinkingText} isStreaming={Boolean(isStreaming && !copyContent)} />
         ) : null}
 
-        {hasText ? (
-          <div className={cn("text-[15px] leading-[1.6] text-stone-800 break-words", (showAvatar || isThinkingMessage) ? "mt-3" : "mt-0")}>
-            <MarkdownMessage content={message.text} />
-            {isStreaming && (
-              <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-stone-300 align-middle"></span>
-            )}
-            {canCopyAssistantContent ? (
+        {copyContent ? (
+          <div className={cn("break-words text-[15px] leading-[1.6] text-stone-800", hasThinking ? "mt-3" : "mt-0")}>
+            <MarkdownMessage content={copyContent} />
+            {isStreaming ? (
+              <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-stone-300 align-middle" />
+            ) : null}
+            {showCopyButton ? (
               <div className="mt-3 flex justify-start opacity-0 transition-opacity group-hover:opacity-100">
                 <CopyButton
                   content={copyContent}
@@ -467,9 +291,9 @@ export const MessageItem = memo(function MessageItem({
           </div>
         ) : null}
 
-        {message.error ? (
+        {turn?.error ? (
           <div className="mt-3 rounded-xl bg-rose-50/80 px-4 py-3 text-[14px] leading-relaxed text-rose-800 ring-1 ring-rose-200/50">
-            {message.error}
+            {turn.error}
           </div>
         ) : null}
       </div>

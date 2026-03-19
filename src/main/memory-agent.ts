@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../shared/zora";
+import type { ConversationMessage } from "../shared/zora";
 import {
   isAgentRunningForSession,
   resolveSDKCliPath,
@@ -53,14 +53,17 @@ function logMemoryAgent(message: string) {
   console.log(`${MEMORY_AGENT_PREFIX} ${message}`);
 }
 
-function serializeMemoryMessage(message: ChatMessage): string | null {
-  if (message.role === "user" && message.type === "text") {
-    const text = truncateText(message.text, USER_MESSAGE_MAX_CHARS);
+function serializeMemoryMessage(message: ConversationMessage): string | null {
+  if (message.role === "user") {
+    const text = truncateText(message.text ?? "", USER_MESSAGE_MAX_CHARS);
     return text ? `**User**: ${text}` : null;
   }
 
-  if (message.role === "assistant" && message.type === "text") {
-    const text = truncateText(message.text, ASSISTANT_MESSAGE_MAX_CHARS);
+  if (message.role === "assistant" && message.turn) {
+    const text = truncateText(
+      message.turn.bodySegments.map((segment) => segment.text).join("\n\n"),
+      ASSISTANT_MESSAGE_MAX_CHARS
+    );
     return text ? `**Zora**: ${text}` : null;
   }
 
@@ -68,7 +71,7 @@ function serializeMemoryMessage(message: ChatMessage): string | null {
 }
 
 function buildMemoryPrompt(
-  messages: ChatMessage[],
+  messages: ConversationMessage[],
   sessionTitle: string
 ): MemoryPromptBuildResult {
   const now = new Date();

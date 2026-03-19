@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   startConversationAtom,
-  failConversationAtom,
+  failTurnAtom,
   draftAtom,
   isRunningAtom,
   messagesAtom,
@@ -66,7 +66,7 @@ function ProviderCheckIndicator({ status }: { status: ProviderCheckStatus }) {
 
 export function AwakeningView() {
   const startConversation = useSetAtom(startConversationAtom);
-  const failConversation = useSetAtom(failConversationAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const [draft, setDraft] = useAtom(draftAtom);
   const [messages, setMessages] = useAtom(messagesAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
@@ -188,13 +188,13 @@ export function AwakeningView() {
         await window.zora.awaken(AUTO_AWAKEN_PROMPT);
       } catch (error) {
         setSessionRunning("__awakening__", false);
-        failConversation(getErrorMessage(error));
+        failTurn("__awakening__", getErrorMessage(error));
       }
     }, AUTO_AWAKEN_DELAY_MS);
 
     // Strict Mode 下第一次 effect 会被立刻清理；保留 cleanup 即可避免重复触发。
     return () => clearTimeout(timer);
-  }, [failConversation, messages.length, setSessionRunning]);
+  }, [failTurn, messages.length, setSessionRunning]);
 
   const handleSubmit = async () => {
     const text = draft.trim();
@@ -208,7 +208,7 @@ export function AwakeningView() {
     try {
       await window.zora.awaken(text);
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn("__awakening__", getErrorMessage(error));
     }
   };
 
@@ -216,7 +216,7 @@ export function AwakeningView() {
     try {
       await window.zora.stopAgent("__awakening__");
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn("__awakening__", getErrorMessage(error));
     }
   };
 

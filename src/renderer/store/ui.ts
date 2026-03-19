@@ -12,11 +12,6 @@ export const sidebarCollapsedAtom = atom(false);
 export const currentModeAtom = atom<Mode>("chat");
 
 /**
- * 思考过程全局展开偏好（默认展开）
- */
-export const globalThinkingExpandedAtom = atom(true);
-
-/**
  * 设置弹窗开关
  */
 export const isSettingsOpenAtom = atom(false);

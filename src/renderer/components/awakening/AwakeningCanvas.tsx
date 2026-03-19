@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { messagesAtom, setSessionRunningAtom, failConversationAtom } from "../../store/chat";
+import { messagesAtom, setSessionRunningAtom, failTurnAtom } from "../../store/chat";
 import { appPhaseAtom } from "../../store/zora";
 import { getErrorMessage } from "../../utils/message";
 import { AwakeningMessage } from "./AwakeningMessage";
@@ -38,7 +38,7 @@ export function AwakeningCanvas() {
   const messages = useAtomValue(messagesAtom);
   const setAppPhase = useSetAtom(appPhaseAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
-  const failConversation = useSetAtom(failConversationAtom);
+  const failTurn = useSetAtom(failTurnAtom);
 
   const autoAwakenStartedRef = useRef(false);
 
@@ -66,17 +66,19 @@ export function AwakeningCanvas() {
         await window.zora.awaken(AUTO_AWAKEN_PROMPT);
       } catch (error) {
         setSessionRunning("__awakening__", false);
-        failConversation(getErrorMessage(error));
+        failTurn("__awakening__", getErrorMessage(error));
       }
     }, AUTO_AWAKEN_DELAY_MS);
 
     return () => clearTimeout(timer);
-  }, [failConversation, messages.length, setSessionRunning]);
+  }, [failTurn, messages.length, setSessionRunning]);
 
   useEffect(() => {
     if (firstTokenArrived) return;
     const assistantMsg = messages.find((m) => m.role === "assistant");
-    if (assistantMsg?.text) {
+    const assistantText =
+      assistantMsg?.turn?.bodySegments.map((segment) => segment.text).join("\n\n") ?? "";
+    if (assistantText) {
       setFirstTokenArrived(true);
     }
   }, [messages, firstTokenArrived]);
@@ -84,7 +86,7 @@ export function AwakeningCanvas() {
   useEffect(() => {
     if (firstMessageDone) return;
     const assistantMsg = messages.find((m) => m.role === "assistant");
-    if (assistantMsg?.status === "done") {
+    if (assistantMsg?.turn?.status === "done") {
       setFirstMessageDone(true);
     }
   }, [messages, firstMessageDone]);
@@ -101,7 +103,13 @@ export function AwakeningCanvas() {
 
   const filteredMessages = useMemo(() => {
     return messages.filter(
-      (m) => m.role === "user" || (m.role === "assistant" && m.type !== "tool_use" && m.type !== "thinking")
+      (m) =>
+        m.role === "user" ||
+        (m.role === "assistant" &&
+          Boolean(
+            m.turn?.bodySegments.some((segment) => segment.text.trim().length > 0) ||
+              m.turn?.error
+          ))
     );
   }, [messages]);
 

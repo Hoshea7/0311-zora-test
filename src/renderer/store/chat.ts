@@ -1,9 +1,9 @@
 import { atom, type Getter } from "jotai";
 import type {
-  ChatMessage,
-  ChatMessageStatus,
-  ChatMessageType,
+  AssistantTurn,
+  ConversationMessage,
   FileAttachment,
+  ProcessStep,
 } from "../types";
 import { createId, stringifyUnknown } from "../utils/message";
 import { currentSessionIdAtom } from "./workspace";
@@ -11,10 +11,12 @@ import { appPhaseAtom } from "./zora";
 
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
-type SessionMessages = Record<string, ChatMessage[]>;
+type SessionMessages = Record<string, ConversationMessage[]>;
 type SessionDrafts = Record<string, string>;
 type SessionDraftAttachments = Record<string, FileAttachment[]>;
-type MessageUpdate = ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[]);
+type MessageUpdate =
+  | ConversationMessage[]
+  | ((current: ConversationMessage[]) => ConversationMessage[]);
 
 const EMPTY_DRAFT = "";
 const EMPTY_ATTACHMENTS: FileAttachment[] = [];
@@ -163,7 +165,7 @@ function applyMessageUpdate(
   const previous = current[sessionId] ?? [];
   const next =
     typeof update === "function"
-      ? (update as (messages: ChatMessage[]) => ChatMessage[])(previous)
+      ? (update as (messages: ConversationMessage[]) => ConversationMessage[])(previous)
       : update;
 
   if (next === previous) {
@@ -247,7 +249,7 @@ export const isCurrentSessionRunningAtom = atom((get) => {
 /**
  * 操作：设置指定会话的运行状态
  */
-export const setSessionRunningAtom = atom(
+export const setSessionRunningAtom = atom<null, [string, boolean], void>(
   null,
   (_get, set, sessionId: string, isRunning: boolean) => {
     set(runningSessionsAtom, (current) => {
@@ -264,456 +266,544 @@ export const setSessionRunningAtom = atom(
 
 export const isRunningAtom = isCurrentSessionRunningAtom;
 
-const FALLBACK_ASSISTANT_TEXT = "The agent stopped before returning a final reply.";
-const FALLBACK_TOOL_ERROR = "Tool execution stopped before returning a result.";
-
-type AssistantStreamStartPayload =
-  | {
-      type: "text";
-      text?: string;
-    }
-  | {
-      type: "thinking";
-      thinking?: string;
-    };
-
-type AssistantHydrationPayload =
-  | {
-      type: "text";
-      text: string;
-    }
-  | {
-      type: "thinking";
-      thinking: string;
-    }
-  | {
-      type: "tool_use";
-      toolName: string;
-      toolUseId: string;
-      toolInput: string;
-    }
-  | null;
-
-function findLastMessageIndex(
-  messages: ChatMessage[],
-  predicate: (message: ChatMessage, index: number) => boolean
-) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (predicate(messages[index], index)) {
-      return index;
-    }
-  }
-
-  return -1;
-}
-
-function getMessageType(message: ChatMessage): ChatMessageType {
-  return message.type ?? "text";
-}
-
-function createAssistantMessage(
-  type: ChatMessageType,
-  overrides: Partial<ChatMessage> = {}
-): ChatMessage {
+function createAssistantTurnMessage(now = Date.now()): ConversationMessage {
+  const turnId = createId("turn");
   return {
-    id: createId(type === "tool_use" ? "tooluse" : type),
+    id: turnId,
     role: "assistant",
-    type,
-    text: "",
-    thinking: "",
-    status: "streaming",
-    ...overrides
+    timestamp: now,
+    turn: {
+      id: turnId,
+      processSteps: [],
+      bodySegments: [],
+      status: "streaming",
+      startedAt: now,
+    },
   };
 }
 
-function appendAssistantChunk(
-  messages: ChatMessage[],
-  type: Extract<ChatMessageType, "text" | "thinking">,
-  chunk: string
-) {
-  if (chunk.length === 0) {
-    return messages;
-  }
+function isAssistantTurnMessage(
+  message: ConversationMessage
+): message is ConversationMessage & { role: "assistant"; turn: AssistantTurn } {
+  return message.role === "assistant" && Boolean(message.turn);
+}
 
-  const targetIndex = findLastMessageIndex(
-    messages,
-    (message) =>
-      message.role === "assistant" &&
-      message.status === "streaming" &&
-      getMessageType(message) === type
-  );
-
-  if (targetIndex === -1) {
-    return messages;
-  }
-
-  return messages.map((message, index) => {
-    if (index !== targetIndex) {
+function getActiveTurn(messages: ConversationMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isAssistantTurnMessage(message) && message.turn.status === "streaming") {
       return message;
     }
+  }
 
-    return type === "text"
-      ? {
-          ...message,
-          text: `${message.text}${chunk}`
-        }
-      : {
-          ...message,
-          thinking: `${message.thinking}${chunk}`
-        };
-  });
+  return null;
 }
 
-function findLastAssistantMessageInActiveTurn(
-  messages: ChatMessage[],
-  predicate: (message: ChatMessage) => boolean
+function updateActiveTurn(
+  messages: ConversationMessage[],
+  updater: (turn: AssistantTurn) => AssistantTurn
 ) {
-  const lastUserIndex = findLastMessageIndex(messages, (message) => message.role === "user");
-
-  for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === "assistant" && predicate(message)) {
-      return index;
+    if (!isAssistantTurnMessage(message) || message.turn.status !== "streaming") {
+      continue;
     }
+
+    const nextTurn = updater(message.turn);
+    if (nextTurn === message.turn) {
+      return messages;
+    }
+
+    const nextMessages = [...messages];
+    nextMessages[index] = {
+      ...message,
+      turn: nextTurn,
+    };
+    return nextMessages;
   }
 
-  return -1;
+  return messages;
 }
 
-function hydrateAssistantMessage(
-  message: ChatMessage,
-  payload: Exclude<AssistantHydrationPayload, null>
+function ensureActiveTurn(messages: ConversationMessage[]) {
+  return getActiveTurn(messages) ? messages : [...messages, createAssistantTurnMessage()];
+}
+
+function updateOrCreateActiveTurn(
+  messages: ConversationMessage[],
+  updater: (turn: AssistantTurn) => AssistantTurn
 ) {
-  if (payload.type === "text") {
-    return {
-      ...message,
-      text: payload.text || message.text,
-      status: "done" as const
-    };
-  }
-
-  if (payload.type === "thinking") {
-    return {
-      ...message,
-      thinking: payload.thinking || message.thinking,
-      status: "done" as const
-    };
-  }
-
-  return {
-    ...message,
-    toolName: payload.toolName || message.toolName,
-    toolUseId: payload.toolUseId || message.toolUseId,
-    toolInput: payload.toolInput || message.toolInput || "",
-    toolStatus: message.toolStatus ?? "running",
-    status: "done" as const
-  };
+  return updateActiveTurn(ensureActiveTurn(messages), updater);
 }
 
-function createHydratedAssistantMessage(
-  payload: Exclude<AssistantHydrationPayload, null>
-): ChatMessage {
-  if (payload.type === "text") {
-    return createAssistantMessage("text", {
-      text: payload.text,
-      status: "done"
-    });
-  }
-
-  if (payload.type === "thinking") {
-    return createAssistantMessage("thinking", {
-      thinking: payload.thinking,
-      status: "done"
-    });
-  }
-
-  return createAssistantMessage("tool_use", {
-    toolName: payload.toolName,
-    toolUseId: payload.toolUseId,
-    toolInput: payload.toolInput,
-    toolResult: "",
-    toolStatus: "running",
-    status: "done"
-  });
-}
-
-function finalizeToolUseMessage(message: ChatMessage, status: ChatMessageStatus) {
-  if (getMessageType(message) !== "tool_use" || message.toolStatus !== "running") {
-    return message;
-  }
-
-  if (status === "done") {
-    return message;
-  }
-
-  return {
-    ...message,
-    toolStatus: "error" as const,
-    toolResult: message.toolResult || FALLBACK_TOOL_ERROR
-  };
-}
-
-export const startAssistantMessageForSessionAtom = atom(
-  null,
-  (_get, set, sessionId: string, payload: AssistantStreamStartPayload) => {
-    if (payload.type === "text") {
-      set(setSessionMessagesAtom, sessionId, (current) => [
-        ...current,
-        createAssistantMessage("text", {
-          text: payload.text ?? ""
-        })
-      ]);
-      return;
+function updateLastAssistantTurn(
+  messages: ConversationMessage[],
+  predicate: (turn: AssistantTurn) => boolean,
+  updater: (turn: AssistantTurn) => AssistantTurn
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!isAssistantTurnMessage(message) || !predicate(message.turn)) {
+      continue;
     }
 
+    const nextTurn = updater(message.turn);
+    if (nextTurn === message.turn) {
+      return messages;
+    }
+
+    const nextMessages = [...messages];
+    nextMessages[index] = {
+      ...message,
+      turn: nextTurn,
+    };
+    return nextMessages;
+  }
+
+  return messages;
+}
+
+function findLastPendingThinkingStepIndex(turn: AssistantTurn) {
+  return turn.processSteps.findLastIndex(
+    (step) => step.type === "thinking" && step.thinking.completedAt === undefined
+  );
+}
+
+function findLastRunningToolStepIndex(turn: AssistantTurn) {
+  return turn.processSteps.findLastIndex(
+    (step) => step.type === "tool" && step.tool.status === "running"
+  );
+}
+
+function completePendingThinkingSteps(turn: AssistantTurn, completedAt: number) {
+  let changed = false;
+  const processSteps = turn.processSteps.map<ProcessStep>((step) => {
+    if (step.type !== "thinking" || step.thinking.completedAt !== undefined) {
+      return step;
+    }
+
+    changed = true;
+    return {
+      type: "thinking",
+      thinking: {
+        ...step.thinking,
+        completedAt,
+      },
+    };
+  });
+
+  return changed
+    ? {
+        ...turn,
+        processSteps,
+      }
+    : turn;
+}
+
+function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResult: string) {
+  let changed = false;
+  const processSteps = turn.processSteps.map<ProcessStep>((step) => {
+    if (step.type !== "tool" || step.tool.status !== "running") {
+      return step;
+    }
+
+    changed = true;
+    return {
+      type: "tool",
+      tool: {
+        ...step.tool,
+        status: "error",
+        result: step.tool.result || fallbackResult,
+        completedAt: step.tool.completedAt ?? completedAt,
+      },
+    };
+  });
+
+  return changed
+    ? {
+        ...turn,
+        processSteps,
+      }
+    : turn;
+}
+
+export const createAssistantTurnAtom = atom<null, [string], void>(
+  null,
+  (_get, set, sessionId: string) => {
     set(setSessionMessagesAtom, sessionId, (current) => [
       ...current,
-      createAssistantMessage("thinking", {
-        thinking: payload.thinking ?? ""
-      })
+      createAssistantTurnMessage(),
     ]);
   }
 );
 
-export const appendAssistantTextForSessionAtom = atom(
+export const ensureActiveTurnAtom = atom<null, [string], void>(
   null,
-  (_get, set, sessionId: string, chunk: string) => {
-    if (chunk.length === 0) {
-      return;
-    }
-
-    set(setSessionMessagesAtom, sessionId, (current) =>
-      appendAssistantChunk(current, "text", chunk)
-    );
+  (_get, set, sessionId: string) => {
+    set(setSessionMessagesAtom, sessionId, (current) => ensureActiveTurn(current));
   }
 );
 
-export const appendAssistantThinkingForSessionAtom = atom(
+export const startBodySegmentAtom = atom<null, [string, string?], void>(
   null,
-  (_get, set, sessionId: string, chunk: string) => {
-    if (chunk.length === 0) {
-      return;
-    }
-
+  (_get, set, sessionId: string, initialText = "") => {
     set(setSessionMessagesAtom, sessionId, (current) =>
-      appendAssistantChunk(current, "thinking", chunk)
-    );
-  }
-);
-
-export const hydrateAssistantForSessionAtom = atom(
-  null,
-  (_get, set, sessionId: string, payload: AssistantHydrationPayload) => {
-    if (!payload) {
-      return;
-    }
-
-    set(setSessionMessagesAtom, sessionId, (current) => {
-      const targetIndex = findLastAssistantMessageInActiveTurn(current, (message) => {
-        if (payload.type === "tool_use") {
-          return (
-            getMessageType(message) === "tool_use" &&
-            (message.toolUseId === payload.toolUseId || message.status === "streaming")
-          );
+      updateOrCreateActiveTurn(current, (turn) => {
+        const lastSegment = turn.bodySegments[turn.bodySegments.length - 1];
+        if (lastSegment && lastSegment.text.length === 0 && initialText.length === 0) {
+          return turn;
         }
 
-        return getMessageType(message) === payload.type;
-      });
-
-      if (targetIndex === -1) {
-        return [...current, createHydratedAssistantMessage(payload)];
-      }
-
-      return current.map((message, index) =>
-        index === targetIndex ? hydrateAssistantMessage(message, payload) : message
-      );
-    });
+        return {
+          ...turn,
+          bodySegments: [
+            ...turn.bodySegments,
+            {
+              id: createId("segment"),
+              text: initialText,
+            },
+          ],
+        };
+      })
+    );
   }
 );
 
-export const startToolUseForSessionAtom = atom(
+export const appendBodyTextAtom = atom<null, [string, string], void>(
   null,
-  (_get, set, sessionId: string, toolName: string, toolUseId: string, toolInput: string = "") => {
+  (_get, set, sessionId: string, chunk: string) => {
+    if (chunk.length === 0) {
+      return;
+    }
+
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateOrCreateActiveTurn(current, (turn) => {
+        if (turn.bodySegments.length === 0) {
+          return {
+            ...turn,
+            bodySegments: [
+              {
+                id: createId("segment"),
+                text: chunk,
+              },
+            ],
+          };
+        }
+
+        return {
+          ...turn,
+          bodySegments: turn.bodySegments.map((segment, index) =>
+            index === turn.bodySegments.length - 1
+              ? {
+                  ...segment,
+                  text: `${segment.text}${chunk}`,
+                }
+              : segment
+          ),
+        };
+      })
+    );
+  }
+);
+
+export const addThinkingStepAtom = atom<null, [string, string?], void>(
+  null,
+  (_get, set, sessionId: string, initialContent = "") => {
+    const startedAt = Date.now();
+
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateOrCreateActiveTurn(current, (turn) => ({
+        ...turn,
+        processSteps: [
+          ...turn.processSteps,
+          {
+            type: "thinking",
+            thinking: {
+              id: createId("thinking"),
+              content: initialContent,
+              startedAt,
+            },
+          },
+        ],
+      }))
+    );
+  }
+);
+
+export const appendThinkingAtom = atom<null, [string, string], void>(
+  null,
+  (_get, set, sessionId: string, chunk: string) => {
+    if (chunk.length === 0) {
+      return;
+    }
+
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateOrCreateActiveTurn(current, (turn) => {
+        const targetIndex = findLastPendingThinkingStepIndex(turn);
+
+        if (targetIndex === -1) {
+          return {
+            ...turn,
+            processSteps: [
+              ...turn.processSteps,
+              {
+                type: "thinking",
+                thinking: {
+                  id: createId("thinking"),
+                  content: chunk,
+                  startedAt: Date.now(),
+                },
+              },
+            ],
+          };
+        }
+
+        return {
+          ...turn,
+          processSteps: turn.processSteps.map<ProcessStep>((step, index) =>
+            index === targetIndex && step.type === "thinking"
+              ? {
+                  type: "thinking",
+                  thinking: {
+                    ...step.thinking,
+                    content: `${step.thinking.content}${chunk}`,
+                  },
+                }
+              : step
+          ),
+        };
+      })
+    );
+  }
+);
+
+export const completeThinkingStepAtom = atom<null, [string], void>(
+  null,
+  (_get, set, sessionId: string) => {
+    const completedAt = Date.now();
+
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateActiveTurn(current, (turn) => {
+        const targetIndex = findLastPendingThinkingStepIndex(turn);
+        if (targetIndex === -1) {
+          return turn;
+        }
+
+        return {
+          ...turn,
+          processSteps: turn.processSteps.map<ProcessStep>((step, index) =>
+            index === targetIndex && step.type === "thinking"
+              ? {
+                  type: "thinking",
+                  thinking: {
+                    ...step.thinking,
+                    completedAt,
+                  },
+                }
+              : step
+          ),
+        };
+      })
+    );
+  }
+);
+
+export const addToolStepAtom = atom<null, [string, string, string, string?], void>(
+  null,
+  (_get, set, sessionId: string, toolName: string, toolUseId: string, input = "") => {
     if (!toolName || !toolUseId) {
       return;
     }
 
-    set(setSessionMessagesAtom, sessionId, (current) => [
-      ...current,
-      createAssistantMessage("tool_use", {
-        toolName,
-        toolUseId,
-        toolInput,
-        toolResult: "",
-        toolStatus: "running"
-      })
-    ]);
+    const startedAt = Date.now();
+
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateOrCreateActiveTurn(current, (turn) => ({
+        ...turn,
+        processSteps: [
+          ...turn.processSteps,
+          {
+            type: "tool",
+            tool: {
+              id: toolUseId,
+              name: toolName,
+              input,
+              status: "running",
+              startedAt,
+            },
+          },
+        ],
+      }))
+    );
   }
 );
 
-export const appendToolInputForSessionAtom = atom(
+export const appendToolInputAtom = atom<null, [string, string], void>(
   null,
   (_get, set, sessionId: string, chunk: string) => {
     if (chunk.length === 0) {
       return;
     }
 
-    set(setSessionMessagesAtom, sessionId, (current) => {
-      const targetIndex = findLastMessageIndex(
-        current,
-        (message) =>
-          message.role === "assistant" &&
-          getMessageType(message) === "tool_use" &&
-          message.status === "streaming"
-      );
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateActiveTurn(current, (turn) => {
+        const targetIndex = findLastRunningToolStepIndex(turn);
+        if (targetIndex === -1) {
+          return turn;
+        }
 
-      if (targetIndex === -1) {
-        return current;
-      }
-
-      return current.map((message, index) =>
-        index === targetIndex
-          ? {
-              ...message,
-              toolInput: `${message.toolInput ?? ""}${chunk}`
-            }
-          : message
-      );
-    });
+        return {
+          ...turn,
+          processSteps: turn.processSteps.map<ProcessStep>((step, index) =>
+            index === targetIndex && step.type === "tool"
+              ? {
+                  type: "tool",
+                  tool: {
+                    ...step.tool,
+                    input: `${step.tool.input}${chunk}`,
+                  },
+                }
+              : step
+          ),
+        };
+      })
+    );
   }
 );
 
-export const completeToolResultForSessionAtom = atom(
+export const completeToolResultAtom = atom<null, [string, string, unknown, boolean?], void>(
   null,
   (_get, set, sessionId: string, toolUseId: string, content: unknown, isError = false) => {
     if (!toolUseId) {
       return;
     }
 
+    const completedAt = Date.now();
+    const result = stringifyUnknown(content);
+
     set(setSessionMessagesAtom, sessionId, (current) =>
-      current.map((message) =>
-        message.toolUseId === toolUseId
-          ? {
-              ...message,
-              toolResult: stringifyUnknown(content),
-              toolStatus: isError ? "error" : "done",
-              status: "done"
-            }
-          : message
+      updateLastAssistantTurn(
+        current,
+        (turn) =>
+          turn.processSteps.some(
+            (step) => step.type === "tool" && step.tool.id === toolUseId
+          ),
+        (turn) => ({
+          ...turn,
+          processSteps: turn.processSteps.map<ProcessStep>((step) =>
+            step.type === "tool" && step.tool.id === toolUseId
+              ? {
+                  type: "tool",
+                  tool: {
+                    ...step.tool,
+                    result,
+                    status: isError ? "error" : "done",
+                    completedAt,
+                  },
+                }
+              : step
+          ),
+        })
       )
     );
   }
 );
 
-export const completeStreamingMessageForSessionAtom = atom(
+export const completeStreamingBlockAtom = atom<null, [string], void>(
   null,
   (_get, set, sessionId: string) => {
-    set(setSessionMessagesAtom, sessionId, (current) => {
-      const targetIndex = findLastMessageIndex(
-        current,
-        (message) => message.role === "assistant" && message.status === "streaming"
-      );
-
-      if (targetIndex === -1) {
-        return current;
-      }
-
-      return current.map((message, index) =>
-        index === targetIndex
-          ? {
-              ...message,
-              status: "done"
-            }
-          : message
-      );
-    });
+    set(setSessionMessagesAtom, sessionId, (current) => current);
   }
 );
 
-export const completeConversationForSessionAtom = atom(
+export const completeTurnAtom = atom<null, [string, "done" | "stopped"], void>(
   null,
-  (_get, set, sessionId: string, status: Exclude<ChatMessageStatus, "error">) => {
+  (_get, set, sessionId: string, status: "done" | "stopped") => {
+    const completedAt = Date.now();
+
     set(setSessionMessagesAtom, sessionId, (current) =>
-      current.map<ChatMessage>((message) => {
-        if (message.role !== "assistant") {
-          return message;
-        }
+      updateLastAssistantTurn(
+        current,
+        (turn) => turn.status === "streaming",
+        (turn) => {
+          let nextTurn = completePendingThinkingSteps(turn, completedAt);
 
-        if (message.status === "streaming") {
-          return finalizeToolUseMessage(
-            {
-              ...message,
-              status
-            },
-            status
-          );
-        }
+          if (status === "stopped") {
+            nextTurn = failRunningTools(
+              nextTurn,
+              completedAt,
+              "Tool execution stopped before returning a result."
+            );
+          }
 
-        return finalizeToolUseMessage(message, status);
-      })
+          return {
+            ...nextTurn,
+            status,
+            completedAt: nextTurn.completedAt ?? completedAt,
+          };
+        }
+      )
     );
   }
 );
 
-export const failConversationForSessionAtom = atom(
+export const failTurnAtom = atom<null, [string, string], void>(
   null,
   (_get, set, sessionId: string, errorMessage: string) => {
+    const completedAt = Date.now();
+
     set(setSessionMessagesAtom, sessionId, (current) => {
-      const lastAssistantIndex = findLastMessageIndex(
+      const updated = updateLastAssistantTurn(
         current,
-        (message) => message.role === "assistant"
+        (turn) => turn.status === "streaming",
+        (turn) => {
+          const withThinkingCompleted = completePendingThinkingSteps(turn, completedAt);
+          const withFailedTools = failRunningTools(
+            withThinkingCompleted,
+            completedAt,
+            "Tool execution stopped before returning a result."
+          );
+
+          return {
+            ...withFailedTools,
+            status: "error",
+            error: errorMessage,
+            completedAt: withFailedTools.completedAt ?? completedAt,
+          };
+        }
       );
 
-      if (lastAssistantIndex === -1) {
-        return [
-          ...current,
-          createAssistantMessage("text", {
-            text: "The agent could not start.",
-            status: "error",
-            error: errorMessage
-          })
-        ];
+      if (updated !== current) {
+        return updated;
       }
 
-      return current.map<ChatMessage>((message, index) => {
-        if (message.role !== "assistant") {
-          return message;
-        }
-
-        const isToolUse = getMessageType(message) === "tool_use";
-        const shouldMarkAsErrored =
-          index === lastAssistantIndex || message.status === "streaming";
-
-        if (!shouldMarkAsErrored && !(isToolUse && message.toolStatus === "running")) {
-          return message;
-        }
-
-        return {
-          ...message,
-          status: shouldMarkAsErrored ? "error" : message.status,
-          error: shouldMarkAsErrored ? errorMessage : message.error,
-          text:
-            getMessageType(message) === "text" && !message.text
-              ? FALLBACK_ASSISTANT_TEXT
-              : message.text,
-          toolStatus: isToolUse ? "error" : message.toolStatus,
-          toolResult:
-            isToolUse && !message.toolResult
-              ? FALLBACK_TOOL_ERROR
-              : message.toolResult
-        };
-      });
+      const turnId = createId("turn");
+      return [
+        ...current,
+        {
+          id: turnId,
+          role: "assistant",
+          timestamp: completedAt,
+          turn: {
+            id: turnId,
+            processSteps: [],
+            bodySegments: [],
+            status: "error",
+            error: errorMessage || "The agent could not start.",
+            startedAt: completedAt,
+            completedAt,
+          },
+        },
+      ];
     });
   }
 );
 
-// 操作 atoms
-
 /**
  * 开始新对话
- * 只创建用户消息，助手消息由流式事件驱动
+ * 只创建用户消息，助手 turn 由流式事件驱动
  */
-export const startConversationAtom = atom(
+export const startConversationAtom = atom<null, [string, FileAttachment[]?], void>(
   null,
   (
     _get,
@@ -721,288 +811,17 @@ export const startConversationAtom = atom(
     prompt: string,
     attachments: FileAttachment[] = []
   ) => {
-  const userId = createId("user");
+    const timestamp = Date.now();
 
     set(messagesAtom, (current) => [
       ...current,
       {
-        id: userId,
+        id: createId("user"),
         role: "user",
-        type: "text",
-        text: prompt,
-        thinking: "",
-        status: "done",
+        text: prompt.length > 0 ? prompt : undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
-      }
+        timestamp,
+      },
     ]);
   }
 );
-
-/**
- * 创建新的助手流式消息块
- * 每个 content_block_start 都会在消息尾部追加一条新消息
- */
-export const startAssistantMessageAtom = atom(
-  null,
-  (_get, set, payload: AssistantStreamStartPayload) => {
-    if (payload.type === "text") {
-      set(messagesAtom, (current) => [
-        ...current,
-        createAssistantMessage("text", {
-          text: payload.text ?? ""
-        })
-      ]);
-      return;
-    }
-
-    set(messagesAtom, (current) => [
-      ...current,
-      createAssistantMessage("thinking", {
-        thinking: payload.thinking ?? ""
-      })
-    ]);
-  }
-);
-
-/**
- * 追加助手文本内容
- */
-export const appendAssistantTextAtom = atom(null, (_get, set, chunk: string) => {
-  if (chunk.length === 0) {
-    return;
-  }
-
-  set(messagesAtom, (current) => appendAssistantChunk(current, "text", chunk));
-});
-
-/**
- * 追加助手思考内容
- */
-export const appendAssistantThinkingAtom = atom(null, (_get, set, chunk: string) => {
-  if (chunk.length === 0) {
-    return;
-  }
-
-  set(messagesAtom, (current) => appendAssistantChunk(current, "thinking", chunk));
-});
-
-/**
- * 水合助手消息
- * 用于一次性设置完整的文本和思考内容
- */
-export const hydrateAssistantAtom = atom(
-  null,
-  (_get, set, payload: AssistantHydrationPayload) => {
-    if (!payload) {
-      return;
-    }
-
-    set(messagesAtom, (current) => {
-      const targetIndex = findLastAssistantMessageInActiveTurn(current, (message) => {
-        if (payload.type === "tool_use") {
-          return (
-            getMessageType(message) === "tool_use" &&
-            (message.toolUseId === payload.toolUseId || message.status === "streaming")
-          );
-        }
-
-        return getMessageType(message) === payload.type;
-      });
-
-      if (targetIndex === -1) {
-        return [...current, createHydratedAssistantMessage(payload)];
-      }
-
-      return current.map((message, index) =>
-        index === targetIndex ? hydrateAssistantMessage(message, payload) : message
-      );
-    });
-  }
-);
-
-/**
- * 开始工具调用消息
- */
-export const startToolUseAtom = atom(
-  null,
-  (_get, set, toolName: string, toolUseId: string, toolInput: string = "") => {
-    if (!toolName || !toolUseId) {
-      return;
-    }
-
-    set(messagesAtom, (current) => [
-      ...current,
-      createAssistantMessage("tool_use", {
-        toolName,
-        toolUseId,
-        toolInput,
-        toolResult: "",
-        toolStatus: "running"
-      })
-    ]);
-  }
-);
-
-/**
- * 追加工具输入内容
- */
-export const appendToolInputAtom = atom(null, (_get, set, chunk: string) => {
-  if (chunk.length === 0) {
-    return;
-  }
-
-  set(messagesAtom, (current) => {
-    const targetIndex = findLastMessageIndex(
-      current,
-      (message) =>
-        message.role === "assistant" &&
-        getMessageType(message) === "tool_use" &&
-        message.status === "streaming"
-    );
-
-    if (targetIndex === -1) {
-      return current;
-    }
-
-    return current.map((message, index) =>
-      index === targetIndex
-        ? {
-            ...message,
-            toolInput: `${message.toolInput ?? ""}${chunk}`
-          }
-        : message
-    );
-  });
-});
-
-/**
- * 补全工具结果
- */
-export const completeToolResultAtom = atom(
-  null,
-  (_get, set, toolUseId: string, content: unknown, isError = false) => {
-    if (!toolUseId) {
-      return;
-    }
-
-    set(messagesAtom, (current) =>
-      current.map((message) =>
-        message.toolUseId === toolUseId
-          ? {
-              ...message,
-              toolResult: stringifyUnknown(content),
-              toolStatus: isError ? "error" : "done",
-              status: "done"
-            }
-          : message
-      )
-    );
-  }
-);
-
-/**
- * 结束当前流式块
- */
-export const completeStreamingMessageAtom = atom(null, (_get, set) => {
-  set(messagesAtom, (current) => {
-    const targetIndex = findLastMessageIndex(
-      current,
-      (message) => message.role === "assistant" && message.status === "streaming"
-    );
-
-    if (targetIndex === -1) {
-      return current;
-    }
-
-    return current.map((message, index) =>
-      index === targetIndex
-        ? {
-            ...message,
-            status: "done"
-          }
-        : message
-    );
-  });
-});
-
-/**
- * 完成对话
- * 设置最终状态并清理运行标志
- */
-export const completeConversationAtom = atom(
-  null,
-  (_get, set, status: Exclude<ChatMessageStatus, "error">) => {
-    set(messagesAtom, (current) =>
-      current.map<ChatMessage>((message) => {
-        if (message.role !== "assistant") {
-          return message;
-        }
-
-        if (message.status === "streaming") {
-          return finalizeToolUseMessage(
-            {
-              ...message,
-              status
-            },
-            status
-          );
-        }
-
-        return finalizeToolUseMessage(message, status);
-      })
-    );
-  }
-);
-
-/**
- * 对话失败
- * 设置错误状态和错误消息
- */
-export const failConversationAtom = atom(null, (_get, set, errorMessage: string) => {
-  set(messagesAtom, (current) => {
-    const lastAssistantIndex = findLastMessageIndex(
-      current,
-      (message) => message.role === "assistant"
-    );
-
-    if (lastAssistantIndex === -1) {
-      return [
-        ...current,
-        createAssistantMessage("text", {
-          text: "The agent could not start.",
-          status: "error",
-          error: errorMessage
-        })
-      ];
-    }
-
-    return current.map<ChatMessage>((message, index) => {
-      if (message.role !== "assistant") {
-        return message;
-      }
-
-      const isToolUse = getMessageType(message) === "tool_use";
-      const shouldMarkAsErrored =
-        index === lastAssistantIndex || message.status === "streaming";
-
-      if (!shouldMarkAsErrored && !(isToolUse && message.toolStatus === "running")) {
-        return message;
-      }
-
-      return {
-        ...message,
-        status: shouldMarkAsErrored ? "error" : message.status,
-        error: shouldMarkAsErrored ? errorMessage : message.error,
-        text:
-          getMessageType(message) === "text" && !message.text
-            ? FALLBACK_ASSISTANT_TEXT
-            : message.text,
-        toolStatus: isToolUse ? "error" : message.toolStatus,
-        toolResult:
-          isToolUse && !message.toolResult
-            ? FALLBACK_TOOL_ERROR
-            : message.toolResult
-      };
-    });
-  });
-});
