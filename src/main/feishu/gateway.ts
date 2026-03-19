@@ -470,8 +470,12 @@ export class FeishuGateway {
         }
 
         resolvedReactionId =
-          listResponse.data?.items.find(
-            (item) =>
+          listResponse.data?.items?.find(
+            (item: {
+              operator?: { operator_type?: string };
+              reaction_type?: { emoji_type?: string };
+              reaction_id?: string | null;
+            }) =>
               item.operator?.operator_type === "app" &&
               item.reaction_type?.emoji_type === TYPING_REACTION_EMOJI
           )?.reaction_id ?? null;

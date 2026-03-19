@@ -51,25 +51,50 @@ export interface WorkspaceMeta {
   updatedAt: string;
 }
 
-export type ChatMessageStatus = "streaming" | "done" | "stopped" | "error";
-export type ChatMessageType = "text" | "thinking" | "tool_use";
-export type ChatToolStatus = "running" | "done" | "error";
+export interface ToolAction {
+  id: string;
+  name: string;
+  input: string;
+  result?: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  completedAt?: number;
+}
 
-export type ChatMessage = {
+export interface ThinkingBlock {
+  id: string;
+  content: string;
+  startedAt: number;
+  completedAt?: number;
+}
+
+export type ProcessStep =
+  | { type: "thinking"; thinking: ThinkingBlock }
+  | { type: "tool"; tool: ToolAction };
+
+export interface BodySegment {
+  id: string;
+  text: string;
+}
+
+export interface AssistantTurn {
+  id: string;
+  processSteps: ProcessStep[];
+  bodySegments: BodySegment[];
+  status: "streaming" | "done" | "stopped" | "error";
+  error?: string;
+  startedAt: number;
+  completedAt?: number;
+}
+
+export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
-  type?: ChatMessageType;
-  text: string;
-  thinking: string;
-  status: ChatMessageStatus;
+  text?: string;
   attachments?: FileAttachment[];
-  error?: string;
-  toolName?: string;
-  toolUseId?: string;
-  toolInput?: string;
-  toolResult?: string;
-  toolStatus?: ChatToolStatus;
-};
+  turn?: AssistantTurn;
+  timestamp: number;
+}
 
 export type AgentControlEvent =
   | {
@@ -188,7 +213,7 @@ export interface ZoraApi {
   openSkillsDir: () => Promise<void>;
   openSkillDir: (dirName: string) => Promise<void>;
   listSessions: (workspaceId?: string) => Promise<SessionMeta[]>;
-  loadMessages: (sessionId: string, workspaceId?: string) => Promise<ChatMessage[]>;
+  loadMessages: (sessionId: string, workspaceId?: string) => Promise<ConversationMessage[]>;
   createSession: (title: string, workspaceId?: string) => Promise<SessionMeta>;
   deleteSession: (sessionId: string, workspaceId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string, workspaceId?: string) => Promise<void>;

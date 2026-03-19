@@ -1,12 +1,14 @@
-import type { ChatMessage } from "../../../shared/zora";
+import type { ConversationMessage } from "../../../shared/zora";
 import { MarkdownMessage } from "../chat/MarkdownMessage";
 
 interface Props {
-  message: ChatMessage;
+  message: ConversationMessage;
 }
 
 export function AwakeningMessage({ message }: Props) {
   const isUser = message.role === "user";
+  const assistantText = message.turn?.bodySegments.map((segment) => segment.text).join("\n\n") ?? "";
+  const isStreaming = message.turn?.status === "streaming";
 
   return (
     <div className={`flex flex-col w-full ${isUser ? "items-end" : "items-start"}`}>
@@ -21,16 +23,14 @@ export function AwakeningMessage({ message }: Props) {
           .filter(Boolean)
           .join(" ")}
       >
-        {message.text ? (
-          isUser ? (
-            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
-          ) : (
-            <div className="text-[16px] leading-relaxed">
-              <MarkdownMessage content={message.text} />
-            </div>
-          )
+        {isUser && message.text ? (
+          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
+        ) : !isUser && assistantText ? (
+          <div className="text-[16px] leading-relaxed">
+            <MarkdownMessage content={assistantText} />
+          </div>
         ) : (
-          message.status === "streaming" && !isUser && (
+          isStreaming && !isUser && (
             <span className="inline-block w-2 h-2 rounded-full bg-stone-300 animate-pulse mt-2" />
           )
         )}

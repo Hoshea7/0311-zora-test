@@ -1,24 +1,26 @@
 import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import {
-  startAssistantMessageForSessionAtom,
-  appendAssistantTextForSessionAtom,
-  appendAssistantThinkingForSessionAtom,
-  appendToolInputForSessionAtom,
-  completeStreamingMessageForSessionAtom,
-  completeToolResultForSessionAtom,
-  hydrateAssistantForSessionAtom,
-  completeConversationForSessionAtom,
-  failConversationForSessionAtom,
-  startToolUseForSessionAtom,
+  addThinkingStepAtom,
+  addToolStepAtom,
+  appendBodyTextAtom,
+  appendThinkingAtom,
+  appendToolInputAtom,
+  completeStreamingBlockAtom,
+  completeThinkingStepAtom,
+  completeToolResultAtom,
+  completeTurnAtom,
+  ensureActiveTurnAtom,
+  failTurnAtom,
   isAgentIdleAtom,
   messagesAtom,
-  setSessionRunningAtom
+  setSessionRunningAtom,
+  startBodySegmentAtom,
 } from "./store/chat";
 import {
   appPhaseAtom,
   checkAwakeningAtom,
-  completeAwakeningAtom
+  completeAwakeningAtom,
 } from "./store/zora";
 import {
   pushPermissionAtom,
@@ -29,13 +31,16 @@ import {
 } from "./store/hitl";
 import { loadProvidersAtom } from "./store/provider";
 import { currentSessionIdAtom } from "./store/workspace";
-import type { AgentRunSource, PermissionRequest, AskUserRequest } from "../shared/zora";
+import type {
+  AgentRunSource,
+  AskUserRequest,
+  PermissionRequest,
+} from "../shared/zora";
 import {
   extractStreamChunks,
-  extractAssistantPayload,
   extractToolResultContent,
   getAgentErrorText,
-  isRecord
+  isRecord,
 } from "./utils/message";
 import { AppShell } from "./components/layout/AppShell";
 import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
@@ -48,33 +53,48 @@ function normalizeRunSource(value: unknown): AgentRunSource | undefined {
     : undefined;
 }
 
-/**
- * 应用根组件
- * 管理 App 生命周期阶段（splash → awakening → chat）
- * 负责初始化和流式事件处理
- */
+function mergeThinkingSeedWithDelta(seed: string, delta: string): string {
+  if (seed.length === 0) {
+    return delta;
+  }
+
+  const maxOverlap = Math.min(seed.length, delta.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    if (seed.slice(-overlap) === delta.slice(0, overlap)) {
+      return `${seed}${delta.slice(overlap)}`;
+    }
+  }
+
+  return `${seed}${delta}`;
+}
+
 export default function App() {
   const appPhase = useAtomValue(appPhaseAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const appPhaseRef = useRef(appPhase);
   const toolInputBufferRef = useRef(new Map<string, string>());
   const toolInputFlushTimerRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const activeBlockTypeRef = useRef<string | null>(null);
+  const pendingThinkingSeedRef = useRef("");
+  const activeThinkingHasDeltaRef = useRef(false);
   const store = useStore();
   const checkAwakening = useSetAtom(checkAwakeningAtom);
   const completeAwakening = useSetAtom(completeAwakeningAtom);
   const loadProviders = useSetAtom(loadProvidersAtom);
   const setMessages = useSetAtom(messagesAtom);
 
-  const startAssistantMessage = useSetAtom(startAssistantMessageForSessionAtom);
-  const appendAssistantText = useSetAtom(appendAssistantTextForSessionAtom);
-  const appendAssistantThinking = useSetAtom(appendAssistantThinkingForSessionAtom);
-  const appendToolInput = useSetAtom(appendToolInputForSessionAtom);
-  const completeStreamingMessage = useSetAtom(completeStreamingMessageForSessionAtom);
-  const completeToolResult = useSetAtom(completeToolResultForSessionAtom);
-  const hydrateAssistant = useSetAtom(hydrateAssistantForSessionAtom);
-  const completeConversation = useSetAtom(completeConversationForSessionAtom);
-  const failConversation = useSetAtom(failConversationForSessionAtom);
-  const startToolUse = useSetAtom(startToolUseForSessionAtom);
+  const ensureActiveTurn = useSetAtom(ensureActiveTurnAtom);
+  const startBodySegment = useSetAtom(startBodySegmentAtom);
+  const appendBodyText = useSetAtom(appendBodyTextAtom);
+  const addThinkingStep = useSetAtom(addThinkingStepAtom);
+  const appendThinking = useSetAtom(appendThinkingAtom);
+  const completeThinkingStep = useSetAtom(completeThinkingStepAtom);
+  const addToolStep = useSetAtom(addToolStepAtom);
+  const appendToolInput = useSetAtom(appendToolInputAtom);
+  const completeStreamingBlock = useSetAtom(completeStreamingBlockAtom);
+  const completeToolResult = useSetAtom(completeToolResultAtom);
+  const completeTurn = useSetAtom(completeTurnAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const pushPermission = useSetAtom(pushPermissionAtom);
@@ -83,7 +103,6 @@ export default function App() {
   const resolveAskUser = useSetAtom(resolveAskUserAtom);
   const clearHitlForSession = useSetAtom(clearHitlForSessionAtom);
 
-  // 启动阶段：检查唤醒状态
   useEffect(() => {
     checkAwakening();
   }, [checkAwakening]);
@@ -91,10 +110,6 @@ export default function App() {
   useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
-
-  useEffect(() => {
-    console.log(`[app] Current mode: ${appPhase}`);
-  }, [appPhase]);
 
   useEffect(() => {
     appPhaseRef.current = appPhase;
@@ -138,7 +153,6 @@ export default function App() {
     };
   }, [setSessionRunning]);
 
-  // 处理 Agent 流式事件（awakening 和 chat 阶段都需要）
   useEffect(() => {
     const zora = window.zora;
     if (!zora) {
@@ -159,6 +173,25 @@ export default function App() {
       idleTimer = setTimeout(() => setIsAgentIdle(true), 450);
     };
 
+    const resetThinkingStreamState = () => {
+      pendingThinkingSeedRef.current = "";
+      activeThinkingHasDeltaRef.current = false;
+    };
+
+    const flushPendingThinkingSeed = (sessionId: string) => {
+      if (
+        activeBlockTypeRef.current !== "thinking" ||
+        activeThinkingHasDeltaRef.current ||
+        pendingThinkingSeedRef.current.length === 0
+      ) {
+        resetThinkingStreamState();
+        return;
+      }
+
+      appendThinking(sessionId, pendingThinkingSeedRef.current);
+      resetThinkingStreamState();
+    };
+
     const flushToolInput = (sessionId: string) => {
       const pending = toolInputBufferRef.current.get(sessionId);
       if (!pending) {
@@ -173,10 +206,8 @@ export default function App() {
         toolInputFlushTimerRef.current.delete(sessionId);
       }
 
-      appendToolInput(targetSessionIdFromFlush(sessionId), pending);
+      appendToolInput(sessionId, pending);
     };
-
-    const targetSessionIdFromFlush = (sessionId: string) => sessionId;
 
     const scheduleToolInputFlush = (sessionId: string, chunk: string) => {
       const previous = toolInputBufferRef.current.get(sessionId) ?? "";
@@ -201,49 +232,34 @@ export default function App() {
 
     const unsubscribe = zora.onStream((streamEvent) => {
       const eventSessionId = streamEvent.sessionId;
-      const currentSessionId = store.get(currentSessionIdAtom);
+      const activeSessionId = store.get(currentSessionIdAtom);
       const activeMessageSessionId =
-        appPhaseRef.current.startsWith("awakening") ? "__awakening__" : currentSessionId;
+        appPhaseRef.current.startsWith("awakening") ? "__awakening__" : activeSessionId;
       const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
       const targetSessionId = eventSessionId ?? activeMessageSessionId;
 
-      console.log(`[renderer event][mode:${appPhaseRef.current}]`, streamEvent);
-
-      // ─── HITL 事件分发 ───
       if (streamEvent.type === "permission_request" && "request" in streamEvent) {
         const request = streamEvent.request as PermissionRequest;
-        console.log("[renderer][hitl] Received permission_request.", {
-          requestId: request.requestId,
-          toolName: request.toolName,
-          description: request.description,
-        });
         if (targetSessionId) {
           pushPermission({ request, sessionId: targetSessionId });
         }
         return;
       }
+
       if (streamEvent.type === "permission_resolved" && "requestId" in streamEvent) {
-        console.log("[renderer][hitl] Received permission_resolved.", {
-          requestId: streamEvent.requestId,
-        });
         resolvePermission(streamEvent.requestId as string);
         return;
       }
+
       if (streamEvent.type === "ask_user_request" && "request" in streamEvent) {
         const request = streamEvent.request as AskUserRequest;
-        console.log("[renderer][hitl] Received ask_user_request.", {
-          requestId: request.requestId,
-          questionCount: request.questions.length,
-        });
         if (targetSessionId) {
           pushAskUser({ request, sessionId: targetSessionId });
         }
         return;
       }
+
       if (streamEvent.type === "ask_user_resolved" && "requestId" in streamEvent) {
-        console.log("[renderer][hitl] Received ask_user_resolved.", {
-          requestId: streamEvent.requestId,
-        });
         resolveAskUser(streamEvent.requestId as string);
         return;
       }
@@ -256,7 +272,9 @@ export default function App() {
         }
 
         if (targetSessionId) {
-          failConversation(
+          flushPendingThinkingSeed(targetSessionId);
+          activeBlockTypeRef.current = null;
+          failTurn(
             targetSessionId,
             getAgentErrorText(isRecord(streamEvent) ? streamEvent.error : undefined)
           );
@@ -285,12 +303,17 @@ export default function App() {
         if (streamEvent.status === "finished") {
           flushAllToolInput();
 
+          if (targetSessionId) {
+            flushPendingThinkingSeed(targetSessionId);
+          }
+          activeBlockTypeRef.current = null;
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
 
           if (targetSessionId) {
-            completeConversation(targetSessionId, "done");
+            completeTurn(targetSessionId, "done");
             clearHitlForSession(targetSessionId);
           }
 
@@ -317,12 +340,17 @@ export default function App() {
         if (streamEvent.status === "stopped") {
           flushAllToolInput();
 
+          if (targetSessionId) {
+            flushPendingThinkingSeed(targetSessionId);
+          }
+          activeBlockTypeRef.current = null;
+
           if (eventSessionId) {
             setSessionRunning(eventSessionId, false);
           }
 
           if (targetSessionId) {
-            completeConversation(targetSessionId, "stopped");
+            completeTurn(targetSessionId, "stopped");
             clearHitlForSession(targetSessionId);
           }
 
@@ -366,17 +394,12 @@ export default function App() {
       }
 
       if (streamEvent.type === "assistant") {
-        flushToolInput(targetSessionId);
-        hydrateAssistant(targetSessionId, extractAssistantPayload(streamEvent.message));
-        if (isCurrentSessionEvent) {
-          bumpContentActivity();
-        }
         return;
       }
 
       if (streamEvent.type === "result") {
         flushToolInput(targetSessionId);
-        completeConversation(targetSessionId, "done");
+        flushPendingThinkingSeed(targetSessionId);
         if (isCurrentSessionEvent) {
           clearIdleTimer();
           setIsAgentIdle(false);
@@ -387,23 +410,36 @@ export default function App() {
       const chunks = extractStreamChunks(streamEvent);
       if (chunks.blockStart) {
         if (chunks.blockStart.type === "tool_use") {
-          console.log("[renderer][tool] tool_use started.", {
-            sessionId: targetSessionId,
-            toolName: chunks.blockStart.toolName,
-            toolUseId: chunks.blockStart.toolUseId,
-            initialInput: chunks.blockStart.toolInput,
-          });
-          startToolUse(
+          if (activeBlockTypeRef.current === "thinking") {
+            flushPendingThinkingSeed(targetSessionId);
+          }
+          ensureActiveTurn(targetSessionId);
+          addToolStep(
             targetSessionId,
             chunks.blockStart.toolName,
             chunks.blockStart.toolUseId,
             chunks.blockStart.toolInput
           );
+          activeBlockTypeRef.current = "tool_use";
           if (isCurrentSessionEvent) {
             bumpContentActivity();
           }
         } else {
-          startAssistantMessage(targetSessionId, chunks.blockStart);
+          ensureActiveTurn(targetSessionId);
+          if (chunks.blockStart.type === "text") {
+            if (activeBlockTypeRef.current === "thinking") {
+              flushPendingThinkingSeed(targetSessionId);
+            } else {
+              resetThinkingStreamState();
+            }
+            startBodySegment(targetSessionId, chunks.blockStart.text ?? "");
+            activeBlockTypeRef.current = "text";
+          } else {
+            pendingThinkingSeedRef.current = chunks.blockStart.thinking ?? "";
+            activeThinkingHasDeltaRef.current = false;
+            addThinkingStep(targetSessionId, "");
+            activeBlockTypeRef.current = "thinking";
+          }
           if (isCurrentSessionEvent) {
             bumpContentActivity();
           }
@@ -411,25 +447,32 @@ export default function App() {
       }
 
       if (chunks.textDelta) {
-        appendAssistantText(targetSessionId, chunks.textDelta);
+        appendBodyText(targetSessionId, chunks.textDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
         }
       }
 
       if (chunks.thinkingDelta) {
-        appendAssistantThinking(targetSessionId, chunks.thinkingDelta);
+        if (activeBlockTypeRef.current === "thinking" && !activeThinkingHasDeltaRef.current) {
+          activeThinkingHasDeltaRef.current = true;
+          appendThinking(
+            targetSessionId,
+            mergeThinkingSeedWithDelta(
+              pendingThinkingSeedRef.current,
+              chunks.thinkingDelta
+            )
+          );
+          pendingThinkingSeedRef.current = "";
+        } else {
+          appendThinking(targetSessionId, chunks.thinkingDelta);
+        }
         if (isCurrentSessionEvent) {
           bumpContentActivity();
         }
       }
 
       if (chunks.toolInputDelta) {
-        console.log("[renderer][tool] tool_use input delta.", {
-          sessionId: targetSessionId,
-          chunkLength: chunks.toolInputDelta.length,
-          chunkPreview: chunks.toolInputDelta.slice(0, 120),
-        });
         scheduleToolInputFlush(targetSessionId, chunks.toolInputDelta);
         if (isCurrentSessionEvent) {
           bumpContentActivity();
@@ -442,7 +485,13 @@ export default function App() {
         streamEvent.event.type === "content_block_stop"
       ) {
         flushToolInput(targetSessionId);
-        completeStreamingMessage(targetSessionId);
+        completeStreamingBlock(targetSessionId);
+        if (activeBlockTypeRef.current === "thinking") {
+          flushPendingThinkingSeed(targetSessionId);
+          completeThinkingStep(targetSessionId);
+        }
+        activeBlockTypeRef.current = null;
+        resetThinkingStreamState();
       }
     });
 
@@ -454,16 +503,18 @@ export default function App() {
       unsubscribe();
     };
   }, [
-    startAssistantMessage,
-    appendAssistantText,
-    appendAssistantThinking,
+    ensureActiveTurn,
+    startBodySegment,
+    appendBodyText,
+    addThinkingStep,
+    appendThinking,
+    completeThinkingStep,
+    addToolStep,
     appendToolInput,
-    completeConversation,
-    completeStreamingMessage,
+    completeStreamingBlock,
     completeToolResult,
-    failConversation,
-    hydrateAssistant,
-    startToolUse,
+    completeTurn,
+    failTurn,
     setIsAgentIdle,
     store,
     completeAwakening,
@@ -473,7 +524,7 @@ export default function App() {
     resolvePermission,
     pushAskUser,
     resolveAskUser,
-    clearHitlForSession
+    clearHitlForSession,
   ]);
 
   if (appPhase === "splash") {
@@ -492,7 +543,5 @@ export default function App() {
     return <AwakeningComplete />;
   }
 
-  return (
-    <AppShell />
-  );
+  return <AppShell />;
 }

@@ -12,7 +12,12 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { ChatMessage, FileAttachment } from "../shared/zora";
+import type {
+  AssistantTurn,
+  ConversationMessage,
+  FileAttachment,
+  ProcessStep,
+} from "../shared/zora";
 
 export interface SessionMeta {
   id: string;
@@ -245,14 +250,17 @@ export async function getSdkSessionId(
   return sessions.find((session) => session.id === sessionId)?.sdkSessionId;
 }
 
+type PersistedUserMessage = Omit<ConversationMessage, "attachments" | "turn"> & {
+  role: "user";
+  attachments?: SavedAttachmentMeta[];
+};
+
 type MessageRecord =
   | {
       kind: "user";
-      message: Omit<ChatMessage, "attachments"> & {
-        attachments?: SavedAttachmentMeta[];
-      };
+      message: PersistedUserMessage;
     }
-  | { kind: "assistant_block"; message: ChatMessage }
+  | { kind: "assistant_turn"; turn: AssistantTurn }
   | { kind: "tool_result"; toolUseId: string; result: string; isError: boolean };
 
 function getJsonlPath(sessionId: string, workspaceId = "default"): string {
@@ -273,6 +281,253 @@ function getAttachmentPath(
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringifyPersistedValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function createAssistantMessageFromTurn(turn: AssistantTurn): ConversationMessage {
+  return {
+    id: turn.id,
+    role: "assistant",
+    turn,
+    timestamp: turn.startedAt,
+  };
+}
+
+function mergeAssistantTurns(
+  existingTurn: AssistantTurn,
+  nextTurn: AssistantTurn
+): AssistantTurn {
+  return {
+    ...existingTurn,
+    processSteps: [...existingTurn.processSteps, ...nextTurn.processSteps],
+    bodySegments: [...existingTurn.bodySegments, ...nextTurn.bodySegments],
+    status: "done",
+    error: nextTurn.error ?? existingTurn.error,
+    completedAt: nextTurn.completedAt ?? existingTurn.completedAt,
+  };
+}
+
+function normalizeTurn(rawTurn: unknown): AssistantTurn | null {
+  if (!isRecord(rawTurn)) {
+    return null;
+  }
+
+  const startedAt =
+    typeof rawTurn.startedAt === "number" ? rawTurn.startedAt : Date.now();
+  const completedAt =
+    typeof rawTurn.completedAt === "number" ? rawTurn.completedAt : undefined;
+  const status =
+    rawTurn.status === "streaming" ||
+    rawTurn.status === "done" ||
+    rawTurn.status === "stopped" ||
+    rawTurn.status === "error"
+      ? rawTurn.status
+      : "done";
+
+  const bodySegments = Array.isArray(rawTurn.bodySegments)
+    ? rawTurn.bodySegments.flatMap((segment) => {
+        if (!isRecord(segment)) {
+          return [];
+        }
+
+        return [
+          {
+            id: typeof segment.id === "string" ? segment.id : makeId("segment"),
+            text: typeof segment.text === "string" ? segment.text : "",
+          },
+        ];
+      })
+    : [];
+
+  const processSteps = Array.isArray(rawTurn.processSteps)
+    ? rawTurn.processSteps.reduce<ProcessStep[]>((steps, step) => {
+        if (!isRecord(step)) {
+          return steps;
+        }
+
+        if (step.type === "thinking" && isRecord(step.thinking)) {
+          steps.push({
+            type: "thinking",
+            thinking: {
+              id:
+                typeof step.thinking.id === "string"
+                  ? step.thinking.id
+                  : makeId("thinking"),
+              content:
+                typeof step.thinking.content === "string"
+                  ? step.thinking.content
+                  : "",
+              startedAt:
+                typeof step.thinking.startedAt === "number"
+                  ? step.thinking.startedAt
+                  : startedAt,
+              completedAt:
+                typeof step.thinking.completedAt === "number"
+                  ? step.thinking.completedAt
+                  : undefined,
+            },
+          });
+          return steps;
+        }
+
+        if (step.type === "tool" && isRecord(step.tool)) {
+          steps.push({
+            type: "tool",
+            tool: {
+              id:
+                typeof step.tool.id === "string" ? step.tool.id : makeId("tool"),
+              name:
+                typeof step.tool.name === "string" ? step.tool.name : "unknown",
+              input:
+                typeof step.tool.input === "string" ? step.tool.input : "",
+              result:
+                typeof step.tool.result === "string" ? step.tool.result : undefined,
+              status:
+                step.tool.status === "done" ||
+                step.tool.status === "error" ||
+                step.tool.status === "running"
+                  ? step.tool.status
+                  : "running",
+              startedAt:
+                typeof step.tool.startedAt === "number"
+                  ? step.tool.startedAt
+                  : startedAt,
+              completedAt:
+                typeof step.tool.completedAt === "number"
+                  ? step.tool.completedAt
+                  : undefined,
+            },
+          });
+        }
+
+        return steps;
+      }, [])
+    : [];
+
+  return {
+    id: typeof rawTurn.id === "string" ? rawTurn.id : makeId("turn"),
+    processSteps,
+    bodySegments,
+    status,
+    error: typeof rawTurn.error === "string" ? rawTurn.error : undefined,
+    startedAt,
+    completedAt,
+  };
+}
+
+function applyToolResultToTurn(
+  turn: AssistantTurn,
+  toolUseId: string,
+  result: string,
+  isError: boolean
+) {
+  if (!turn.processSteps.some((step) => step.type === "tool" && step.tool.id === toolUseId)) {
+    return turn;
+  }
+
+  return {
+    ...turn,
+    processSteps: turn.processSteps.map<ProcessStep>((step) =>
+      step.type === "tool" && step.tool.id === toolUseId
+        ? {
+            type: "tool",
+            tool: {
+              ...step.tool,
+              result,
+              status: isError ? "error" : "done",
+            },
+          }
+        : step
+    ),
+  };
+}
+
+function restoreLegacyAssistantBlock(message: unknown): ConversationMessage | null {
+  if (!isRecord(message)) {
+    return null;
+  }
+
+  const now = Date.now();
+  const turnId = typeof message.id === "string" ? message.id : makeId("turn");
+  const status =
+    message.status === "streaming" ||
+    message.status === "done" ||
+    message.status === "stopped" ||
+    message.status === "error"
+      ? message.status
+      : "done";
+
+  const turn: AssistantTurn = {
+    id: turnId,
+    processSteps: [],
+    bodySegments: [],
+    status,
+    error: typeof message.error === "string" ? message.error : undefined,
+    startedAt: now,
+    completedAt: status === "streaming" ? undefined : now,
+  };
+
+  if (message.type === "thinking" && typeof message.thinking === "string") {
+    turn.processSteps.push({
+      type: "thinking",
+      thinking: {
+        id: makeId("thinking"),
+        content: message.thinking,
+        startedAt: now,
+        completedAt: turn.completedAt,
+      },
+    });
+  } else if (message.type === "tool_use") {
+    turn.processSteps.push({
+      type: "tool",
+      tool: {
+        id: typeof message.toolUseId === "string" ? message.toolUseId : makeId("tool"),
+        name: typeof message.toolName === "string" ? message.toolName : "unknown",
+        input: typeof message.toolInput === "string" ? message.toolInput : "",
+        result:
+          typeof message.toolResult === "string" ? message.toolResult : undefined,
+        status:
+          message.toolStatus === "done" ||
+          message.toolStatus === "error" ||
+          message.toolStatus === "running"
+            ? message.toolStatus
+            : "running",
+        startedAt: now,
+        completedAt:
+          typeof message.toolResult === "string" || message.toolStatus === "done"
+            ? now
+            : undefined,
+      },
+    });
+  }
+
+  if (typeof message.text === "string" && message.text.length > 0) {
+    turn.bodySegments.push({
+      id: makeId("segment"),
+      text: message.text,
+    });
+  }
+
+  return createAssistantMessageFromTurn(turn);
 }
 
 export async function saveAttachments(
@@ -347,7 +602,7 @@ export async function appendMessageRecord(
 export async function loadMessages(
   sessionId: string,
   workspaceId = "default"
-): Promise<ChatMessage[]> {
+): Promise<ConversationMessage[]> {
   await ensureSessionsDir(workspaceId);
 
   let content: string;
@@ -358,7 +613,7 @@ export async function loadMessages(
     return [];
   }
 
-  const messages: ChatMessage[] = [];
+  const messages: ConversationMessage[] = [];
   let restoredInlineImageCount = 0;
 
   for (const line of content.split("\n")) {
@@ -367,16 +622,45 @@ export async function loadMessages(
     }
 
     try {
-      const record = JSON.parse(line) as MessageRecord;
+      const record = JSON.parse(line) as MessageRecord | {
+        kind: "assistant_block";
+        message: unknown;
+      };
+
+      if (record.kind === "assistant_turn") {
+        const turn = normalizeTurn(record.turn);
+        if (turn) {
+          const lastMessage = messages.at(-1);
+
+          if (lastMessage?.role === "assistant" && lastMessage.turn) {
+            messages[messages.length - 1] = {
+              ...lastMessage,
+              turn: mergeAssistantTurns(lastMessage.turn, turn),
+            };
+          } else {
+            messages.push(createAssistantMessageFromTurn(turn));
+          }
+        }
+        continue;
+      }
 
       if (record.kind === "assistant_block") {
-        messages.push(record.message);
+        const legacyMessage = restoreLegacyAssistantBlock(record.message);
+        if (legacyMessage) {
+          messages.push(legacyMessage);
+        }
         continue;
       }
 
       if (record.kind === "user") {
         const { attachments, ...message } = record.message;
-        const restoredMessage: ChatMessage = { ...message };
+        const restoredMessage: ConversationMessage = {
+          id: typeof message.id === "string" ? message.id : makeId("user"),
+          role: "user",
+          text: typeof message.text === "string" ? message.text : undefined,
+          timestamp:
+            typeof message.timestamp === "number" ? message.timestamp : Date.now(),
+        };
 
         if (Array.isArray(attachments) && attachments.length > 0) {
           const restoredAttachments: FileAttachment[] = [];
@@ -431,14 +715,29 @@ export async function loadMessages(
       }
 
       for (let index = messages.length - 1; index >= 0; index -= 1) {
-        if (messages[index].toolUseId === record.toolUseId) {
-          messages[index] = {
-            ...messages[index],
-            toolResult: record.result,
-            toolStatus: record.isError ? "error" : "done",
-          };
-          break;
+        const message = messages[index];
+        if (message.role !== "assistant" || !message.turn) {
+          continue;
         }
+
+        if (
+          !message.turn.processSteps.some(
+            (step) => step.type === "tool" && step.tool.id === record.toolUseId
+          )
+        ) {
+          continue;
+        }
+
+        messages[index] = {
+          ...message,
+          turn: applyToolResultToTurn(
+            message.turn,
+            record.toolUseId,
+            record.result,
+            record.isError
+          ),
+        };
+        break;
       }
     } catch {
       // Ignore malformed lines so one bad record does not block loading.
@@ -453,74 +752,72 @@ export function persistAssistantMessage(
   sdkMessage: unknown,
   workspaceId = "default"
 ): void {
-  if (typeof sdkMessage !== "object" || sdkMessage === null) {
+  if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
     return;
   }
 
-  const content = (sdkMessage as Record<string, unknown>).content;
-  if (!Array.isArray(content)) {
+  const startedAt = Date.now();
+  const turn: AssistantTurn = {
+    id: makeId("turn"),
+    processSteps: [],
+    bodySegments: [],
+    status: "done",
+    startedAt,
+    completedAt: startedAt,
+  };
+
+  for (const block of sdkMessage.content) {
+    if (!isRecord(block)) {
+      continue;
+    }
+
+    if (block.type === "text" && typeof block.text === "string") {
+      turn.bodySegments.push({
+        id: typeof block.id === "string" ? block.id : makeId("segment"),
+        text: block.text,
+      });
+      continue;
+    }
+
+    if (block.type === "thinking" && typeof block.thinking === "string") {
+      turn.processSteps.push({
+        type: "thinking",
+        thinking: {
+          id: typeof block.id === "string" ? block.id : makeId("thinking"),
+          content: block.thinking,
+          startedAt,
+          completedAt: startedAt,
+        },
+      });
+      continue;
+    }
+
+    if (block.type === "tool_use") {
+      turn.processSteps.push({
+        type: "tool",
+        tool: {
+          id: typeof block.id === "string" ? block.id : makeId("tool"),
+          name: typeof block.name === "string" ? block.name : "unknown",
+          input: stringifyPersistedValue(block.input),
+          status: "running",
+          startedAt,
+        },
+      });
+    }
+  }
+
+  if (turn.processSteps.length === 0 && turn.bodySegments.length === 0) {
     return;
   }
 
-  for (const block of content) {
-    if (typeof block !== "object" || block === null) {
-      continue;
-    }
-
-    const item = block as Record<string, unknown>;
-
-    if (item.type === "text" && typeof item.text === "string") {
-      void appendMessageRecord(sessionId, {
-        kind: "assistant_block",
-        message: {
-          id: makeId("text"),
-          role: "assistant",
-          type: "text",
-          text: item.text,
-          thinking: "",
-          status: "done",
-        },
-      }, workspaceId);
-      continue;
-    }
-
-    if (item.type === "thinking" && typeof item.thinking === "string") {
-      void appendMessageRecord(sessionId, {
-        kind: "assistant_block",
-        message: {
-          id: makeId("thinking"),
-          role: "assistant",
-          type: "thinking",
-          text: "",
-          thinking: item.thinking,
-          status: "done",
-        },
-      }, workspaceId);
-      continue;
-    }
-
-    if (item.type === "tool_use") {
-      void appendMessageRecord(sessionId, {
-        kind: "assistant_block",
-        message: {
-          id: makeId("tooluse"),
-          role: "assistant",
-          type: "tool_use",
-          text: "",
-          thinking: "",
-          toolName: typeof item.name === "string" ? item.name : "unknown",
-          toolUseId: typeof item.id === "string" ? item.id : "",
-          toolInput:
-            typeof item.input === "string"
-              ? item.input
-              : JSON.stringify(item.input ?? ""),
-          toolResult: "",
-          toolStatus: "running",
-          status: "done",
-        },
-      }, workspaceId);
-    }
-  }
+  void appendMessageRecord(
+    sessionId,
+    {
+      kind: "assistant_turn",
+      turn,
+    },
+    workspaceId
+  );
 }
 
 export function persistToolResults(

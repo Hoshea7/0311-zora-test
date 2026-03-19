@@ -142,10 +142,8 @@ export class FeishuBridge {
         message: {
           id: `feishu-user-${userMessageId || randomUUID()}`,
           role: "user",
-          type: "text",
           text,
-          thinking: "",
-          status: "done",
+          timestamp: Date.now(),
         },
       },
       binding.workspaceId

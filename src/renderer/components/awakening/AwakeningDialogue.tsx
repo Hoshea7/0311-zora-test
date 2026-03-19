@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   startConversationAtom,
-  failConversationAtom,
+  failTurnAtom,
   draftAtom,
   isRunningAtom,
   messagesAtom,
@@ -17,7 +17,7 @@ import { AwakeningInput } from "./AwakeningInput";
 
 export function AwakeningDialogue() {
   const startConversation = useSetAtom(startConversationAtom);
-  const failConversation = useSetAtom(failConversationAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const [draft, setDraft] = useAtom(draftAtom);
   const [messages, setMessages] = useAtom(messagesAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
@@ -33,7 +33,7 @@ export function AwakeningDialogue() {
     try {
       await window.zora.awaken(text);
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn("__awakening__", getErrorMessage(error));
     }
   };
 
@@ -52,7 +52,13 @@ export function AwakeningDialogue() {
 
   const filteredMessages = useMemo(() => {
     return messages.filter(
-      (m) => m.role === "user" || (m.role === "assistant" && m.type !== "tool_use" && m.type !== "thinking")
+      (m) =>
+        m.role === "user" ||
+        (m.role === "assistant" &&
+          Boolean(
+            m.turn?.bodySegments.some((segment) => segment.text.trim().length > 0) ||
+              m.turn?.error
+          ))
     );
   }, [messages]);
 
@@ -67,7 +73,14 @@ export function AwakeningDialogue() {
       return true;
     }
 
-    return last.role === "assistant" && (last.type === "thinking" || last.type === "tool_use");
+    if (last.role !== "assistant" || !last.turn) {
+      return false;
+    }
+
+    const hasVisibleBody = last.turn.bodySegments.some(
+      (segment) => segment.text.trim().length > 0
+    );
+    return last.turn.status === "streaming" && !hasVisibleBody;
   })();
 
   useLayoutEffect(() => {

@@ -1,7 +1,7 @@
 import type {
   AgentRunSource,
   AgentStreamEvent,
-  ChatMessage,
+  ConversationMessage,
   FileAttachment,
 } from "../shared/zora";
 import {
@@ -39,43 +39,54 @@ function truncateForRecovery(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n...[truncated]`;
 }
 
-function serializeMessageForRecovery(message: ChatMessage): string[] {
+function serializeMessageForRecovery(message: ConversationMessage): string[] {
   if (message.role === "user") {
-    const text = message.text.trim();
+    const text = message.text?.trim() ?? "";
     return text ? [`User: ${text}`] : [];
   }
 
-  if (message.type === "text") {
-    const text = message.text.trim();
-    return text ? [`Assistant: ${text}`] : [];
+  const turn = message.turn;
+  if (!turn) {
+    return [];
   }
 
-  if (message.type === "tool_use") {
-    const toolName = message.toolName || "unknown";
-    const sections = [
-      `Assistant used tool ${toolName} with input:\n${truncateForRecovery(
-        message.toolInput || "(empty input)",
-        RECOVERY_MAX_TOOL_IO_CHARS
-      )}`,
-    ];
+  const sections: string[] = [];
+  const bodyText = turn.bodySegments
+    .map((segment) => segment.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
 
-    if (message.toolResult) {
+  if (bodyText) {
+    sections.push(`Assistant: ${bodyText}`);
+  }
+
+  for (const step of turn.processSteps) {
+    if (step.type !== "tool") {
+      continue;
+    }
+
+    sections.push(
+      `Assistant used tool ${step.tool.name} with input:\n${truncateForRecovery(
+        step.tool.input || "(empty input)",
+        RECOVERY_MAX_TOOL_IO_CHARS
+      )}`
+    );
+
+    if (step.tool.result) {
       sections.push(
-        `Tool result from ${toolName}:\n${truncateForRecovery(
-          message.toolResult,
+        `Tool result from ${step.tool.name}:\n${truncateForRecovery(
+          step.tool.result,
           RECOVERY_MAX_TOOL_IO_CHARS
         )}`
       );
     }
-
-    return sections;
   }
 
-  return [];
+  return sections;
 }
 
 function buildRecoveredPromptFromMessages(
-  messages: ChatMessage[],
+  messages: ConversationMessage[],
   fallbackUserPrompt: string
 ): string {
   const transcriptSections: string[] = [];

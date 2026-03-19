@@ -374,7 +374,6 @@ function buildFileAttachment(filePath: string): FileAttachment | null {
 }
 
 let isQuitting = false;
-
 function createWindow() {
   const window = new BrowserWindow({
     width: 1200,
@@ -687,10 +686,8 @@ app.whenReady().then(async () => {
           message: {
             id: `user-${randomUUID()}`,
             role: "user",
-            type: "text",
             text: text.trim(),
-            thinking: "",
-            status: "done",
+            timestamp: Date.now(),
             attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
           },
         },

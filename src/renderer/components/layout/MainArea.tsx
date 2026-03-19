@@ -3,7 +3,7 @@ import {
   clearDraftAttachmentsAtom,
   draftAttachmentsAtom,
   startConversationAtom,
-  failConversationAtom,
+  failTurnAtom,
   draftAtom,
   setSessionRunningAtom,
 } from "../../store/chat";
@@ -11,7 +11,7 @@ import {
   currentSessionIdAtom,
   currentWorkspaceIdAtom,
   createSessionAtom,
-  touchSessionAtom
+  touchSessionAtom,
 } from "../../store/workspace";
 import { generateSmartTitle } from "../../utils/title";
 import { getErrorMessage } from "../../utils/message";
@@ -23,7 +23,7 @@ import { AskUserBanner } from "../chat/AskUserBanner";
 
 export function MainArea() {
   const startConversation = useSetAtom(startConversationAtom);
-  const failConversation = useSetAtom(failConversationAtom);
+  const failTurn = useSetAtom(failTurnAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const clearAttachments = useSetAtom(clearDraftAttachmentsAtom);
   const [draft, setDraft] = useAtom(draftAtom);
@@ -71,11 +71,14 @@ export function MainArea() {
 
       if (message.includes("An agent is already running for session")) {
         setSessionRunning(sessionId, true);
-        failConversation("当前会话里还有一个 Agent 在运行，请先等待它结束，或点击停止按钮终止后再继续。");
+        failTurn(
+          sessionId,
+          "当前会话里还有一个 Agent 在运行，请先等待它结束，或点击停止按钮终止后再继续。"
+        );
         return;
       }
 
-      failConversation(message);
+      failTurn(sessionId, message);
     }
   };
 
@@ -87,7 +90,7 @@ export function MainArea() {
     try {
       await window.zora.stopAgent(currentSessionId);
     } catch (error) {
-      failConversation(getErrorMessage(error));
+      failTurn(currentSessionId, getErrorMessage(error));
     }
   };
 

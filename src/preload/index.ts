@@ -3,7 +3,7 @@ import type {
   AgentRunInfo,
   AgentStreamEvent,
   AskUserResponse,
-  ChatMessage,
+  ConversationMessage,
   FileAttachment,
   PermissionMode,
   PermissionResponse,
@@ -102,7 +102,7 @@ const zoraApi: ZoraApi = {
   listSessions: (workspaceId?: string) =>
     ipcRenderer.invoke("session:list", workspaceId) as Promise<SessionMeta[]>,
   loadMessages: (sessionId: string, workspaceId?: string) =>
-    ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ChatMessage[]>,
+    ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ConversationMessage[]>,
   createSession: (title: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:create", title, workspaceId) as Promise<SessionMeta>,
   deleteSession: (sessionId: string, workspaceId?: string) =>
