@@ -25,10 +25,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           variant === "secondary" &&
             "border border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50 active:bg-stone-100 disabled:bg-stone-50",
           variant === "ghost" && "text-stone-600 hover:bg-stone-100 active:bg-stone-200",
-          // 尺寸样式
-          size === "sm" && "px-3 py-1.5 text-[13px]",
-          size === "md" && "px-4 py-2 text-[14px]",
-          size === "lg" && "px-5 py-2.5 text-[15px]",
+          // 尺寸样式 (使用 Tailwind 语义化字体大小)
+          size === "sm" && "px-3 py-1.5 text-sm",
+          size === "md" && "px-4 py-2 text-base",
+          size === "lg" && "px-5 py-2.5 text-lg",
           className
         )}
         {...props}
