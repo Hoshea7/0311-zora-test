@@ -287,7 +287,6 @@ function TreeNode({
   const [copied, setCopied] = useState(false);
   const lastSeenVersionRef = useRef(version);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSearching = searchQuery.length > 0;
   const nameMatches = isSearching && matchesSearch(entry, searchQuery);
   const visibleChildren = showHiddenFiles
@@ -300,9 +299,6 @@ function TreeNode({
 
   useEffect(() => {
     return () => {
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-      }
       if (copyResetTimerRef.current) {
         clearTimeout(copyResetTimerRef.current);
       }
@@ -383,22 +379,7 @@ function TreeNode({
     }
   };
 
-  const handleClick = () => {
-    if (!entry.isDirectory) return;
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-    }
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      void handleToggle();
-    }, 200);
-  };
-
   const handleDoubleClick = () => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
     void window.zora.filetree.openInFinder(entry.path);
   };
 
@@ -431,35 +412,44 @@ function TreeNode({
           ...(panelOpen ? { animationDelay: `${animIndex * 15}ms`, animationFillMode: "both" } : {}),
         }}
       >
-        <button
-          type="button"
-          onClick={handleClick}
-          onDoubleClick={handleDoubleClick}
+        <div
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1.5 py-[5px] text-left text-[12.5px] leading-tight",
             entry.isDirectory && "font-medium",
-            "focus-visible:outline-none"
+            "pr-1"
           )}
           style={{
             paddingLeft: pl,
-            paddingRight: 6,
           }}
         >
           {entry.isDirectory ? (
-            <>
+            <button
+              type="button"
+              onClick={() => void handleToggle()}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 focus-visible:outline-none"
+              aria-label={effectiveExpanded ? "折叠目录" : "展开目录"}
+              title={effectiveExpanded ? "折叠目录" : "展开目录"}
+            >
               <ChevronIcon expanded={effectiveExpanded} />
-              <FolderIcon isOpen={effectiveExpanded} />
-            </>
+            </button>
           ) : (
-            <>
-              <span className="w-3 shrink-0" />
-              <FileIcon name={entry.name} />
-            </>
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center" />
           )}
+          <button
+            type="button"
+            onDoubleClick={handleDoubleClick}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-[1px] text-left focus-visible:outline-none"
+          >
+            {entry.isDirectory ? (
+              <FolderIcon isOpen={effectiveExpanded} />
+            ) : (
+              <FileIcon name={entry.name} />
+            )}
           <span className="min-w-0 truncate">
             {highlightMatch(entry.name, searchQuery)}
           </span>
-        </button>
+          </button>
+        </div>
         <button
           type="button"
           onClick={(event) => void handleCopyPath(event)}
