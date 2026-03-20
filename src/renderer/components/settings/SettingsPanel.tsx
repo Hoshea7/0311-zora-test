@@ -64,7 +64,7 @@ export function SettingsPanel() {
       <div className="flex min-h-0 flex-1">
         <aside className="titlebar-no-drag relative flex w-[224px] shrink-0 flex-col border-r border-stone-100 bg-stone-50/30">
           <div className="px-5 py-4">
-            <h1 className="text-[18px] font-semibold tracking-[-0.02em]">设置</h1>
+            <h1 className="text-[20px] font-bold tracking-tight text-stone-900">设置</h1>
             <p className="mt-1 text-[12px] text-stone-500">管理您的 Zora 偏好</p>
           </div>
           <nav className="flex-1 space-y-1 px-3 pointer-events-auto">
@@ -91,7 +91,7 @@ export function SettingsPanel() {
         </aside>
 
         <main className="titlebar-no-drag relative flex-1 overflow-y-auto bg-white">
-          <div className="mx-auto max-w-3xl px-10 pb-7 pt-4">
+          <div className="w-full max-w-[720px] px-10 pb-10 pt-8">
             {settingsTab === "provider" ? <ProviderSettings /> : null}
             {settingsTab === "feishu" ? <FeishuSettings /> : null}
 
@@ -100,10 +100,10 @@ export function SettingsPanel() {
             {settingsTab === "mcp" ? (
               <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="mb-6">
-                  <h2 className="text-[24px] font-semibold tracking-tight text-stone-900">MCP</h2>
-                  <p className="mt-1 text-[14px] text-stone-500">管理 Model Context Protocol (MCP) 服务器配置。</p>
+                  <h2 className="text-[28px] font-bold tracking-tight text-stone-900">MCP</h2>
+                  <p className="mt-1.5 text-[14px] leading-relaxed text-stone-400">管理 Model Context Protocol (MCP) 服务器配置。</p>
                 </div>
-                <div className="overflow-hidden rounded-[16px] border border-stone-200 bg-white shadow-sm ring-1 ring-black/5">
+                <div className="overflow-hidden rounded-[16px] border-none bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] ring-1 ring-stone-900/5 transition-all">
                   <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-stone-50">
                       <svg className="h-6 w-6 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

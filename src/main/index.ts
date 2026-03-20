@@ -60,9 +60,7 @@ import {
 import {
   GLOBAL_SKILLS_DIR,
   listSkills,
-  listInactiveSkills,
   seedBundledSkills,
-  toggleSkill,
   uninstallSkill,
 } from "./skill-manager";
 import {
@@ -585,27 +583,6 @@ app.whenReady().then(async () => {
       throw new Error("A valid skill directory name is required.");
     }
     return uninstallSkill(dirName);
-  });
-
-  ipcMain.handle(
-    "skill:toggle",
-    async (_event, dirName: unknown, enabled: unknown) => {
-      if (
-        typeof dirName !== "string" ||
-        dirName.trim().length === 0 ||
-        path.basename(dirName) !== dirName
-      ) {
-        throw new Error("A valid skill directory name is required.");
-      }
-      if (typeof enabled !== "boolean") {
-        throw new Error("enabled must be a boolean.");
-      }
-      return toggleSkill(dirName, enabled);
-    }
-  );
-
-  ipcMain.handle("skill:list-inactive", async () => {
-    return listInactiveSkills();
   });
 
   ipcMain.handle("skill:list-external-tools", () => {

@@ -223,10 +223,10 @@ export function FeishuSettings() {
   };
 
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-4 mx-auto max-w-3xl space-y-6 pb-10 duration-500">
+    <section className="animate-in fade-in slide-in-from-bottom-4 w-full space-y-8 pb-12 duration-500">
       <div className="flex flex-col gap-1.5 border-b border-stone-100 pb-5">
-        <h2 className="text-[24px] font-semibold tracking-tight text-stone-900">飞书 Bridge</h2>
-        <p className="text-[14px] leading-relaxed text-stone-500">
+        <h2 className="text-[28px] font-bold tracking-tight text-stone-900">飞书 Bridge</h2>
+        <p className="mt-1.5 text-[14px] leading-relaxed text-stone-400">
           通过连接飞书开放平台，将飞书消息转入 ZoraAgent。凭证安全存储于本地。
         </p>
       </div>
@@ -235,7 +235,7 @@ export function FeishuSettings() {
         {/* 服务状态组 */}
         <div>
           <h3 className="mb-2 ml-1 text-[12px] font-medium uppercase tracking-[0.08em] text-stone-500">服务状态</h3>
-          <div className="overflow-hidden rounded-[14px] border border-stone-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-[16px] border-none bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] ring-1 ring-stone-900/5">
             <div className="flex items-center justify-between px-4 py-3.5">
               <div className="flex flex-col">
                 <span className="text-[15px] font-medium text-stone-900">启用飞书 Bridge</span>
@@ -248,19 +248,19 @@ export function FeishuSettings() {
                 disabled={isTogglingEnabled || !canEnableBridge}
                 onClick={() => void handleToggleEnabled()}
                 className={cn(
-                  "relative inline-flex h-7 w-12 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
+                  "relative inline-flex h-[24px] w-[40px] shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
                   formState.enabled ? "bg-stone-900" : "bg-stone-200",
                   (!canEnableBridge || isTogglingEnabled) && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <span className={cn(
-                  "pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
-                  formState.enabled ? "translate-x-5" : "translate-x-0"
+                  "pointer-events-none inline-block h-[20px] w-[20px] transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out",
+                  formState.enabled ? "translate-x-[16px]" : "translate-x-0"
                 )} />
               </button>
             </div>
             
-            <div className="ml-4 h-px bg-stone-100" />
+            <div className="h-px bg-stone-100/80 mx-4" />
             
             <div className="flex items-center justify-between px-4 py-3.5">
               <div className="flex flex-col">
@@ -299,7 +299,7 @@ export function FeishuSettings() {
             <span>应用凭证</span>
             {isLoadingConfig && <span className="lowercase normal-case text-stone-400">读取中...</span>}
           </h3>
-          <div className="overflow-hidden rounded-[14px] border border-stone-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-[16px] border-none bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] ring-1 ring-stone-900/5">
             <div className="group flex items-center px-4 py-3">
               <span className="w-24 whitespace-nowrap text-[15px] text-stone-900">App ID</span>
               <input
@@ -309,7 +309,7 @@ export function FeishuSettings() {
                 placeholder="cli_a1b2c3d4..."
               />
             </div>
-            <div className="ml-4 h-px bg-stone-100" />
+            <div className="h-px bg-stone-100/80 mx-4" />
             <div className="group relative flex items-center px-4 py-3">
               <span className="w-28 whitespace-nowrap text-[15px] text-stone-900">App Secret</span>
               <input
@@ -322,7 +322,7 @@ export function FeishuSettings() {
             </div>
             
             {/* Actions Footer inside the card */}
-            <div className="flex items-center justify-between border-t border-stone-100 bg-stone-50/50 px-4 py-3.5">
+            <div className="flex items-center justify-between border-t border-stone-100/80 bg-stone-50/50 px-4 py-3.5">
               <div className="flex items-center gap-3">
                 {connectionFeedback ? (
                   <span className={cn(

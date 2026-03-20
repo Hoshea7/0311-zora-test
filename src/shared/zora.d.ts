@@ -228,8 +228,6 @@ export interface ZoraApi {
   ) => Promise<ImportResult>;
   importSkills: (selections: ImportSelection[]) => Promise<ImportResult[]>;
   uninstallSkill: (dirName: string) => Promise<void>;
-  toggleSkill: (dirName: string, enabled: boolean) => Promise<void>;
-  listInactiveSkills: () => Promise<SkillMeta[]>;
   listExternalTools: () => Promise<ExternalToolConfig[]>;
   listSessions: (workspaceId?: string) => Promise<SessionMeta[]>;
   loadMessages: (sessionId: string, workspaceId?: string) => Promise<ConversationMessage[]>;

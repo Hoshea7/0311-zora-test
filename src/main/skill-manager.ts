@@ -5,7 +5,6 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   rm,
   stat,
   unlink,
@@ -17,7 +16,6 @@ import { app } from "electron";
 
 export const ZORA_HOME = join(homedir(), ".zora");
 export const GLOBAL_SKILLS_DIR = join(ZORA_HOME, "skills");
-export const INACTIVE_SKILLS_DIR = join(ZORA_HOME, "skills-inactive");
 
 export interface SkillMeta {
   name: string;
@@ -235,57 +233,6 @@ export async function uninstallSkill(dirName: string): Promise<void> {
   } else {
     await rm(skillPath, { recursive: true, force: true });
   }
-}
-
-export async function toggleSkill(dirName: string, enabled: boolean): Promise<void> {
-  await mkdir(INACTIVE_SKILLS_DIR, { recursive: true });
-
-  const srcDir = enabled ? INACTIVE_SKILLS_DIR : GLOBAL_SKILLS_DIR;
-  const destDir = enabled ? GLOBAL_SKILLS_DIR : INACTIVE_SKILLS_DIR;
-
-  const srcPath = join(srcDir, dirName);
-  const destPath = join(destDir, dirName);
-
-  if (!(await pathExists(srcPath))) {
-    throw new Error(
-      `Skill "${dirName}" not found in ${enabled ? "inactive" : "active"} directory`
-    );
-  }
-
-  if (await pathExists(destPath)) {
-    throw new Error(
-      `Skill "${dirName}" already exists in ${enabled ? "active" : "inactive"} directory`
-    );
-  }
-
-  await rename(srcPath, destPath);
-}
-
-export async function listInactiveSkills(): Promise<SkillMeta[]> {
-  let entries;
-  try {
-    entries = await readdir(INACTIVE_SKILLS_DIR, { withFileTypes: true });
-  } catch (error) {
-    if (hasErrorCode(error, "ENOENT")) return [];
-    throw error;
-  }
-
-  const skills: SkillMeta[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const skillDir = join(INACTIVE_SKILLS_DIR, entry.name);
-    const skillFilePath = join(skillDir, "SKILL.md");
-    try {
-      const content = await readFile(skillFilePath, "utf8");
-      const parsed = parseSkillFrontmatter(content);
-      if (!parsed) continue;
-      skills.push({ ...parsed, dirName: entry.name, path: skillDir });
-    } catch (error) {
-      if (hasErrorCode(error, "ENOENT")) continue;
-      throw error;
-    }
-  }
-  return skills.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function ensurePluginManifest() {

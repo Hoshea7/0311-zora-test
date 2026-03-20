@@ -285,12 +285,12 @@ export function ProviderSettings() {
   };
 
   return (
-    <section className="animate-in fade-in slide-in-from-bottom-4 mx-auto max-w-3xl space-y-6 pb-10 duration-500">
+    <section className="animate-in fade-in slide-in-from-bottom-4 w-full space-y-8 pb-12 duration-500">
       <div className="flex flex-col gap-1.5 border-b border-stone-100 pb-5">
         <h2 className="text-[24px] font-semibold tracking-tight text-stone-900">
           模型配置
         </h2>
-        <p className="text-[14px] leading-relaxed text-stone-500">
+        <p className="mt-1.5 text-[14px] leading-relaxed text-stone-400">
           配置并管理兼容 Anthropic 协议的大语言模型服务节点。
         </p>
       </div>
@@ -323,13 +323,13 @@ export function ProviderSettings() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col overflow-hidden rounded-[14px] border border-stone-200 bg-white shadow-sm">
+          <div className="flex flex-col overflow-hidden rounded-[16px] border-none bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] ring-1 ring-stone-900/5">
             {providers.map((provider, index) => {
               const isCardBusy = activeCardActionId === provider.id;
 
               return (
                 <div key={provider.id} className="flex flex-col">
-                  {index > 0 && <div className="ml-4 h-px bg-stone-100" />}
+                  {index > 0 && <div className="h-px bg-stone-100/80 mx-4" />}
                   
                   <div className={cn(
                     "group relative flex items-center justify-between px-4 py-3.5 transition-all duration-200 hover:bg-stone-50/50",
@@ -450,7 +450,7 @@ export function ProviderSettings() {
                   />
                 </div>
                 
-                <div className="ml-4 h-px bg-stone-100" />
+                <div className="h-px bg-stone-100/80 mx-4" />
                 
                 <div className="group flex items-center px-4 py-2.5">
                   <span className="w-24 whitespace-nowrap text-[14px] text-stone-900">供应商</span>
@@ -468,7 +468,7 @@ export function ProviderSettings() {
                   </select>
                 </div>
                 
-                <div className="ml-4 h-px bg-stone-100" />
+                <div className="h-px bg-stone-100/80 mx-4" />
                 
                 <div className="group flex items-center px-4 py-2.5">
                   <span className="w-24 whitespace-nowrap text-[14px] text-stone-900">Base URL</span>
@@ -480,7 +480,7 @@ export function ProviderSettings() {
                   />
                 </div>
                 
-                <div className="ml-4 h-px bg-stone-100" />
+                <div className="h-px bg-stone-100/80 mx-4" />
                 
                 <div className="group relative flex items-center px-4 py-2.5">
                   <span className="w-24 whitespace-nowrap text-[14px] text-stone-900">API Key</span>
@@ -515,7 +515,7 @@ export function ProviderSettings() {
                   </div>
                 </div>
 
-                <div className="ml-4 h-px bg-stone-100" />
+                <div className="h-px bg-stone-100/80 mx-4" />
                 
                 <div className="flex items-center px-5 py-3 group">
                   <span className="text-[15px] text-stone-900 whitespace-nowrap w-24">Model ID</span>

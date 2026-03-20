@@ -127,12 +127,6 @@ const zoraApi: ZoraApi = {
     >,
   uninstallSkill: (dirName: string) =>
     ipcRenderer.invoke("skill:uninstall", dirName) as Promise<void>,
-  toggleSkill: (dirName: string, enabled: boolean) =>
-    ipcRenderer.invoke("skill:toggle", dirName, enabled) as Promise<void>,
-  listInactiveSkills: () =>
-    ipcRenderer.invoke("skill:list-inactive") as Promise<
-      import("../shared/zora").SkillMeta[]
-    >,
   listExternalTools: () =>
     ipcRenderer.invoke("skill:list-external-tools") as Promise<
       ExternalToolConfig[]

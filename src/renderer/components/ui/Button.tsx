@@ -2,7 +2,7 @@ import { type ButtonHTMLAttributes, forwardRef } from "react";
 import { cn } from "../../utils/cn";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "ghost";
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "danger-ghost";
   size?: "sm" | "md" | "lg";
 }
 
@@ -25,6 +25,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           variant === "secondary" &&
             "border border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50 active:bg-stone-100 disabled:bg-stone-50",
           variant === "ghost" && "text-stone-600 hover:bg-stone-100 active:bg-stone-200",
+          variant === "danger" &&
+            "bg-rose-500 text-white hover:bg-rose-600 active:scale-[0.98] disabled:bg-rose-200",
+          variant === "danger-ghost" &&
+            "text-stone-500 hover:bg-rose-50 hover:text-rose-600 hover:ring-1 hover:ring-rose-200 active:bg-rose-100 disabled:opacity-50",
           // 尺寸样式 (使用 Tailwind 语义化字体大小)
           size === "sm" && "px-3 py-1.5 text-sm",
           size === "md" && "px-4 py-2 text-base",
