@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
 import type { FSWatcher } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import type { BrowserWindow } from "electron";
 import type { FileTreeEntry } from "../shared/zora";
@@ -39,23 +39,12 @@ async function buildEntry(dirPath: string, name: string, isDirectory: boolean): 
 
   const extension = path.extname(name).replace(/^\./, "") || undefined;
 
-  try {
-    const stats = await stat(entryPath);
-    return {
-      name,
-      path: entryPath,
-      isDirectory: false,
-      size: stats.size,
-      extension,
-    };
-  } catch {
-    return {
-      name,
-      path: entryPath,
-      isDirectory: false,
-      extension,
-    };
-  }
+  return {
+    name,
+    path: entryPath,
+    isDirectory: false,
+    extension,
+  };
 }
 
 export async function listDirectory(

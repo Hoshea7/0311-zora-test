@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useDeferredValue, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { FileTreeEntry } from "../../../shared/zora";
 import { currentWorkspaceAtom } from "../../store/workspace";
@@ -153,6 +153,112 @@ function CheckIcon() {
   );
 }
 
+function EyeIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+      <circle cx="12" cy="12" r="3" strokeWidth={1.8} />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 3l18 18"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+      <path
+        d="M10.6 5.3A10.8 10.8 0 0 1 12 5.2c6 0 9.5 6 9.5 6a17.5 17.5 0 0 1-3.1 3.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+      <path
+        d="M6.5 6.6A17 17 0 0 0 2.5 12s3.5 6 9.5 6a10.7 10.7 0 0 0 3.05-.42"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+      <path
+        d="M9.9 9.9a3 3 0 0 0 4.2 4.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+      />
+    </svg>
+  );
+}
+
+function areEntriesEqual(
+  currentEntries: FileTreeEntry[],
+  nextEntries: FileTreeEntry[]
+): boolean {
+  if (currentEntries.length !== nextEntries.length) {
+    return false;
+  }
+
+  return currentEntries.every((entry, index) => {
+    const nextEntry = nextEntries[index];
+
+    return (
+      entry.name === nextEntry.name &&
+      entry.path === nextEntry.path &&
+      entry.isDirectory === nextEntry.isDirectory &&
+      entry.size === nextEntry.size &&
+      entry.extension === nextEntry.extension
+    );
+  });
+}
+
+function matchesSearch(entry: FileTreeEntry, query: string): boolean {
+  return entry.name.toLowerCase().includes(query.toLowerCase());
+}
+
+function isHiddenEntry(entry: FileTreeEntry): boolean {
+  return entry.name.startsWith(".");
+}
+
+function highlightMatch(name: string, query: string) {
+  if (!query) return name;
+
+  const lowerName = name.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const idx = lowerName.indexOf(lowerQuery);
+
+  if (idx === -1) return name;
+
+  return (
+    <>
+      {name.slice(0, idx)}
+      <mark className="rounded-sm bg-amber-200/60 px-px text-inherit">
+        {name.slice(idx, idx + query.length)}
+      </mark>
+      {name.slice(idx + query.length)}
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Recursive tree node                                                */
 /* ------------------------------------------------------------------ */
@@ -163,12 +269,16 @@ function TreeNode({
   workspacePath,
   animIndex,
   panelOpen,
+  searchQuery,
+  showHiddenFiles,
 }: {
   entry: FileTreeEntry;
   depth: number;
   workspacePath: string;
   animIndex: number;
   panelOpen: boolean;
+  searchQuery: string;
+  showHiddenFiles: boolean;
 }) {
   const version = useAtomValue(fileTreeVersionAtom);
   const [expanded, setExpanded] = useState(false);
@@ -177,9 +287,22 @@ function TreeNode({
   const [copied, setCopied] = useState(false);
   const lastSeenVersionRef = useRef(version);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSearching = searchQuery.length > 0;
+  const nameMatches = isSearching && matchesSearch(entry, searchQuery);
+  const visibleChildren = showHiddenFiles
+    ? children
+    : children.filter((child) => !isHiddenEntry(child));
+  const hasPotentialVisibleChild =
+    isSearching &&
+    visibleChildren.some((child) => child.isDirectory || matchesSearch(child, searchQuery));
+  const effectiveExpanded = expanded || Boolean(hasPotentialVisibleChild);
 
   useEffect(() => {
     return () => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+      }
       if (copyResetTimerRef.current) {
         clearTimeout(copyResetTimerRef.current);
       }
@@ -188,6 +311,7 @@ function TreeNode({
 
   const handleToggle = async () => {
     if (!entry.isDirectory) return;
+    if (loading) return;
     if (expanded) { setExpanded(false); return; }
 
     if (children.length === 0) {
@@ -216,7 +340,6 @@ function TreeNode({
     }
 
     let cancelled = false;
-    setLoading(true);
 
     void window.zora.filetree
       .list(entry.path, workspacePath)
@@ -225,21 +348,14 @@ function TreeNode({
           return;
         }
 
-        setChildren(result);
+        setChildren((currentChildren) =>
+          areEntriesEqual(currentChildren, result) ? currentChildren : result
+        );
       })
       .catch(() => {
         if (cancelled) {
           return;
         }
-
-        setChildren([]);
-      })
-      .finally(() => {
-        if (cancelled) {
-          return;
-        }
-
-        setLoading(false);
       });
 
     return () => {
@@ -267,7 +383,38 @@ function TreeNode({
     }
   };
 
+  const handleClick = () => {
+    if (!entry.isDirectory) return;
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+    }
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      void handleToggle();
+    }, 200);
+  };
+
+  const handleDoubleClick = () => {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    void window.zora.filetree.openInFinder(entry.path);
+  };
+
   const pl = 8 + depth * 16;
+
+  if (!showHiddenFiles && isHiddenEntry(entry)) {
+    return null;
+  }
+
+  if (isSearching && !entry.isDirectory && !nameMatches) {
+    return null;
+  }
+
+  if (isSearching && entry.isDirectory && !nameMatches && !hasPotentialVisibleChild) {
+    return null;
+  }
 
   return (
     <>
@@ -286,7 +433,8 @@ function TreeNode({
       >
         <button
           type="button"
-          onClick={() => void handleToggle()}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1.5 py-[5px] text-left text-[12.5px] leading-tight",
             entry.isDirectory && "font-medium",
@@ -299,8 +447,8 @@ function TreeNode({
         >
           {entry.isDirectory ? (
             <>
-              <ChevronIcon expanded={expanded} />
-              <FolderIcon isOpen={expanded} />
+              <ChevronIcon expanded={effectiveExpanded} />
+              <FolderIcon isOpen={effectiveExpanded} />
             </>
           ) : (
             <>
@@ -308,7 +456,9 @@ function TreeNode({
               <FileIcon name={entry.name} />
             </>
           )}
-          <span className="min-w-0 truncate">{entry.name}</span>
+          <span className="min-w-0 truncate">
+            {highlightMatch(entry.name, searchQuery)}
+          </span>
         </button>
         <button
           type="button"
@@ -330,9 +480,9 @@ function TreeNode({
         )}
       </div>
 
-      {expanded && children.length > 0 && (
+      {effectiveExpanded && visibleChildren.length > 0 && (
         <div>
-          {children.map((child, i) => (
+          {visibleChildren.map((child, i) => (
             <TreeNode
               key={child.path}
               entry={child}
@@ -340,6 +490,8 @@ function TreeNode({
               workspacePath={workspacePath}
               animIndex={i}
               panelOpen={panelOpen}
+              searchQuery={searchQuery}
+              showHiddenFiles={showHiddenFiles}
             />
           ))}
         </div>
@@ -361,6 +513,13 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
+  const deferredSearchQuery = useDeferredValue(searchQuery.trim());
+  const lastSeenVersionRef = useRef(version);
+  const visibleEntries = showHiddenFiles
+    ? entries
+    : entries.filter((entry) => !isHiddenEntry(entry));
 
   useEffect(() => {
     if (!isOpen || !workspacePath) {
@@ -402,7 +561,10 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
       .list(workspacePath, workspacePath)
       .then((nextEntries) => {
         if (cancelled) return;
-        setEntries(nextEntries);
+        setEntries((currentEntries) =>
+          areEntriesEqual(currentEntries, nextEntries) ? currentEntries : nextEntries
+        );
+        setErrorMessage(null);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -412,6 +574,44 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
       .finally(() => {
         if (cancelled) return;
         setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
+
+  useEffect(() => {
+    if (lastSeenVersionRef.current === version) {
+      return;
+    }
+
+    lastSeenVersionRef.current = version;
+
+    if (!workspacePath) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void window.zora.filetree
+      .list(workspacePath, workspacePath)
+      .then((nextEntries) => {
+        if (cancelled) {
+          return;
+        }
+
+        setEntries((currentEntries) =>
+          areEntriesEqual(currentEntries, nextEntries) ? currentEntries : nextEntries
+        );
+        setErrorMessage(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("[filetree] Background refresh failed:", error);
       });
 
     return () => {
@@ -487,6 +687,60 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
         </div>
       </div>
 
+      {/* Search */}
+      <div className="min-w-[280px] border-b border-stone-200/40 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <svg
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-350"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索文件..."
+              className="w-full rounded-md border border-stone-200/60 bg-stone-50/50 py-1.5 pl-7 pr-7 text-[12px] text-stone-700 placeholder:text-stone-350 outline-none transition-colors focus:border-stone-300 focus:bg-white"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-stone-400 hover:text-stone-600"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} />
+                </svg>
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowHiddenFiles((current) => !current)}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200",
+              showHiddenFiles
+                ? "border-stone-300 bg-white text-stone-700"
+                : "border-stone-200/60 bg-stone-50/50 text-stone-400 hover:border-stone-300 hover:bg-white hover:text-stone-600"
+            )}
+            aria-pressed={showHiddenFiles}
+            aria-label={showHiddenFiles ? "点击隐藏隐藏文件" : "点击查看隐藏文件"}
+            title={showHiddenFiles ? "点击隐藏隐藏文件" : "点击查看隐藏文件"}
+          >
+            {showHiddenFiles ? <EyeIcon /> : <EyeOffIcon />}
+          </button>
+        </div>
+      </div>
+
       {/* Tree content */}
       <div
         className={cn(
@@ -507,17 +761,19 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
             </svg>
             <p className="mt-2 text-[11px] text-stone-400">{errorMessage}</p>
           </div>
-        ) : entries.length === 0 ? (
+        ) : visibleEntries.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <svg className="mx-auto h-7 w-7 text-stone-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2" />
               <path d="M3 7h18a1 1 0 011 1v10a2 2 0 01-2 2H4a2 2 0 01-2-2V8a1 1 0 011-1z" />
             </svg>
-            <p className="mt-2 text-[11px] text-stone-400">目录为空</p>
+            <p className="mt-2 text-[11px] text-stone-400">
+              {entries.length === 0 ? "目录为空" : "没有可显示的文件"}
+            </p>
           </div>
         ) : (
           <div className="space-y-px">
-            {entries.map((entry, index) => (
+            {visibleEntries.map((entry, index) => (
               <TreeNode
                 key={entry.path}
                 entry={entry}
@@ -525,6 +781,8 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
                 workspacePath={workspacePath}
                 animIndex={index}
                 panelOpen={isOpen}
+                searchQuery={deferredSearchQuery}
+                showHiddenFiles={showHiddenFiles}
               />
             ))}
           </div>
