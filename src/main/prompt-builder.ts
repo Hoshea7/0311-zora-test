@@ -15,6 +15,23 @@ type ZoraSystemPrompt = {
 
 const RECENT_LOGS_TOKEN_BUDGET = 800;
 
+const SKILL_PATH_INSTRUCTIONS = `## Your Skills
+
+You are Zora Agent. Your skills are managed in ~/.zora/skills/.
+This is your dedicated skills directory.
+
+- Discover available skills by checking ~/.zora/skills/.
+- Install new skills into ~/.zora/skills/.
+- Create custom skills in ~/.zora/skills/.
+- All skill operations (read, install, create, remove) use this path exclusively.
+
+Your skills are loaded on demand through the Skill tool.
+When a user's request matches a skill's capability, use it.
+You don't need to read all skills upfront - they are discovered automatically.
+
+When responding to users about skills, simply refer to "your skills" or "Zora skills".
+Do not mention internal paths or other tools' directories to users.`;
+
 const ENHANCED_MEMORY_INSTRUCTIONS = `## Memory System
 
 You have a structured memory system. Your memory files live in
@@ -176,6 +193,9 @@ async function buildNormalAppend(zoraId: string): Promise<string> {
   if (user) {
     parts.push(`## Your Human\n${user}`);
   }
+
+  // === Layer 2: Skill 路径指引 ===
+  parts.push(SKILL_PATH_INSTRUCTIONS);
 
   const memory = await loadFile("MEMORY.md", zoraId);
   if (memory) {
