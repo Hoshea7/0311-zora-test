@@ -47,6 +47,7 @@ import {
   appendMessageRecord,
   createSession,
   deleteSession,
+  getSessionMeta,
   listSessions,
   loadMessages,
   migrateSessionsIfNeeded,
@@ -851,6 +852,44 @@ app.whenReady().then(async () => {
     }
   );
 
+  ipcMain.handle(
+    "session:switch-model",
+    async (_event, sessionId: unknown, modelId: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+        throw new Error("A valid sessionId is required.");
+      }
+      if (typeof modelId !== "string") {
+        throw new Error("modelId must be a string.");
+      }
+
+      const trimmedModelId = modelId.trim();
+      const workspaces = await listWorkspaces();
+      let targetWorkspaceId: string | null = null;
+
+      for (const workspace of workspaces) {
+        const sessions = await listSessions(workspace.id);
+        if (sessions.some((session) => session.id === sessionId)) {
+          targetWorkspaceId = workspace.id;
+          break;
+        }
+      }
+
+      if (!targetWorkspaceId) {
+        throw new Error(`Session ${sessionId} not found.`);
+      }
+
+      await updateSessionMeta(
+        sessionId,
+        {
+          selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
+        },
+        targetWorkspaceId
+      );
+
+      return { success: true };
+    }
+  );
+
   ipcMain.handle("dialog:select-files", async (event) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender);
     const dialogOptions: Electron.OpenDialogOptions = {
@@ -909,7 +948,21 @@ app.whenReady().then(async () => {
         `[index] Current mode: productivity, workspace: ${targetWorkspaceId}, session: ${sessionId}`
       );
 
-      await updateSessionMeta(sessionId, {}, targetWorkspaceId);
+      const session = await getSessionMeta(sessionId, targetWorkspaceId);
+      let providerId = session?.providerId;
+      let selectedModelId = session?.selectedModelId;
+      const sessionUpdates: Parameters<typeof updateSessionMeta>[1] = {};
+
+      if (!session?.providerLocked) {
+        const defaultProvider = await providerManager.getDefaultProvider();
+        if (defaultProvider) {
+          providerId = defaultProvider.id;
+          sessionUpdates.providerId = defaultProvider.id;
+          sessionUpdates.providerLocked = true;
+        }
+      }
+
+      await updateSessionMeta(sessionId, sessionUpdates, targetWorkspaceId);
       const savedAttachments =
         attachments && attachments.length > 0
           ? await saveAttachments(sessionId, attachments, targetWorkspaceId)
@@ -958,6 +1011,8 @@ app.whenReady().then(async () => {
         workspaceId: targetWorkspaceId,
         attachments,
         source: "desktop",
+        providerId,
+        selectedModelId,
       }).catch((err) => {
         console.error(`[index] Agent run failed for session ${sessionId}:`, err);
       });

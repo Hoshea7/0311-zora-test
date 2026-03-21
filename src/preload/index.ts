@@ -158,6 +158,10 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("session:delete", sessionId, workspaceId) as Promise<void>,
   renameSession: (sessionId: string, title: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:rename", sessionId, title, workspaceId) as Promise<void>,
+  switchSessionModel: (sessionId: string, modelId: string) =>
+    ipcRenderer.invoke("session:switch-model", sessionId, modelId) as Promise<{
+      success: boolean;
+    }>,
   listWorkspaces: () =>
     ipcRenderer.invoke("workspace:list") as Promise<WorkspaceMeta[]>,
   createWorkspace: (name: string, workspacePath: string) =>

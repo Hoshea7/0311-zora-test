@@ -54,6 +54,9 @@ export interface SessionMeta {
   createdAt: string;
   updatedAt: string;
   sdkSessionId?: string;
+  providerId?: string;
+  providerLocked?: boolean;
+  selectedModelId?: string;
 }
 
 export interface WorkspaceMeta {
@@ -246,6 +249,10 @@ export interface ZoraApi {
   createSession: (title: string, workspaceId?: string) => Promise<SessionMeta>;
   deleteSession: (sessionId: string, workspaceId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string, workspaceId?: string) => Promise<void>;
+  switchSessionModel: (
+    sessionId: string,
+    modelId: string
+  ) => Promise<{ success: boolean }>;
   listWorkspaces: () => Promise<WorkspaceMeta[]>;
   createWorkspace: (name: string, workspacePath: string) => Promise<WorkspaceMeta>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;

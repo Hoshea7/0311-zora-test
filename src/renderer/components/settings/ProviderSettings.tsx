@@ -297,30 +297,17 @@ export function ProviderSettings() {
 
       const hasRoleModels = Object.keys(roleModels).length > 0;
 
-      if (hasRoleModels) {
-        const result = await window.zora.testProviderWithRoleModels(
-          formState.baseUrl.trim(),
-          formState.apiKey.trim(),
-          formState.modelId.trim() || undefined,
-          roleModels
-        );
-        setConnectionTestState({
-          status: result.success ? "success" : "error",
-          message: result.message,
-          details: result.details,
-        });
-      } else {
-        const result: ProviderTestResult = await window.zora.testProvider(
-          formState.baseUrl.trim(),
-          formState.apiKey.trim(),
-          formState.modelId.trim() || undefined
-        );
-        setConnectionTestState({
-          status: result.success ? "success" : "error",
-          message: result.message,
-          details: null,
-        });
-      }
+      const result = await window.zora.testProviderWithRoleModels(
+        formState.baseUrl.trim(),
+        formState.apiKey.trim(),
+        formState.modelId.trim() || undefined,
+        roleModels
+      );
+      setConnectionTestState({
+        status: result.success ? "success" : "error",
+        message: result.message,
+        details: result.details,
+      });
     } catch (error) {
       setConnectionTestState({
         status: "error",
