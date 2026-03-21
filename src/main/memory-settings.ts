@@ -40,10 +40,18 @@ function normalizeMemorySettings(value: unknown): MemorySettings {
         ? value.memoryProviderId.trim()
         : DEFAULT_MEMORY_SETTINGS.memoryProviderId;
 
+  const memoryModelId =
+    value.memoryModelId === null
+      ? null
+      : typeof value.memoryModelId === "string" && value.memoryModelId.trim().length > 0
+        ? value.memoryModelId.trim()
+        : DEFAULT_MEMORY_SETTINGS.memoryModelId;
+
   return {
     mode,
     batchIdleMinutes,
     memoryProviderId,
+    memoryModelId: memoryProviderId ? memoryModelId : null,
   };
 }
 

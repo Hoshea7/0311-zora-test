@@ -394,6 +394,19 @@ function parseMemorySettingsUpdateInput(input: unknown): Partial<MemorySettings>
         : normalizedProviderId;
   }
 
+  if ("memoryModelId" in input) {
+    const { memoryModelId } = input;
+    if (memoryModelId !== null && typeof memoryModelId !== "string") {
+      throw new Error("memory.memoryModelId must be a string or null.");
+    }
+    const normalizedModelId =
+      typeof memoryModelId === "string" ? memoryModelId.trim() : memoryModelId;
+    updates.memoryModelId =
+      typeof normalizedModelId === "string" && normalizedModelId.length === 0
+        ? null
+        : normalizedModelId;
+  }
+
   return updates;
 }
 

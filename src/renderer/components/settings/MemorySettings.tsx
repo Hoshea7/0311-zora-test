@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type { MemorySettings as MemorySettingsValue } from "../../../shared/types/memory";
-import type { ProviderConfig } from "../../../shared/types/provider";
+import {
+  PROVIDER_PRESETS,
+  type ProviderConfig,
+} from "../../../shared/types/provider";
 import { cn } from "../../utils/cn";
 import { emitMemorySettingsUpdated } from "../../utils/memory-settings-event";
 import { getErrorMessage } from "../../utils/message";
+import {
+  getProviderModels,
+  resolveSelectedModelId,
+  resolveSelectedModelOverride,
+} from "../../utils/provider-selection";
 import { Button } from "../ui/Button";
 
 const BATCH_IDLE_OPTIONS = [1, 10, 20, 30, 60, 120] as const;
@@ -38,6 +46,70 @@ const selectClassName = [
   "text-[14px] text-stone-900 outline-none transition-all",
   "focus:border-stone-400 focus:ring-4 focus:ring-stone-200/60",
 ].join(" ");
+
+function serializeMemoryModelSelection(
+  providerId: string | null,
+  modelId: string | null
+): string {
+  if (!providerId) {
+    return "";
+  }
+
+  return JSON.stringify({ providerId, modelId });
+}
+
+function parseMemoryModelSelection(
+  value: string
+): { providerId: string; modelId: string | null } | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as {
+      providerId?: unknown;
+      modelId?: unknown;
+    };
+
+    if (typeof parsed.providerId !== "string" || parsed.providerId.trim().length === 0) {
+      return null;
+    }
+
+    return {
+      providerId: parsed.providerId.trim(),
+      modelId:
+        typeof parsed.modelId === "string" && parsed.modelId.trim().length > 0
+          ? parsed.modelId.trim()
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveMemoryModelSelectValue(
+  settings: MemorySettingsValue,
+  providers: ProviderConfig[]
+): string {
+  if (!settings.memoryProviderId) {
+    return "";
+  }
+
+  const provider = providers.find(
+    (item) => item.enabled && item.id === settings.memoryProviderId
+  );
+  if (!provider) {
+    return "";
+  }
+
+  const resolvedModelId = resolveSelectedModelId(provider, settings.memoryModelId ?? undefined);
+  if (!resolvedModelId) {
+    return "";
+  }
+
+  const modelOverride = resolveSelectedModelOverride(provider, resolvedModelId);
+  return serializeMemoryModelSelection(provider.id, modelOverride || null);
+}
 
 function SectionHeading({ title }: { title: string }) {
   return (
@@ -185,6 +257,10 @@ export function MemorySettings() {
     }
   };
 
+  const enabledProviders = providers.filter((provider) => provider.enabled);
+  const selectedMemoryModelValue =
+    settings ? resolveMemoryModelSelectValue(settings, enabledProviders) : "";
+
   return (
     <section className="animate-in fade-in slide-in-from-bottom-4 w-full space-y-8 pb-12 duration-500">
       <div className="mb-6">
@@ -326,20 +402,54 @@ export function MemorySettings() {
                 <div className="relative">
                   <select
                     className={cn(selectClassName, "pr-10")}
-                    value={settings.memoryProviderId ?? ""}
-                    onChange={(event) =>
-                      queueSettingsUpdate({
-                        memoryProviderId: event.target.value || null,
-                      })
-                    }
+                    value={selectedMemoryModelValue}
+                    onChange={(event) => {
+                      const selection = parseMemoryModelSelection(event.target.value);
+                      queueSettingsUpdate(
+                        selection
+                          ? {
+                              memoryProviderId: selection.providerId,
+                              memoryModelId: selection.modelId,
+                            }
+                          : {
+                              memoryProviderId: null,
+                              memoryModelId: null,
+                            }
+                      );
+                    }}
                   >
                     <option value="">跟随默认模型</option>
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                        {provider.modelId ? ` - ${provider.modelId}` : ""}
-                      </option>
-                    ))}
+                    {enabledProviders.map((provider) => {
+                      const models = getProviderModels(provider);
+                      if (models.length === 0) {
+                        return null;
+                      }
+
+                      return (
+                        <optgroup
+                          key={provider.id}
+                          label={`${provider.name} · ${PROVIDER_PRESETS[provider.providerType].label}`}
+                        >
+                          {models.map((model) => {
+                            const modelOverride =
+                              resolveSelectedModelOverride(provider, model.modelId) || null;
+
+                            return (
+                              <option
+                                key={`${provider.id}:${model.modelId}`}
+                                value={serializeMemoryModelSelection(
+                                  provider.id,
+                                  modelOverride
+                                )}
+                              >
+                                {model.modelId}
+                                {model.label ? `（${model.label}）` : ""}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      );
+                    })}
                   </select>
                   <SelectChevron />
                 </div>

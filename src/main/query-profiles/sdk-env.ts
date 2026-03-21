@@ -1,5 +1,30 @@
+import type { ProviderConfig } from "../../shared/types/provider";
 import { buildProviderSdkEnv, providerManager } from "../provider-manager";
 import { loadMemorySettings } from "../memory-settings";
+
+function normalizeOptionalModelId(value?: string | null): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function hasConfiguredModel(provider: ProviderConfig, modelId?: string | null): boolean {
+  const normalizedModelId = normalizeOptionalModelId(modelId);
+  if (!normalizedModelId) {
+    return false;
+  }
+
+  if (normalizeOptionalModelId(provider.modelId) === normalizedModelId) {
+    return true;
+  }
+
+  return Object.values(provider.roleModels ?? {}).some(
+    (value) => normalizeOptionalModelId(value) === normalizedModelId
+  );
+}
 
 export async function resolveSdkEnvForProfile(
   profileName: "awakening" | "productivity" | "memory",
@@ -14,6 +39,7 @@ export async function resolveSdkEnvForProfile(
   };
 
   let result: Awaited<ReturnType<typeof providerManager.getProviderByIdWithKey>> | null = null;
+  let memorySelectedModelId: string | undefined;
 
   if (options?.providerId) {
     result = await providerManager.getProviderByIdWithKey(options.providerId);
@@ -38,6 +64,7 @@ export async function resolveSdkEnvForProfile(
           result = null;
         }
         if (result) {
+          memorySelectedModelId = normalizeOptionalModelId(settings.memoryModelId);
           console.log(
             `[memory] Using dedicated memory provider: ${result.provider.name}`
           );
@@ -63,11 +90,23 @@ export async function resolveSdkEnvForProfile(
   }
 
   const { provider, apiKey } = result;
-  const effectiveModelId = options?.selectedModelId ?? provider.modelId;
+  const requestedModelId = normalizeOptionalModelId(
+    options?.selectedModelId ?? memorySelectedModelId
+  );
+  const effectiveModelId =
+    requestedModelId && hasConfiguredModel(provider, requestedModelId)
+      ? requestedModelId
+      : provider.modelId;
+
+  if (requestedModelId && effectiveModelId !== requestedModelId) {
+    console.warn(
+      `[${profileName}] Requested model ${requestedModelId} is not configured on provider ${provider.name}; falling back to provider default.`
+    );
+  }
 
   console.log(`[${profileName}] Active provider:`, {
     lockedProviderId: options?.providerId ?? "(default)",
-    selectedModelId: options?.selectedModelId ?? "(provider default)",
+    selectedModelId: requestedModelId ?? "(provider default)",
     providerId: provider.id,
     name: provider.name,
     providerType: provider.providerType,
