@@ -362,12 +362,12 @@ export class ProviderManager {
     return { provider, apiKey };
   }
 
-  async getProviderWithKey(
+  async getProviderByIdWithKey(
     providerId: string
   ): Promise<{ provider: ProviderConfig; apiKey: string } | null> {
     const id = normalizeRequiredString(providerId, "Provider ID");
     const providers = await this.readProviders();
-    const provider = providers.find((p) => p.id === id && p.enabled) ?? null;
+    const provider = providers.find((p) => p.id === id) ?? null;
 
     if (!provider) {
       return null;

@@ -9,22 +9,14 @@ export async function resolveSdkEnvForProfile(
     CLAUDE_AGENT_SDK_CLIENT_APP: "zora",
   };
 
-  let result: {
-    provider: {
-      name: string;
-      providerType: string;
-      baseUrl: string;
-      modelId?: string;
-    };
-    apiKey: string;
-  } | null = null;
+  let result = null;
 
   if (profileName === "memory") {
     try {
       const settings = await loadMemorySettings();
       if (settings.memoryProviderId) {
-        result = await providerManager.getProviderWithKey(settings.memoryProviderId);
-        if (result) {
+        result = await providerManager.getProviderByIdWithKey(settings.memoryProviderId);
+        if (result?.provider.enabled) {
           console.log(
             `[${profileName}] Using dedicated memory provider: ${result.provider.name}`
           );
@@ -32,6 +24,7 @@ export async function resolveSdkEnvForProfile(
           console.log(
             `[${profileName}] Configured memory provider (${settings.memoryProviderId}) not found or disabled; falling back to default.`
           );
+          result = null;
         }
       }
     } catch (err) {
