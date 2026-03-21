@@ -12,25 +12,21 @@ const MEMORY_MODE_OPTIONS = [
     value: "immediate",
     title: "即时记忆",
     description: "每次对话结束后立即处理记忆",
-    recommended: false,
   },
   {
     value: "batch",
     title: "批量记忆",
     description: "累积多次对话后统一处理，减少 token 消耗",
-    recommended: true,
   },
   {
     value: "manual",
     title: "手动记忆",
     description: "仅在对话中说“记住这个”或手动触发时处理",
-    recommended: false,
   },
 ] as const satisfies ReadonlyArray<{
   value: MemorySettingsValue["mode"];
   title: string;
   description: string;
-  recommended?: boolean;
 }>;
 
 type SaveState = "idle" | "saving" | "saved";
@@ -269,11 +265,6 @@ export function MemorySettings() {
                         <span className="text-[15px] font-medium text-stone-900">
                           {option.title}
                         </span>
-                        {option.recommended ? (
-                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-medium tracking-[0.06em] text-amber-700">
-                            推荐
-                          </span>
-                        ) : null}
                       </div>
                       <p className="mt-1 text-[13px] leading-relaxed text-stone-500">
                         {option.description}

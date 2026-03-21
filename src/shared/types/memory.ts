@@ -17,7 +17,7 @@ export interface MemorySettings {
 }
 
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
-  mode: "batch",
+  mode: "immediate",
   batchIdleMinutes: 30,
   memoryProviderId: null,
 };
