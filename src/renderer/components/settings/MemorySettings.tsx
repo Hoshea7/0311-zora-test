@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MemorySettings as MemorySettingsValue } from "../../../shared/types/memory";
 import type { ProviderConfig } from "../../../shared/types/provider";
 import { cn } from "../../utils/cn";
+import { emitMemorySettingsUpdated } from "../../utils/memory-settings-event";
 import { getErrorMessage } from "../../utils/message";
 import { Button } from "../ui/Button";
 
@@ -95,6 +96,7 @@ export function MemorySettings() {
 
         setSettings(loadedSettings);
         setProviders(loadedProviders);
+        emitMemorySettingsUpdated(loadedSettings);
       } catch (error) {
         if (!isActive) {
           return;
@@ -144,6 +146,7 @@ export function MemorySettings() {
 
         if (requestId === latestRequestRef.current) {
           setSettings(updatedSettings);
+          emitMemorySettingsUpdated(updatedSettings);
           setSaveState("saved");
         }
       })
@@ -159,6 +162,7 @@ export function MemorySettings() {
           const latestSettings = await window.zora.memory.getSettings();
           if (requestId === latestRequestRef.current) {
             setSettings(latestSettings);
+            emitMemorySettingsUpdated(latestSettings);
           }
         } catch {
           // Keep the visible error and optimistic state when reload also fails.
@@ -177,6 +181,7 @@ export function MemorySettings() {
       ]);
       setSettings(loadedSettings);
       setProviders(loadedProviders);
+      emitMemorySettingsUpdated(loadedSettings);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     } finally {

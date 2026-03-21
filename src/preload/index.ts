@@ -97,6 +97,26 @@ const zoraApi: ZoraApi = {
       ipcRenderer.invoke("memory:getSettings") as Promise<MemorySettings>,
     updateSettings: (settings: Partial<MemorySettings>) =>
       ipcRenderer.invoke("memory:updateSettings", settings) as Promise<MemorySettings>,
+    processNow: () =>
+      ipcRenderer.invoke("memory:processNow") as Promise<{
+        total: number;
+        processed: number;
+      }>,
+    getPendingCount: () =>
+      ipcRenderer.invoke("memory:getPendingCount") as Promise<number>,
+    onPendingChanged: (callback: (count: number) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, count: number) => {
+        callback(count);
+      };
+
+      ipcRenderer.on("memory:pendingChanged", handler);
+
+      return () => {
+        ipcRenderer.removeListener("memory:pendingChanged", handler);
+      };
+    },
+    getStatus: () =>
+      ipcRenderer.invoke("memory:getStatus") as Promise<{ pending: number; processing: number }>,
   },
   chat: (
     text: string,

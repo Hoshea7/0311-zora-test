@@ -216,6 +216,10 @@ export interface ZoraApi {
   memory: {
     getSettings: () => Promise<MemorySettings>;
     updateSettings: (settings: Partial<MemorySettings>) => Promise<MemorySettings>;
+    processNow: () => Promise<{ total: number; processed: number }>;
+    getPendingCount: () => Promise<number>;
+    onPendingChanged: (callback: (count: number) => void) => () => void;
+    getStatus: () => Promise<{ pending: number; processing: number }>;
   };
   chat: (
     text: string,

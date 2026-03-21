@@ -220,6 +220,7 @@ export class MemoryAgent {
   private readonly processedMessageCounts = new Map<string, number>();
   private readonly pendingContexts = new Map<string, PendingSessionContext>();
   private batchIdleTimer: NodeJS.Timeout | null = null;
+  private pendingChangeCallback?: (count: number) => void;
   private queue: Promise<void> = Promise.resolve();
 
   async onConversationEnd(
@@ -227,15 +228,33 @@ export class MemoryAgent {
     workspaceId = "default",
     zoraId = "default"
   ): Promise<void> {
+    const messages = await loadMessages(sessionId, workspaceId);
+    if (messages.length < 4) {
+      this.clearDebounceTimer(sessionId);
+      this.deletePendingContext(sessionId);
+      logMemoryAgent(
+        `Session ${sessionId} has ${messages.length} message(s), below threshold (4); not queuing.`
+      );
+      return;
+    }
+
     const settings = await loadMemorySettings();
 
     switch (settings.mode) {
       case "manual":
-        logMemoryAgent(`Manual mode: skipping memory processing for session ${sessionId}.`);
+        this.setPendingContext(sessionId, {
+          workspaceId,
+          zoraId,
+          enqueuedAt: Date.now(),
+        });
+        this.clearDebounceTimer(sessionId);
+        logMemoryAgent(
+          `Conversation ended for session ${sessionId} (manual mode: stored, waiting for explicit trigger; pending: ${this.pendingContexts.size}).`
+        );
         return;
 
       case "batch":
-        this.pendingContexts.set(sessionId, {
+        this.setPendingContext(sessionId, {
           workspaceId,
           zoraId,
           enqueuedAt: Date.now(),
@@ -255,7 +274,7 @@ export class MemoryAgent {
 
       case "immediate":
       default:
-        this.pendingContexts.set(sessionId, {
+        this.setPendingContext(sessionId, {
           workspaceId,
           zoraId,
           enqueuedAt: Date.now(),
@@ -279,15 +298,10 @@ export class MemoryAgent {
     const settings = getMemorySettingsSync();
 
     if (settings.mode === "manual" || settings.mode === "batch") {
-      this.pendingContexts.set(sessionId, {
-        workspaceId,
-        zoraId,
-        enqueuedAt: Date.now(),
-      });
       return;
     }
 
-    this.pendingContexts.set(sessionId, {
+    this.setPendingContext(sessionId, {
       workspaceId,
       zoraId,
       enqueuedAt: Date.now(),
@@ -359,6 +373,46 @@ export class MemoryAgent {
     logMemoryAgent("Flush complete.");
   }
 
+  async processNow(): Promise<{ total: number; processed: number }> {
+    logMemoryAgent("Manual processNow triggered.");
+
+    this.clearBatchIdleTimer();
+
+    for (const [, timer] of this.debounceTimers) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
+
+    const total = this.pendingContexts.size;
+    if (total === 0) {
+      logMemoryAgent("processNow: no pending sessions.");
+      this.notifyPendingChanged();
+      return { total: 0, processed: 0 };
+    }
+
+    logMemoryAgent(`processNow: ${total} pending session(s).`);
+    const processed = await this.processPendingBatch();
+    logMemoryAgent(`processNow complete: ${processed}/${total} sessions processed.`);
+    this.notifyPendingChanged();
+
+    return { total, processed };
+  }
+
+  setPendingChangeCallback(callback: (count: number) => void): void {
+    this.pendingChangeCallback = callback;
+  }
+
+  getPendingCount(): number {
+    return this.pendingContexts.size;
+  }
+
+  getStatus(): { pending: number; processing: number } {
+    return {
+      pending: this.pendingContexts.size,
+      processing: this.processing.size,
+    };
+  }
+
   private clearDebounceTimer(sessionId: string) {
     const timer = this.debounceTimers.get(sessionId);
     if (!timer) {
@@ -367,6 +421,25 @@ export class MemoryAgent {
 
     clearTimeout(timer);
     this.debounceTimers.delete(sessionId);
+  }
+
+  private setPendingContext(sessionId: string, context: PendingSessionContext): void {
+    const previousCount = this.pendingContexts.size;
+    this.pendingContexts.set(sessionId, context);
+    if (this.pendingContexts.size !== previousCount) {
+      this.notifyPendingChanged();
+    }
+  }
+
+  private deletePendingContext(sessionId: string): void {
+    const deleted = this.pendingContexts.delete(sessionId);
+    if (deleted) {
+      this.notifyPendingChanged();
+    }
+  }
+
+  private notifyPendingChanged(): void {
+    this.pendingChangeCallback?.(this.pendingContexts.size);
   }
 
   private resetBatchIdleTimer(idleMinutes: number): void {
@@ -388,7 +461,7 @@ export class MemoryAgent {
     }
   }
 
-  private async processPendingBatch(): Promise<void> {
+  private async processPendingBatch(): Promise<number> {
     const pending: Array<{
       sessionId: string;
       context: PendingSessionContext;
@@ -402,14 +475,13 @@ export class MemoryAgent {
 
     if (pending.length === 0) {
       logMemoryAgent("Batch: no eligible pending sessions.");
-      return;
+      return 0;
     }
 
     if (pending.length === 1) {
       const { sessionId, context } = pending[0];
       logMemoryAgent(`Batch: only 1 session (${sessionId}); using single-session processing.`);
-      await this.process(sessionId, context.workspaceId, context.zoraId);
-      return;
+      return (await this.process(sessionId, context.workspaceId, context.zoraId)) ? 1 : 0;
     }
 
     const byZora = new Map<string, typeof pending>();
@@ -418,6 +490,8 @@ export class MemoryAgent {
       if (!byZora.has(key)) byZora.set(key, []);
       byZora.get(key)?.push(item);
     }
+
+    let totalProcessed = 0;
 
     for (const [zoraId, group] of byZora) {
       const startedAt = Date.now();
@@ -438,14 +512,14 @@ export class MemoryAgent {
 
           if (messages.length < 4) {
             logMemoryAgent(`Batch: skip ${sessionId} — only ${messages.length} message(s).`);
-            this.pendingContexts.delete(sessionId);
+            this.deletePendingContext(sessionId);
             continue;
           }
 
           const lastProcessed = this.processedMessageCounts.get(sessionId);
           if (lastProcessed !== undefined && lastProcessed >= messages.length) {
             logMemoryAgent(`Batch: skip ${sessionId} — unchanged (${messages.length} msgs).`);
-            this.pendingContexts.delete(sessionId);
+            this.deletePendingContext(sessionId);
             continue;
           }
 
@@ -462,7 +536,7 @@ export class MemoryAgent {
           });
         } catch (error) {
           console.error(`${MEMORY_AGENT_PREFIX} Batch: failed to load ${sessionId}:`, error);
-          this.pendingContexts.delete(sessionId);
+          this.deletePendingContext(sessionId);
         }
       }
 
@@ -478,7 +552,9 @@ export class MemoryAgent {
           continue;
         }
         logMemoryAgent(`Batch: 1 session survived filtering (${sessionId}); using single-session.`);
-        await this.process(sessionId, ctx.workspaceId, ctx.zoraId);
+        if (await this.process(sessionId, ctx.workspaceId, ctx.zoraId)) {
+          totalProcessed += 1;
+        }
         continue;
       }
 
@@ -524,6 +600,7 @@ export class MemoryAgent {
         for (const { sessionId, entry } of entries) {
           this.processedMessageCounts.set(sessionId, entry.messages.length);
         }
+        totalProcessed += entries.length;
 
         logMemoryAgent(
           `Batch memory run complete for ${batchSessionIds.length} sessions in ${Date.now() - startedAt}ms.`
@@ -533,10 +610,12 @@ export class MemoryAgent {
       } finally {
         for (const sid of batchSessionIds) {
           this.processing.delete(sid);
-          this.pendingContexts.delete(sid);
+          this.deletePendingContext(sid);
         }
       }
     }
+
+    return totalProcessed;
   }
 
   private enqueueProcess(
@@ -544,13 +623,15 @@ export class MemoryAgent {
     workspaceId = "default",
     zoraId = "default"
   ) {
-    this.pendingContexts.set(sessionId, {
+    this.setPendingContext(sessionId, {
       workspaceId,
       zoraId,
       enqueuedAt: Date.now(),
     });
     this.queue = this.queue
-      .then(() => this.process(sessionId, workspaceId, zoraId))
+      .then(async () => {
+        await this.process(sessionId, workspaceId, zoraId);
+      })
       .catch((error) => {
         console.error(
           `${MEMORY_AGENT_PREFIX} Queue failure for session ${sessionId}:`,
@@ -563,20 +644,20 @@ export class MemoryAgent {
     sessionId: string,
     workspaceId = "default",
     zoraId = "default"
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.processing.has(sessionId)) {
       logMemoryAgent(`Skip session ${sessionId}: processing already in progress.`);
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
 
     if (sessionId === "__awakening__") {
       logMemoryAgent("Skip awakening session for memory extraction.");
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
 
     if (sessionId.startsWith("__memory_")) {
       logMemoryAgent(`Skip nested memory session ${sessionId}.`);
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
 
     return (async () => {
@@ -595,7 +676,7 @@ export class MemoryAgent {
           logMemoryAgent(
             `Skip session ${sessionId}: only ${messages.length} message(s), below threshold.`
           );
-          return;
+          return false;
         }
 
         const lastProcessedCount = this.processedMessageCounts.get(sessionId);
@@ -603,7 +684,7 @@ export class MemoryAgent {
           logMemoryAgent(
             `Session ${sessionId} unchanged (${messages.length} message(s)); skipping.`
           );
-          return;
+          return false;
         }
 
         const sessions = await listSessions(workspaceId);
@@ -624,7 +705,7 @@ export class MemoryAgent {
           logMemoryAgent(
             `Skip session ${sessionId}: no text transcript eligible for memory extraction.`
           );
-          return;
+          return false;
         }
 
         logMemoryAgent(
@@ -659,14 +740,16 @@ export class MemoryAgent {
         logMemoryAgent(
           `Completed memory run for session ${sessionId} in ${Date.now() - startedAt}ms.`
         );
+        return true;
       } catch (error) {
         console.error(
           `${MEMORY_AGENT_PREFIX} Failed to process session ${sessionId}:`,
           error
         );
+        return false;
       } finally {
         this.processing.delete(sessionId);
-        this.pendingContexts.delete(sessionId);
+        this.deletePendingContext(sessionId);
       }
     })();
   }

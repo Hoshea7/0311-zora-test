@@ -580,6 +580,18 @@ app.whenReady().then(async () => {
     return loadMemorySettings();
   });
 
+  ipcMain.handle("memory:processNow", async () => {
+    return memoryAgent.processNow();
+  });
+
+  ipcMain.handle("memory:getPendingCount", () => {
+    return memoryAgent.getPendingCount();
+  });
+
+  ipcMain.handle("memory:getStatus", () => {
+    return memoryAgent.getStatus();
+  });
+
   ipcMain.handle("skill:list", () => {
     return listSkills();
   });
@@ -1078,6 +1090,14 @@ app.whenReady().then(async () => {
       respondToAskUser(response.requestId, response.answers);
     }
   );
+
+  memoryAgent.setPendingChangeCallback((count) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("memory:pendingChanged", count);
+      }
+    }
+  });
 
   createWindow();
 
