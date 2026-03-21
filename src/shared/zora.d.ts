@@ -3,6 +3,7 @@ import type {
   FeishuConfig,
   FeishuConnectionTestResult,
 } from "./types/feishu";
+import type { MemorySettings } from "./types/memory";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -211,6 +212,10 @@ export interface ZoraApi {
     onAgentStateChanged: (
       callback: (payload: { sessionId: string; running: boolean }) => void
     ) => () => void;
+  };
+  memory: {
+    getSettings: () => Promise<MemorySettings>;
+    updateSettings: (settings: Partial<MemorySettings>) => Promise<MemorySettings>;
   };
   chat: (
     text: string,

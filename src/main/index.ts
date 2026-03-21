@@ -10,6 +10,7 @@ import type {
   PermissionResponse,
 } from "../shared/zora";
 import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
+import type { MemorySettings } from "../shared/types/memory";
 import type { ImportMethod, ImportResult, ImportSelection } from "../shared/types/skill";
 import type { ProviderCreateInput, ProviderUpdateInput } from "../shared/types/provider";
 import {
@@ -25,6 +26,7 @@ import {
   setPermissionMode,
 } from "./hitl";
 import { memoryAgent } from "./memory-agent";
+import { loadMemorySettings, saveMemorySettings } from "./memory-settings";
 import { ensureBootstrapScaffold } from "./memory-store";
 import {
   feishuBridge,
@@ -292,6 +294,52 @@ function parseOptionalFeishuConfigInput(input: unknown): FeishuConfig | undefine
   return input as unknown as FeishuConfig;
 }
 
+function isMemoryMode(value: unknown): value is MemorySettings["mode"] {
+  return value === "immediate" || value === "batch" || value === "manual";
+}
+
+function parseMemorySettingsUpdateInput(input: unknown): Partial<MemorySettings> {
+  if (!isRecord(input)) {
+    throw new Error("A valid memory settings payload is required.");
+  }
+
+  const updates: Partial<MemorySettings> = {};
+
+  if ("mode" in input) {
+    if (!isMemoryMode(input.mode)) {
+      throw new Error("memory.mode must be immediate, batch, or manual.");
+    }
+    updates.mode = input.mode;
+  }
+
+  if ("batchIdleMinutes" in input) {
+    const batchIdleMinutes = input.batchIdleMinutes;
+    if (
+      typeof batchIdleMinutes !== "number" ||
+      !Number.isInteger(batchIdleMinutes) ||
+      ![10, 20, 30, 60, 120].includes(batchIdleMinutes)
+    ) {
+      throw new Error("memory.batchIdleMinutes must be one of 10, 20, 30, 60, 120.");
+    }
+    updates.batchIdleMinutes = batchIdleMinutes;
+  }
+
+  if ("memoryProviderId" in input) {
+    const { memoryProviderId } = input;
+    if (memoryProviderId !== null && typeof memoryProviderId !== "string") {
+      throw new Error("memory.memoryProviderId must be a string or null.");
+    }
+    const normalizedProviderId =
+      typeof memoryProviderId === "string" ? memoryProviderId.trim() : memoryProviderId;
+    updates.memoryProviderId =
+      typeof normalizedProviderId === "string" && normalizedProviderId.length === 0
+        ? null
+        : normalizedProviderId;
+  }
+
+  return updates;
+}
+
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 const DOCUMENT_EXTENSIONS = ["pdf"] as const;
 const TEXT_EXTENSIONS = [
@@ -516,6 +564,20 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(FEISHU_IPC.GET_STATUS, () => {
     return feishuBridge.getStatus();
+  });
+
+  ipcMain.handle("memory:getSettings", async () => {
+    return loadMemorySettings();
+  });
+
+  ipcMain.handle("memory:updateSettings", async (_event, input: unknown) => {
+    const current = await loadMemorySettings();
+    const updated: MemorySettings = {
+      ...current,
+      ...parseMemorySettingsUpdateInput(input),
+    };
+    await saveMemorySettings(updated);
+    return loadMemorySettings();
   });
 
   ipcMain.handle("skill:list", () => {

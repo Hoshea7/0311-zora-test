@@ -20,6 +20,7 @@ import {
   type FeishuConfig,
   type FeishuConnectionTestResult,
 } from "../shared/types/feishu";
+import type { MemorySettings } from "../shared/types/memory";
 import type {
   DiscoveryResult,
   ExternalToolConfig,
@@ -90,6 +91,12 @@ const zoraApi: ZoraApi = {
         ipcRenderer.removeListener(FEISHU_IPC.AGENT_STATE, handler);
       };
     },
+  },
+  memory: {
+    getSettings: () =>
+      ipcRenderer.invoke("memory:getSettings") as Promise<MemorySettings>,
+    updateSettings: (settings: Partial<MemorySettings>) =>
+      ipcRenderer.invoke("memory:updateSettings", settings) as Promise<MemorySettings>,
   },
   chat: (
     text: string,
