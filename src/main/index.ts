@@ -136,7 +136,7 @@ function assertOptionalBoolean(value: unknown, fieldName: string): boolean | und
 }
 
 function isMcpTransportType(value: unknown): value is McpTransportType {
-  return value === "stdio" || value === "http" || value === "sse";
+  return value === "stdio" || value === "http" || value === "sse" || value === "sdk";
 }
 
 function parseMcpServerMutationInput(
@@ -149,7 +149,7 @@ function parseMcpServerMutationInput(
   const name = assertRequiredString(input.name, "mcp.name");
 
   if (!isRecord(input.entry) || !isMcpTransportType(input.entry.type)) {
-    throw new Error("mcp.entry.type must be one of: stdio, http, sse.");
+    throw new Error("mcp.entry.type must be one of: stdio, http, sse, sdk.");
   }
 
   return {
@@ -177,12 +177,21 @@ function parseMcpToggleInput(input: unknown): { name: string; enabled: boolean }
   };
 }
 
-function parseMcpRawJsonInput(input: unknown): string {
-  if (typeof input !== "string") {
-    throw new Error("A valid MCP JSON string is required.");
+function parseMcpRawJsonInput(
+  input: unknown
+): { json: string; fallbackName?: string } {
+  if (typeof input === "string") {
+    return { json: input };
   }
 
-  return input;
+  if (!isRecord(input)) {
+    throw new Error("A valid MCP JSON payload is required.");
+  }
+
+  return {
+    json: assertRequiredString(input.json, "mcp.json"),
+    fallbackName: assertOptionalString(input.fallbackName, "mcp.fallbackName"),
+  };
 }
 
 function truncateForPreview(value: string, maxChars = 200): string {
@@ -575,8 +584,8 @@ app.whenReady().then(async () => {
     return mcpManager.getConfig();
   });
 
-  ipcMain.handle("mcp:get-raw-json", () => {
-    return mcpManager.getRawConfigJson();
+  ipcMain.handle("mcp:get-editable-config", () => {
+    return mcpManager.getEditableConfig();
   });
 
   ipcMain.handle("mcp:save-server", async (_event, input: unknown) => {
@@ -585,7 +594,16 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("mcp:save-raw-json", async (_event, input: unknown) => {
-    return mcpManager.saveRawJson(parseMcpRawJsonInput(input));
+    const { json, fallbackName } = parseMcpRawJsonInput(input);
+    return mcpManager.saveRawJson(json, fallbackName);
+  });
+
+  ipcMain.handle("mcp:save-single-server-json", async (_event, input: unknown) => {
+    const { json, fallbackName } = parseMcpRawJsonInput(input);
+    return mcpManager.saveSingleServerJson(
+      assertRequiredString(fallbackName, "mcp.fallbackName"),
+      json
+    );
   });
 
   ipcMain.handle("mcp:delete-server", async (_event, input: unknown) => {

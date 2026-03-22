@@ -35,6 +35,7 @@ import type {
 } from "../shared/types/provider";
 import type {
   McpConfig,
+  McpRawJsonSaveInput,
   McpRawJsonSaveResult,
   McpServerEntry,
   McpServerTestResult,
@@ -99,11 +100,13 @@ const zoraApi: ZoraApi = {
   },
   mcp: {
     getConfig: () => ipcRenderer.invoke("mcp:get-config") as Promise<McpConfig>,
-    getRawJson: () => ipcRenderer.invoke("mcp:get-raw-json") as Promise<string>,
+    getEditableConfig: () => ipcRenderer.invoke("mcp:get-editable-config") as Promise<McpConfig>,
     saveServer: (name: string, entry: McpServerEntry) =>
       ipcRenderer.invoke("mcp:save-server", { name, entry }) as Promise<McpConfig>,
-    saveRawJson: (json: string) =>
-      ipcRenderer.invoke("mcp:save-raw-json", json) as Promise<McpRawJsonSaveResult>,
+    saveRawJson: (input: McpRawJsonSaveInput) =>
+      ipcRenderer.invoke("mcp:save-raw-json", input) as Promise<McpRawJsonSaveResult>,
+    saveSingleServerJson: (input: McpRawJsonSaveInput) =>
+      ipcRenderer.invoke("mcp:save-single-server-json", input) as Promise<McpRawJsonSaveResult>,
     deleteServer: (name: string) =>
       ipcRenderer.invoke("mcp:delete-server", { name }) as Promise<McpConfig>,
     toggleServer: (name: string, enabled: boolean) =>

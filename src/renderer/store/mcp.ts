@@ -1,10 +1,7 @@
 import { atom } from "jotai";
 import type { McpConfig } from "../../shared/types/mcp";
 
-export type McpEditMode = "list" | "json";
-
 export const mcpConfigAtom = atom<McpConfig>({ servers: {} });
-export const mcpEditModeAtom = atom<McpEditMode>("list");
 
 export const loadMcpConfigAtom = atom(null, async (_get, set) => {
   const config = await window.zora.mcp.getConfig();

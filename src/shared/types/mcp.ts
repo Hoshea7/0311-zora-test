@@ -1,5 +1,64 @@
 /** MCP 传输类型 */
-export type McpTransportType = "stdio" | "http" | "sse";
+export type McpTransportType = "stdio" | "http" | "sse" | "sdk";
+
+export type McpBuiltinKey = "web_search" | "web_fetch";
+
+export const MCP_WEB_SEARCH_SERVER_NAME = "mcp_web_search";
+export const MCP_WEB_FETCH_SERVER_NAME = "mcp_web_fetch";
+
+export interface McpBuiltinDefinition {
+  serverName: string;
+  toolName: string;
+  title: string;
+  envKey: string;
+  label: string;
+  helper: string;
+  placeholder: string;
+  configuredSummary: string;
+  missingSummary: string;
+  isReadOnlyTool: boolean;
+}
+
+export const MCP_BUILTINS: Record<McpBuiltinKey, McpBuiltinDefinition> = {
+  web_search: {
+    serverName: MCP_WEB_SEARCH_SERVER_NAME,
+    toolName: "zora_mcp_websearch",
+    title: "Web Search",
+    envKey: "TAVILY_API_KEY",
+    label: "Tavily API Key",
+    helper: "用于启用内置 web_search 工具",
+    placeholder: "tvly-...",
+    configuredSummary: "Tavily Web Search 已配置",
+    missingSummary: "等待配置 Tavily API Key",
+    isReadOnlyTool: true,
+  },
+  web_fetch: {
+    serverName: MCP_WEB_FETCH_SERVER_NAME,
+    toolName: "zora_mcp_webfetch",
+    title: "Web Fetch",
+    envKey: "JINA_API_KEY",
+    label: "Jina API Key",
+    helper: "用于启用内置 web_fetch 工具",
+    placeholder: "jina_...",
+    configuredSummary: "Jina Web Fetch 已配置",
+    missingSummary: "等待配置 Jina API Key",
+    isReadOnlyTool: true,
+  },
+};
+
+export function getMcpBuiltinDefinition(
+  builtinKey?: McpBuiltinKey
+): McpBuiltinDefinition | null {
+  return builtinKey ? MCP_BUILTINS[builtinKey] : null;
+}
+
+export function isSafeBuiltinMcpToolName(toolName: string): boolean {
+  return Object.values(MCP_BUILTINS).some(
+    (definition) =>
+      definition.isReadOnlyTool &&
+      toolName === `mcp__${definition.serverName}__${definition.toolName}`
+  );
+}
 
 /** MCP Server 配置条目 */
 export interface McpServerEntry {
@@ -21,6 +80,8 @@ export interface McpServerEntry {
   enabled: boolean;
   /** 是否为内置 MCP（不可删除，V1 预留字段） */
   isBuiltin?: boolean;
+  /** 内置 MCP 标识 */
+  builtinKey?: McpBuiltinKey;
   /** 最后一次连接测试结果 */
   lastTestResult?: {
     success: boolean;
@@ -62,4 +123,9 @@ export interface McpRawJsonSaveResult {
   success: boolean;
   error?: string;
   results: McpRawJsonServerResult[];
+}
+
+export interface McpRawJsonSaveInput {
+  json: string;
+  fallbackName?: string;
 }

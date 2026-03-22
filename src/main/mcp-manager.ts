@@ -2,15 +2,29 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { app, safeStorage } from "electron";
-import type { McpServerConfigForProcessTransport } from "@anthropic-ai/claude-agent-sdk";
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
+import { MCP_BUILTINS } from "../shared/types/mcp";
 import type {
   McpConfig,
+  McpBuiltinKey,
   McpRawJsonSaveResult,
   McpRawJsonServerResult,
   McpServerEntry,
   McpServerTestResult,
   McpTransportType,
 } from "../shared/types/mcp";
+import {
+  createBuiltinWebFetchEntry,
+  createBuiltinWebFetchServer,
+  isBuiltinWebFetchEntry,
+  testBuiltinWebFetch,
+} from "./builtin-mcp/web-fetch";
+import {
+  createBuiltinWebSearchEntry,
+  createBuiltinWebSearchServer,
+  isBuiltinWebSearchEntry,
+  testBuiltinWebSearch,
+} from "./builtin-mcp/web-search";
 import { isRecord } from "./utils/guards";
 import { isEnoentError, replaceFileAtomically } from "./utils/fs";
 
@@ -18,8 +32,21 @@ const MASKED_SECRET = "••••••";
 const ENCRYPTED_PREFIX = "__ENCRYPTED:";
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const REMOTE_TEST_TIMEOUT_MS = 10_000;
-const MCP_TRANSPORT_TYPES = new Set<McpTransportType>(["stdio", "http", "sse"]);
+const MCP_TRANSPORT_TYPES = new Set<McpTransportType>(["stdio", "http", "sse", "sdk"]);
 const SENSITIVE_KEYWORDS = ["key", "token", "secret", "password", "authorization"];
+const SERVER_ENTRY_KEYS = new Set<keyof McpServerEntry>([
+  "type",
+  "command",
+  "args",
+  "url",
+  "headers",
+  "env",
+  "timeout",
+  "enabled",
+  "isBuiltin",
+  "builtinKey",
+  "lastTestResult",
+]);
 const INITIALIZE_REQUEST = {
   jsonrpc: "2.0",
   id: 1,
@@ -33,9 +60,25 @@ const INITIALIZE_REQUEST = {
     },
   },
 } as const;
+const INITIALIZED_NOTIFICATION = {
+  jsonrpc: "2.0",
+  method: "notifications/initialized",
+  params: {},
+} as const;
+const TOOLS_LIST_REQUEST = {
+  jsonrpc: "2.0",
+  id: 2,
+  method: "tools/list",
+  params: {},
+} as const;
 
 type StringRecord = Record<string, string>;
-export type SdkMcpServers = Record<string, McpServerConfigForProcessTransport>;
+export type SdkMcpServers = Record<string, McpServerConfig>;
+
+const BUILTIN_SERVER_FACTORIES: Record<string, () => McpServerEntry> = {
+  [MCP_BUILTINS.web_fetch.serverName]: () => createBuiltinWebFetchEntry(),
+  [MCP_BUILTINS.web_search.serverName]: () => createBuiltinWebSearchEntry(),
+};
 
 let sharedMcpManager: McpManager | null = null;
 
@@ -111,9 +154,16 @@ function normalizeOptionalBoolean(value: unknown, fieldName: string): boolean | 
   return value;
 }
 
-function normalizeRequiredBoolean(value: unknown, fieldName: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean.`);
+function normalizeOptionalBuiltinKey(
+  value: unknown,
+  fieldName: string
+): McpBuiltinKey | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value !== "web_search" && value !== "web_fetch") {
+    throw new Error(`${fieldName} must be "web_search" or "web_fetch".`);
   }
 
   return value;
@@ -168,7 +218,7 @@ function normalizeServerEntry(input: unknown, fieldName: string): McpServerEntry
   }
 
   if (!isMcpTransportType(input.type)) {
-    throw new Error(`${fieldName}.type must be one of: stdio, http, sse.`);
+    throw new Error(`${fieldName}.type must be one of: stdio, http, sse, sdk.`);
   }
 
   return {
@@ -181,8 +231,9 @@ function normalizeServerEntry(input: unknown, fieldName: string): McpServerEntry
     timeout:
       normalizeOptionalTimeout(input.timeout, `${fieldName}.timeout`) ??
       DEFAULT_TIMEOUT_SECONDS,
-    enabled: normalizeRequiredBoolean(input.enabled, `${fieldName}.enabled`),
+    enabled: normalizeOptionalBoolean(input.enabled, `${fieldName}.enabled`) ?? true,
     isBuiltin: normalizeOptionalBoolean(input.isBuiltin, `${fieldName}.isBuiltin`),
+    builtinKey: normalizeOptionalBuiltinKey(input.builtinKey, `${fieldName}.builtinKey`),
     lastTestResult: normalizeOptionalLastTestResult(
       input.lastTestResult,
       `${fieldName}.lastTestResult`
@@ -197,6 +248,75 @@ function normalizeConfig(input: unknown): McpConfig {
 
   const servers: Record<string, McpServerEntry> = {};
   for (const [name, entry] of Object.entries(input.servers)) {
+    servers[name] = normalizeServerEntry(entry, `mcp.servers.${name}`);
+  }
+
+  return { servers };
+}
+
+function getHeaderKey(headers: StringRecord, target: string): string | undefined {
+  return Object.keys(headers).find((key) => key.toLowerCase() === target.toLowerCase());
+}
+
+function buildRemoteTestHeaders(headers?: StringRecord): StringRecord {
+  const nextHeaders: StringRecord = { ...(headers ?? {}) };
+  const acceptKey = getHeaderKey(nextHeaders, "Accept") ?? "Accept";
+  const contentTypeKey = getHeaderKey(nextHeaders, "Content-Type") ?? "Content-Type";
+  const acceptValues = new Set(
+    String(nextHeaders[acceptKey] ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+      .map((value) => value.toLowerCase())
+  );
+
+  acceptValues.add("application/json");
+  acceptValues.add("text/event-stream");
+
+  nextHeaders[acceptKey] = Array.from(acceptValues).join(", ");
+  nextHeaders[contentTypeKey] = "application/json";
+
+  return nextHeaders;
+}
+
+function looksLikeBareServerEntry(input: unknown): input is Record<string, unknown> {
+  if (!isRecord(input)) {
+    return false;
+  }
+
+  if (isMcpTransportType(input.type)) {
+    return true;
+  }
+
+  return Object.keys(input).some((key) => SERVER_ENTRY_KEYS.has(key as keyof McpServerEntry));
+}
+
+function normalizeRawJsonInput(input: unknown, fallbackName?: string): McpConfig {
+  if (!isRecord(input)) {
+    throw new Error(
+      'JSON 结构错误: 请提供 {"servers": {...}}、{"mcpServers": {...}} 或直接粘贴 Server 片段对象'
+    );
+  }
+
+  if (isRecord(input.servers)) {
+    return normalizeConfig(input);
+  }
+
+  if (isRecord(input.mcpServers)) {
+    return normalizeConfig({ servers: input.mcpServers });
+  }
+
+  if (looksLikeBareServerEntry(input)) {
+    const normalizedName = normalizeRequiredName(fallbackName ?? "");
+    return {
+      servers: {
+        [normalizedName]: normalizeServerEntry(input, `mcp.servers.${normalizedName}`),
+      },
+    };
+  }
+
+  const servers: Record<string, McpServerEntry> = {};
+  for (const [name, entry] of Object.entries(input)) {
     servers[name] = normalizeServerEntry(entry, `mcp.servers.${name}`);
   }
 
@@ -411,6 +531,22 @@ function formatServerInfoName(serverInfo: Record<string, unknown>): string {
   return `连接成功: ${name}${version}`;
 }
 
+function extractRpcErrorMessage(payload: unknown): string | null {
+  if (!isRecord(payload) || !isRecord(payload.error)) {
+    return null;
+  }
+
+  if (typeof payload.error.message === "string" && payload.error.message.trim().length > 0) {
+    return payload.error.message.trim();
+  }
+
+  if (typeof payload.error.code === "number") {
+    return `连接失败 (code ${payload.error.code})`;
+  }
+
+  return "连接失败";
+}
+
 function extractRpcTestResult(payload: unknown): McpServerTestResult | null {
   if (!isRecord(payload)) {
     return null;
@@ -420,18 +556,81 @@ function extractRpcTestResult(payload: unknown): McpServerTestResult | null {
     return buildTestResult(true, formatServerInfoName(payload.result.serverInfo));
   }
 
-  if (isRecord(payload.error)) {
-    const errorMessage =
-      typeof payload.error.message === "string" && payload.error.message.trim().length > 0
-        ? payload.error.message.trim()
-        : typeof payload.error.code === "number"
-          ? `连接失败 (code ${payload.error.code})`
-          : "连接失败";
-
+  const errorMessage = extractRpcErrorMessage(payload);
+  if (errorMessage) {
     return buildTestResult(false, errorMessage);
   }
 
   return null;
+}
+
+function extractJsonFromSseResponse(responseText: string): unknown | null {
+  const normalizedText = responseText.replace(/\r\n/g, "\n").trim();
+  if (!normalizedText || !normalizedText.includes("data:")) {
+    return null;
+  }
+
+  const eventBlocks = normalizedText.split(/\n\n+/);
+  for (const block of eventBlocks) {
+    const dataLines = block
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).trimStart())
+      .filter((line) => line.length > 0);
+
+    if (dataLines.length === 0) {
+      continue;
+    }
+
+    const payloadText = dataLines.join("\n").trim();
+    if (!payloadText) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(payloadText);
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function parseRemoteResponsePayload(responseText: string): unknown | null {
+  if (responseText.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return extractJsonFromSseResponse(responseText);
+  }
+}
+
+function getResponseHeaderCaseInsensitive(headers: Headers, target: string): string | null {
+  for (const [key, value] of headers.entries()) {
+    if (key.toLowerCase() === target.toLowerCase()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function buildToolsListSuccessMessage(
+  initializeMessage: string,
+  payload: unknown
+): McpServerTestResult | null {
+  if (!isRecord(payload) || !isRecord(payload.result) || !Array.isArray(payload.result.tools)) {
+    return null;
+  }
+
+  return buildTestResult(
+    true,
+    `${initializeMessage} · 可用工具 ${payload.result.tools.length} 个`
+  );
 }
 
 function createTimestampedResult(result: McpServerTestResult): NonNullable<McpServerEntry["lastTestResult"]> {
@@ -439,6 +638,37 @@ function createTimestampedResult(result: McpServerTestResult): NonNullable<McpSe
     success: result.success,
     message: result.message,
     timestamp: Date.now(),
+  };
+}
+
+function withBuiltinServers(config: McpConfig): McpConfig {
+  const servers: Record<string, McpServerEntry> = {
+    ...config.servers,
+  };
+
+  for (const [name, createEntry] of Object.entries(BUILTIN_SERVER_FACTORIES)) {
+    if (servers[name]) {
+      servers[name] = createEntryFromExistingBuiltin(name, servers[name], createEntry());
+      continue;
+    }
+
+    servers[name] = createEntry();
+  }
+
+  return { servers };
+}
+
+function createEntryFromExistingBuiltin(
+  _name: string,
+  entry: McpServerEntry,
+  fallbackEntry: McpServerEntry
+): McpServerEntry {
+  return {
+    ...fallbackEntry,
+    ...entry,
+    isBuiltin: true,
+    builtinKey: fallbackEntry.builtinKey,
+    type: fallbackEntry.type,
   };
 }
 
@@ -453,7 +683,7 @@ export class McpManager {
   }
 
   private createEmptyConfig(): McpConfig {
-    return { servers: {} };
+    return withBuiltinServers({ servers: {} });
   }
 
   private async writeConfig(config: McpConfig): Promise<void> {
@@ -480,23 +710,10 @@ export class McpManager {
   private async readConfig(): Promise<McpConfig> {
     try {
       const raw = await readFile(this.configPath, "utf8");
-      return normalizeConfig(JSON.parse(raw) as unknown);
+      return withBuiltinServers(normalizeConfig(JSON.parse(raw) as unknown));
     } catch (error) {
       if (isEnoentError(error)) {
         return this.initializeEmptyConfig();
-      }
-
-      throw error;
-    }
-  }
-
-  private async readRawConfigText(): Promise<string> {
-    try {
-      return await readFile(this.configPath, "utf8");
-    } catch (error) {
-      if (isEnoentError(error)) {
-        const config = await this.initializeEmptyConfig();
-        return `${JSON.stringify(config, null, 2)}\n`;
       }
 
       throw error;
@@ -743,44 +960,114 @@ export class McpManager {
     }
 
     try {
-      const response = await fetch(entry.url, {
+      const initializeResponse = await fetch(entry.url, {
         method: "POST",
-        headers: {
-          ...(entry.headers ?? {}),
-          "Content-Type": "application/json",
-        },
+        headers: buildRemoteTestHeaders(entry.headers),
         body: JSON.stringify(INITIALIZE_REQUEST),
         signal: AbortSignal.timeout(REMOTE_TEST_TIMEOUT_MS),
       });
 
-      const responseText = await response.text();
-      let parsed: unknown = null;
+      const initializeResponseText = await initializeResponse.text();
+      const initializePayload = parseRemoteResponsePayload(initializeResponseText);
 
-      if (responseText.trim().length > 0) {
-        try {
-          parsed = JSON.parse(responseText);
-        } catch {
-          return buildTestResult(
-            false,
-            `响应不是有效 JSON (HTTP ${response.status}): ${truncateText(responseText)}`
-          );
-        }
-      }
-
-      const rpcResult = extractRpcTestResult(parsed);
-      if (!response.ok) {
+      if (initializeResponseText.trim().length > 0 && !initializePayload) {
         return buildTestResult(
           false,
-          rpcResult?.message ??
-            `HTTP ${response.status}: ${truncateText(responseText || response.statusText)}`
+          `响应不是有效 JSON (HTTP ${initializeResponse.status}): ${truncateText(initializeResponseText)}`
         );
       }
 
-      if (rpcResult) {
-        return rpcResult;
+      const rpcResult = extractRpcTestResult(initializePayload);
+      if (!initializeResponse.ok) {
+        return buildTestResult(
+          false,
+          rpcResult?.message ??
+            `HTTP ${initializeResponse.status}: ${truncateText(
+              initializeResponseText || initializeResponse.statusText
+            )}`
+        );
       }
 
-      return buildTestResult(false, "响应中未包含有效的 MCP initialize 结果");
+      if (!rpcResult || !rpcResult.success) {
+        return rpcResult ?? buildTestResult(false, "响应中未包含有效的 MCP initialize 结果");
+      }
+
+      const sessionId = getResponseHeaderCaseInsensitive(
+        initializeResponse.headers,
+        "MCP-Session-Id"
+      );
+      const protocolVersion =
+        isRecord(initializePayload) &&
+        isRecord(initializePayload.result) &&
+        typeof initializePayload.result.protocolVersion === "string" &&
+        initializePayload.result.protocolVersion.trim().length > 0
+          ? initializePayload.result.protocolVersion.trim()
+          : INITIALIZE_REQUEST.params.protocolVersion;
+      const followupHeaders = buildRemoteTestHeaders(entry.headers);
+
+      followupHeaders["MCP-Protocol-Version"] = protocolVersion;
+      if (sessionId) {
+        followupHeaders["MCP-Session-Id"] = sessionId;
+      }
+
+      const initializedResponse = await fetch(entry.url, {
+        method: "POST",
+        headers: followupHeaders,
+        body: JSON.stringify(INITIALIZED_NOTIFICATION),
+        signal: AbortSignal.timeout(REMOTE_TEST_TIMEOUT_MS),
+      });
+      const initializedResponseText = await initializedResponse.text();
+      const initializedPayload = parseRemoteResponsePayload(initializedResponseText);
+
+      if (!initializedResponse.ok) {
+        return buildTestResult(
+          false,
+          extractRpcErrorMessage(initializedPayload) ??
+            `HTTP ${initializedResponse.status}: ${truncateText(
+              initializedResponseText || initializedResponse.statusText
+            )}`
+        );
+      }
+
+      const toolsResponse = await fetch(entry.url, {
+        method: "POST",
+        headers: followupHeaders,
+        body: JSON.stringify(TOOLS_LIST_REQUEST),
+        signal: AbortSignal.timeout(REMOTE_TEST_TIMEOUT_MS),
+      });
+      const toolsResponseText = await toolsResponse.text();
+      const toolsPayload = parseRemoteResponsePayload(toolsResponseText);
+
+      if (toolsResponseText.trim().length > 0 && !toolsPayload) {
+        return buildTestResult(
+          false,
+          `tools/list 响应不是有效 JSON (HTTP ${toolsResponse.status}): ${truncateText(
+            toolsResponseText
+          )}`
+        );
+      }
+
+      if (!toolsResponse.ok) {
+        return buildTestResult(
+          false,
+          extractRpcErrorMessage(toolsPayload) ??
+            `HTTP ${toolsResponse.status}: ${truncateText(
+              toolsResponseText || toolsResponse.statusText
+            )}`
+        );
+      }
+
+      const toolsError = extractRpcErrorMessage(toolsPayload);
+      if (toolsError) {
+        return buildTestResult(false, toolsError);
+      }
+
+      const toolsSuccessResult = buildToolsListSuccessMessage(rpcResult.message, toolsPayload);
+      if (toolsSuccessResult) {
+        return toolsSuccessResult;
+      }
+
+      return buildTestResult(false, "连接已建立，但 tools/list 未返回有效结果");
     } catch (error) {
       if (error instanceof DOMException && error.name === "TimeoutError") {
         return buildTestResult(false, "连接超时：10 秒内未收到响应");
@@ -801,8 +1088,15 @@ export class McpManager {
     return { servers };
   }
 
-  async getRawConfigJson(): Promise<string> {
-    return this.readRawConfigText();
+  async getEditableConfig(): Promise<McpConfig> {
+    const storedConfig = await this.readConfig();
+    const servers: Record<string, McpServerEntry> = {};
+
+    for (const [name, entry] of Object.entries(storedConfig.servers)) {
+      servers[name] = resolveEntryForRuntime(entry, entry);
+    }
+
+    return { servers };
   }
 
   async addServer(name: string, entry: McpServerEntry): Promise<McpConfig> {
@@ -884,6 +1178,16 @@ export class McpManager {
 
       const runtimeEntry = resolveEntryForRuntime(entry, entry);
 
+      if (isBuiltinWebFetchEntry(runtimeEntry)) {
+        sdkServers[name] = createBuiltinWebFetchServer(runtimeEntry);
+        continue;
+      }
+
+      if (isBuiltinWebSearchEntry(runtimeEntry)) {
+        sdkServers[name] = createBuiltinWebSearchServer(runtimeEntry);
+        continue;
+      }
+
       if (runtimeEntry.type === "stdio") {
         if (!runtimeEntry.command) {
           continue;
@@ -898,7 +1202,7 @@ export class McpManager {
         continue;
       }
 
-      if (!runtimeEntry.url) {
+      if ((runtimeEntry.type !== "http" && runtimeEntry.type !== "sse") || !runtimeEntry.url) {
         continue;
       }
 
@@ -912,7 +1216,11 @@ export class McpManager {
     return sdkServers;
   }
 
-  async saveRawJson(rawJson: string): Promise<McpRawJsonSaveResult> {
+  async saveSingleServerJson(
+    name: string,
+    rawJson: string
+  ): Promise<McpRawJsonSaveResult> {
+    const normalizedName = normalizeRequiredName(name);
     let parsed: unknown;
 
     try {
@@ -921,19 +1229,81 @@ export class McpManager {
       return buildRawJsonSaveFailure(`JSON 格式错误: ${stringifyError(error)}`);
     }
 
-    if (!isRecord(parsed) || !isRecord(parsed.servers)) {
-      return buildRawJsonSaveFailure("JSON 结构错误: 必须包含 servers 对象");
-    }
-
-    let nextConfig: McpConfig;
+    let parsedConfig: McpConfig;
 
     try {
-      nextConfig = normalizeConfig(parsed);
+      parsedConfig = normalizeRawJsonInput(parsed, normalizedName);
+    } catch (error) {
+      return buildRawJsonSaveFailure(stringifyError(error));
+    }
+
+    const entries = Object.entries(parsedConfig.servers);
+    if (entries.length !== 1 || !parsedConfig.servers[normalizedName]) {
+      return buildRawJsonSaveFailure("编辑模式只允许保存当前 Server 的单条配置");
+    }
+
+    const [, entry] = entries[0];
+    const testResult = await this.testServer(normalizedName, entry);
+    const results = [buildRawJsonServerResult(normalizedName, testResult)];
+
+    if (!testResult.success) {
+      return buildRawJsonSaveFailure("当前 Server 连接测试失败", results);
+    }
+
+    const config = await this.readConfig();
+    if (!config.servers[normalizedName]) {
+      return buildRawJsonSaveFailure(`MCP Server "${normalizedName}" 不存在`);
+    }
+
+    if (config.servers[normalizedName]?.isBuiltin) {
+      return buildRawJsonSaveFailure("内置 MCP 请使用专用配置入口");
+    }
+
+    config.servers[normalizedName] = prepareEntryForStorage(
+      {
+        ...normalizeServerEntry(entry, `mcp.servers.${normalizedName}`),
+        lastTestResult: createTimestampedResult(testResult),
+      },
+      config.servers[normalizedName]
+    );
+
+    await this.writeConfig(config);
+
+    return {
+      success: true,
+      results,
+    };
+  }
+
+  async saveRawJson(rawJson: string, fallbackName?: string): Promise<McpRawJsonSaveResult> {
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(rawJson);
+    } catch (error) {
+      return buildRawJsonSaveFailure(`JSON 格式错误: ${stringifyError(error)}`);
+    }
+
+    let parsedConfig: McpConfig;
+
+    try {
+      parsedConfig = normalizeRawJsonInput(parsed, fallbackName);
     } catch (error) {
       return buildRawJsonSaveFailure(stringifyError(error));
     }
 
     const previousConfig = await this.readConfig();
+    if (Object.keys(parsedConfig.servers).length === 0) {
+      return buildRawJsonSaveFailure("未发现可添加的 MCP Server");
+    }
+
+    const nextConfig: McpConfig = {
+      servers: {
+        ...previousConfig.servers,
+        ...parsedConfig.servers,
+      },
+    };
+
     for (const [name, entry] of Object.entries(previousConfig.servers)) {
       if (entry.isBuiltin && !nextConfig.servers[name]) {
         return buildRawJsonSaveFailure(`内置 MCP Server "${name}" 不可删除`);
@@ -994,7 +1364,11 @@ export class McpManager {
     const runtimeEntry = resolveEntryForRuntime(normalizedEntry, storedEntry);
 
     const result =
-      runtimeEntry.type === "stdio"
+      isBuiltinWebFetchEntry(runtimeEntry)
+        ? await testBuiltinWebFetch(runtimeEntry)
+        : isBuiltinWebSearchEntry(runtimeEntry)
+        ? await testBuiltinWebSearch(runtimeEntry)
+        : runtimeEntry.type === "stdio"
         ? await this.testStdioServer(runtimeEntry)
         : await this.testRemoteServer(runtimeEntry);
 
