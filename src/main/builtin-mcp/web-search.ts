@@ -16,7 +16,7 @@ const TAVILY_API_URL = "https://api.tavily.com/search";
 const TAVILY_API_KEY_ENV_NAME = WEB_SEARCH_BUILTIN.envKey;
 const WEB_SEARCH_TOOL_NAME = WEB_SEARCH_BUILTIN.toolName;
 const WEB_SEARCH_TOOL_DESCRIPTION =
-  "Search the web for real-time information. Use this when you need current data, recent news, live prices, weather, events, or any facts that may have changed after your training cutoff. Returns relevant results with titles, URLs, and content snippets.";
+  "Search the web for real-time information. Use this when you need current data that may not be in your training knowledge: recent news, live prices, today's weather, latest documentation, or any factual question where freshness matters. Returns a ranked list of results with titles, URLs, and content snippets — often sufficient to answer the question directly without further steps.";
 
 type TavilyTopic = "general" | "news";
 

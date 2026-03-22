@@ -3,12 +3,15 @@ export type McpTransportType = "stdio" | "http" | "sse" | "sdk";
 
 export type McpBuiltinKey = "web_search" | "web_fetch";
 
-export const MCP_WEB_SEARCH_SERVER_NAME = "mcp_web_search";
-export const MCP_WEB_FETCH_SERVER_NAME = "mcp_web_fetch";
+export const MCP_WEB_SEARCH_SERVER_NAME = "zora_web_search";
+export const MCP_WEB_FETCH_SERVER_NAME = "zora_web_fetch";
+export const LEGACY_MCP_WEB_SEARCH_SERVER_NAME = "mcp_web_search";
+export const LEGACY_MCP_WEB_FETCH_SERVER_NAME = "mcp_web_fetch";
 
 export interface McpBuiltinDefinition {
   serverName: string;
   toolName: string;
+  displayName: string;
   title: string;
   envKey: string;
   label: string;
@@ -17,12 +20,14 @@ export interface McpBuiltinDefinition {
   configuredSummary: string;
   missingSummary: string;
   isReadOnlyTool: boolean;
+  legacyServerNames?: string[];
 }
 
 export const MCP_BUILTINS: Record<McpBuiltinKey, McpBuiltinDefinition> = {
   web_search: {
     serverName: MCP_WEB_SEARCH_SERVER_NAME,
-    toolName: "zora_mcp_websearch",
+    toolName: "web_search",
+    displayName: "zora_mcp_websearch",
     title: "Web Search",
     envKey: "TAVILY_API_KEY",
     label: "Tavily API Key",
@@ -31,10 +36,12 @@ export const MCP_BUILTINS: Record<McpBuiltinKey, McpBuiltinDefinition> = {
     configuredSummary: "Tavily Web Search 已配置",
     missingSummary: "等待配置 Tavily API Key",
     isReadOnlyTool: true,
+    legacyServerNames: [LEGACY_MCP_WEB_SEARCH_SERVER_NAME],
   },
   web_fetch: {
     serverName: MCP_WEB_FETCH_SERVER_NAME,
-    toolName: "zora_mcp_webfetch",
+    toolName: "web_fetch",
+    displayName: "zora_mcp_webfetch",
     title: "Web Fetch",
     envKey: "JINA_API_KEY",
     label: "Jina API Key",
@@ -43,6 +50,7 @@ export const MCP_BUILTINS: Record<McpBuiltinKey, McpBuiltinDefinition> = {
     configuredSummary: "Jina Web Fetch 已配置",
     missingSummary: "等待配置 Jina API Key",
     isReadOnlyTool: true,
+    legacyServerNames: [LEGACY_MCP_WEB_FETCH_SERVER_NAME],
   },
 };
 
@@ -125,7 +133,35 @@ export interface McpRawJsonSaveResult {
   results: McpRawJsonServerResult[];
 }
 
-export interface McpRawJsonSaveInput {
+export interface McpSaveEntryInput {
+  mode: "entry";
+  name: string;
+  entry: McpServerEntry;
+}
+
+export interface McpSaveMergeJsonInput {
+  mode: "merge-json";
   json: string;
   fallbackName?: string;
 }
+
+export interface McpSaveSingleJsonInput {
+  mode: "single-json";
+  name: string;
+  json: string;
+}
+
+export type McpSaveInput =
+  | McpSaveEntryInput
+  | McpSaveMergeJsonInput
+  | McpSaveSingleJsonInput;
+
+export type McpSaveResult =
+  | {
+      mode: "entry";
+      config: McpConfig;
+    }
+  | {
+      mode: "merge-json" | "single-json";
+      result: McpRawJsonSaveResult;
+    };

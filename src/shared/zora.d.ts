@@ -19,8 +19,8 @@ import type {
 } from "./types/skill";
 import type {
   McpConfig,
-  McpRawJsonSaveInput,
-  McpRawJsonSaveResult,
+  McpSaveInput,
+  McpSaveResult,
   McpServerEntry,
   McpServerTestResult,
 } from "./types/mcp";
@@ -222,9 +222,7 @@ export interface ZoraApi {
   mcp: {
     getConfig: () => Promise<McpConfig>;
     getEditableConfig: () => Promise<McpConfig>;
-    saveServer: (name: string, entry: McpServerEntry) => Promise<McpConfig>;
-    saveRawJson: (input: McpRawJsonSaveInput) => Promise<McpRawJsonSaveResult>;
-    saveSingleServerJson: (input: McpRawJsonSaveInput) => Promise<McpRawJsonSaveResult>;
+    save: (input: McpSaveInput) => Promise<McpSaveResult>;
     deleteServer: (name: string) => Promise<McpConfig>;
     toggleServer: (name: string, enabled: boolean) => Promise<McpConfig>;
     testServer: (name: string, entry: McpServerEntry) => Promise<McpServerTestResult>;

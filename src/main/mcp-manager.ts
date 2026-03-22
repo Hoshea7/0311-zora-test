@@ -641,10 +641,29 @@ function createTimestampedResult(result: McpServerTestResult): NonNullable<McpSe
   };
 }
 
+function migrateBuiltinServerAliases(servers: Record<string, McpServerEntry>): Record<string, McpServerEntry> {
+  const nextServers: Record<string, McpServerEntry> = { ...servers };
+
+  for (const definition of Object.values(MCP_BUILTINS)) {
+    for (const legacyName of definition.legacyServerNames ?? []) {
+      const legacyEntry = nextServers[legacyName];
+      if (!legacyEntry) {
+        continue;
+      }
+
+      if (!nextServers[definition.serverName]) {
+        nextServers[definition.serverName] = legacyEntry;
+      }
+
+      delete nextServers[legacyName];
+    }
+  }
+
+  return nextServers;
+}
+
 function withBuiltinServers(config: McpConfig): McpConfig {
-  const servers: Record<string, McpServerEntry> = {
-    ...config.servers,
-  };
+  const servers = migrateBuiltinServerAliases(config.servers);
 
   for (const [name, createEntry] of Object.entries(BUILTIN_SERVER_FACTORIES)) {
     if (servers[name]) {

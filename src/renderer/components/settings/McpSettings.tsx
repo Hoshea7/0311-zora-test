@@ -31,7 +31,7 @@ interface ServerStatus {
 }
 
 function formatServerDisplayName(name: string, server: McpServerEntry): string {
-  return getMcpBuiltinDefinition(server.builtinKey)?.toolName ?? name;
+  return getMcpBuiltinDefinition(server.builtinKey)?.displayName ?? name;
 }
 
 function formatSummary(server: McpServerEntry): string {

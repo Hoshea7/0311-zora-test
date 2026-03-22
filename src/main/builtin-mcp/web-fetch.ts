@@ -15,7 +15,7 @@ const JINA_READER_BASE_URL = "https://r.jina.ai/";
 const JINA_API_KEY_ENV_NAME = WEB_FETCH_BUILTIN.envKey;
 const WEB_FETCH_TOOL_NAME = WEB_FETCH_BUILTIN.toolName;
 const WEB_FETCH_TOOL_DESCRIPTION =
-  "Fetch and read the full content of a web page. Converts the page into clean, readable Markdown. Use this to read articles, documentation, blog posts, GitHub READMEs, or any URL where you need the actual page content rather than just a search snippet.";
+  "Fetch a URL and extract its full content as clean, readable Markdown. Use this when you have a specific URL and need to read the complete page content. Common scenarios: the user shares a link and asks what does this say, reading documentation or articles, extracting content from GitHub READMEs, or any case where you need the actual page text rather than a brief snippet. Automatically strips ads, navigation, and other noise";
 
 function buildTestResult(success: boolean, message: string): McpServerTestResult {
   return { success, message };

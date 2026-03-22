@@ -10,7 +10,7 @@ import type {
   PermissionResponse,
 } from "../shared/zora";
 import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
-import type { McpServerEntry, McpTransportType } from "../shared/types/mcp";
+import type { McpSaveInput, McpServerEntry, McpTransportType } from "../shared/types/mcp";
 import type { ImportMethod, ImportResult, ImportSelection } from "../shared/types/skill";
 import type { ProviderCreateInput, ProviderUpdateInput } from "../shared/types/provider";
 import {
@@ -177,21 +177,33 @@ function parseMcpToggleInput(input: unknown): { name: string; enabled: boolean }
   };
 }
 
-function parseMcpRawJsonInput(
-  input: unknown
-): { json: string; fallbackName?: string } {
-  if (typeof input === "string") {
-    return { json: input };
+function parseMcpSaveInput(input: unknown): McpSaveInput {
+  if (!isRecord(input) || typeof input.mode !== "string") {
+    throw new Error("A valid MCP save payload is required.");
   }
 
-  if (!isRecord(input)) {
-    throw new Error("A valid MCP JSON payload is required.");
+  if (input.mode === "entry") {
+    const { name, entry } = parseMcpServerMutationInput(input);
+    return { mode: "entry", name, entry };
   }
 
-  return {
-    json: assertRequiredString(input.json, "mcp.json"),
-    fallbackName: assertOptionalString(input.fallbackName, "mcp.fallbackName"),
-  };
+  if (input.mode === "merge-json") {
+    return {
+      mode: "merge-json",
+      json: assertRequiredString(input.json, "mcp.json"),
+      fallbackName: assertOptionalString(input.fallbackName, "mcp.fallbackName"),
+    };
+  }
+
+  if (input.mode === "single-json") {
+    return {
+      mode: "single-json",
+      name: assertRequiredString(input.name, "mcp.name"),
+      json: assertRequiredString(input.json, "mcp.json"),
+    };
+  }
+
+  throw new Error('mcp.mode must be one of: "entry", "merge-json", "single-json".');
 }
 
 function truncateForPreview(value: string, maxChars = 200): string {
@@ -588,22 +600,27 @@ app.whenReady().then(async () => {
     return mcpManager.getEditableConfig();
   });
 
-  ipcMain.handle("mcp:save-server", async (_event, input: unknown) => {
-    const { name, entry } = parseMcpServerMutationInput(input);
-    return mcpManager.addServer(name, entry);
-  });
+  ipcMain.handle("mcp:save", async (_event, input: unknown) => {
+    const payload = parseMcpSaveInput(input);
 
-  ipcMain.handle("mcp:save-raw-json", async (_event, input: unknown) => {
-    const { json, fallbackName } = parseMcpRawJsonInput(input);
-    return mcpManager.saveRawJson(json, fallbackName);
-  });
+    if (payload.mode === "entry") {
+      return {
+        mode: "entry" as const,
+        config: await mcpManager.addServer(payload.name, payload.entry),
+      };
+    }
 
-  ipcMain.handle("mcp:save-single-server-json", async (_event, input: unknown) => {
-    const { json, fallbackName } = parseMcpRawJsonInput(input);
-    return mcpManager.saveSingleServerJson(
-      assertRequiredString(fallbackName, "mcp.fallbackName"),
-      json
-    );
+    if (payload.mode === "merge-json") {
+      return {
+        mode: "merge-json" as const,
+        result: await mcpManager.saveRawJson(payload.json, payload.fallbackName),
+      };
+    }
+
+    return {
+      mode: "single-json" as const,
+      result: await mcpManager.saveSingleServerJson(payload.name, payload.json),
+    };
   });
 
   ipcMain.handle("mcp:delete-server", async (_event, input: unknown) => {

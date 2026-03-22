@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSetAtom } from "jotai";
 import type {
+  McpSaveResult,
   McpRawJsonSaveResult,
   McpServerEntry,
 } from "../../../shared/types/mcp";
@@ -33,6 +34,14 @@ interface McpManualAddDialogProps {
 interface ConnectionTestState {
   status: "success" | "error";
   message: string;
+}
+
+function extractJsonSaveResult(saveResult: McpSaveResult): McpRawJsonSaveResult {
+  if (saveResult.mode === "entry") {
+    throw new Error("当前保存结果不是 JSON 保存模式");
+  }
+
+  return saveResult.result;
 }
 
 function createEditableEntry(entry: McpServerEntry): Partial<McpServerEntry> {
@@ -259,15 +268,18 @@ export function McpManualAddDialog({
     setConnectionTestState(null);
 
     try {
-      const result = editingServer
-        ? await window.zora.mcp.saveSingleServerJson({
+      const response = editingServer
+        ? await window.zora.mcp.save({
+            mode: "single-json",
+            name: editingServer.name,
             json: snippetText,
-            fallbackName: editingServer.name,
           })
-        : await window.zora.mcp.saveRawJson({
+        : await window.zora.mcp.save({
+            mode: "merge-json",
             json: snippetText,
             fallbackName: fallbackName.trim() || undefined,
           });
+      const result = extractJsonSaveResult(response);
 
       if (!result.success) {
         setSaveResult(result);
@@ -313,12 +325,16 @@ export function McpManualAddDialog({
         return;
       }
 
-      await window.zora.mcp.saveServer(editingServer.name, {
-        ...nextEntry,
-        lastTestResult: {
-          success: testResult.success,
-          message: testResult.message,
-          timestamp: Date.now(),
+      await window.zora.mcp.save({
+        mode: "entry",
+        name: editingServer.name,
+        entry: {
+          ...nextEntry,
+          lastTestResult: {
+            success: testResult.success,
+            message: testResult.message,
+            timestamp: Date.now(),
+          },
         },
       });
 
