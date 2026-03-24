@@ -1,4 +1,0 @@
-extends: ./electron-builder.yml
-
-mac:
-  identity: "-"

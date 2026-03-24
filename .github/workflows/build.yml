@@ -19,12 +19,10 @@ jobs:
             platform: mac
             arch: arm64
             dist_script: dist:mac:arm64
-            unsigned_script: dist:mac:arm64:unsigned
           - os: macos-15-intel
             platform: mac
             arch: x64
             dist_script: dist:mac:x64
-            unsigned_script: dist:mac:x64:unsigned
           - os: windows-latest
             platform: win
             arch: x64
@@ -57,16 +55,10 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [[ "${{ matrix.platform }}" == "mac" ]]; then
-            if [[ -n "${CSC_LINK}" ]]; then
-              bun run ${{ matrix.dist_script }}
-            else
-              unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-              bun run ${{ matrix.unsigned_script }}
-            fi
-          else
-            bun run ${{ matrix.dist_script }}
+          if [[ "${{ matrix.platform }}" == "mac" && -z "${CSC_LINK}" ]]; then
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
           fi
+          bun run ${{ matrix.dist_script }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

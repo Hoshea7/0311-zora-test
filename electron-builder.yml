@@ -32,6 +32,7 @@ extraResources:
       - "**/*"
 
 npmRebuild: false
+afterPack: scripts/after-pack.js
 
 mac:
   category: public.app-category.productivity
