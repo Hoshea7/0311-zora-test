@@ -61,6 +61,7 @@ jobs:
             if [[ -n "${CSC_LINK}" ]]; then
               bun run ${{ matrix.dist_script }}
             else
+              unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
               bun run ${{ matrix.unsigned_script }}
             fi
           else
