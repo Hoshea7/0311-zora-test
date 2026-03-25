@@ -70,13 +70,21 @@ jobs:
         run: bun run vendor:bun
 
       - name: Build & Package
+        shell: bash
         env:
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bun run ${{ matrix.dist_script }}
+        run: |
+          for var in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID GH_TOKEN; do
+            if [[ -z "${!var:-}" ]]; then
+              unset "$var"
+            fi
+          done
+
+          bun run ${{ matrix.dist_script }}
 
       - name: Generate macOS checksums
         if: matrix.platform == 'mac'
