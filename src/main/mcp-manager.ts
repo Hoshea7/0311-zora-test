@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { app, safeStorage } from "electron";
+import { app } from "electron";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { MCP_BUILTINS } from "../shared/types/mcp";
 import type {
@@ -13,6 +13,7 @@ import type {
   McpServerTestResult,
   McpTransportType,
 } from "../shared/types/mcp";
+import { readSecret, storeSecret } from "./utils/secret-storage";
 import {
   createBuiltinWebFetchEntry,
   createBuiltinWebFetchServer,
@@ -332,15 +333,9 @@ function isEncryptedValue(value: string): boolean {
   return value.startsWith(ENCRYPTED_PREFIX);
 }
 
-function ensureEncryptionAvailable(mode: "encrypt" | "decrypt"): void {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error(`safeStorage ${mode}ion is unavailable on this device.`);
-  }
-}
-
 function encryptValue(value: string): string {
-  ensureEncryptionAvailable("encrypt");
-  return `${ENCRYPTED_PREFIX}${safeStorage.encryptString(value).toString("base64")}`;
+  const storedValue = storeSecret(value);
+  return storedValue === value ? value : `${ENCRYPTED_PREFIX}${storedValue}`;
 }
 
 function decryptValue(value: string): string {
@@ -348,10 +343,9 @@ function decryptValue(value: string): string {
     return value;
   }
 
-  ensureEncryptionAvailable("decrypt");
-  return safeStorage.decryptString(
-    Buffer.from(value.slice(ENCRYPTED_PREFIX.length), "base64")
-  );
+  return readSecret(value, {
+    legacySafeStoragePrefix: ENCRYPTED_PREFIX,
+  });
 }
 
 function maskSensitiveRecord(record?: StringRecord): StringRecord | undefined {

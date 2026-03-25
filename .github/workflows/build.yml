@@ -1,16 +1,50 @@
 name: Build & Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Target platform"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          echo "package.json version: ${PACKAGE_VERSION}"
+          echo "git tag version: ${TAG_VERSION}"
+
+          if [[ "${PACKAGE_VERSION}" != "${TAG_VERSION}" ]]; then
+            echo "::error::Tag version (${TAG_VERSION}) does not match package.json version (${PACKAGE_VERSION})"
+            exit 1
+          fi
+
   build:
+    needs: validate-release
+    if: ${{ (needs.validate-release.result == 'success' || needs.validate-release.result == 'skipped') && (github.event_name == 'push' || github.event.inputs.platform == 'all' || (github.event.inputs.platform == 'macos' && matrix.platform == 'mac') || (github.event.inputs.platform == 'windows' && matrix.platform == 'win')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -46,19 +80,31 @@ jobs:
         run: bun run vendor:bun
 
       - name: Build & Package
-        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bun run ${{ matrix.dist_script }}
+
+      - name: Generate macOS checksums
+        if: matrix.platform == 'mac'
+        shell: bash
         run: |
-          if [[ "${{ matrix.platform }}" == "mac" && -z "${CSC_LINK}" ]]; then
-            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-          fi
-          bun run ${{ matrix.dist_script }}
+          cd release
+          shasum -a 256 *.dmg | tee "checksums-${{ matrix.platform }}-${{ matrix.arch }}.sha256"
+
+      - name: Generate Windows checksums
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          Set-Location release
+          Get-ChildItem *.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Append "checksums-${{ matrix.platform }}-${{ matrix.arch }}.sha256" -Encoding utf8
+          }
+          Get-Content "checksums-${{ matrix.platform }}-${{ matrix.arch }}.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -67,10 +113,8 @@ jobs:
           path: |
             release/*.dmg
             release/*.exe
-            release/*.blockmap
-            release/*.yml
-            release/*.yaml
-          if-no-files-found: ignore
+            release/checksums-*.sha256
+          if-no-files-found: error
 
   release:
     needs: build
@@ -88,14 +132,34 @@ jobs:
       - name: List downloaded files
         run: find artifacts -type f | head -50
 
+      - name: Merge checksums
+        shell: bash
+        run: |
+          mapfile -t CHECKSUM_FILES < <(find artifacts -type f -name 'checksums-*.sha256' | sort)
+
+          if [[ ${#CHECKSUM_FILES[@]} -eq 0 ]]; then
+            echo "::error::No checksum files were produced"
+            exit 1
+          fi
+
+          : > artifacts/SHA256SUMS.txt
+          for file in "${CHECKSUM_FILES[@]}"; do
+            cat "${file}" >> artifacts/SHA256SUMS.txt
+          done
+
+          echo "=== Combined checksums ==="
+          cat artifacts/SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          name: Zora ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.exe
-            artifacts/**/*.blockmap
+            artifacts/SHA256SUMS.txt
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

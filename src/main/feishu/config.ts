@@ -1,9 +1,9 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { safeStorage } from "electron";
 import type { FeishuConfig } from "../../shared/types/feishu";
 import { isRecord } from "../utils/guards";
 import { ZORA_DIR, ensureZoraDir, replaceFileAtomically, isEnoentError } from "../utils/fs";
+import { readSecret, storeSecret } from "../utils/secret-storage";
 import { normalizeRequiredString, normalizeOptionalString, normalizeBoolean } from "../utils/validate";
 
 const FEISHU_CONFIG_FILE = path.join(ZORA_DIR, "feishu.json");
@@ -23,19 +23,13 @@ function normalizeFeishuConfig(input: unknown): FeishuConfig {
 }
 
 export function encryptSecret(plain: string): string {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("safeStorage encryption is unavailable on this device.");
-  }
-
-  return safeStorage.encryptString(plain).toString("base64");
+  return storeSecret(plain);
 }
 
 export function decryptSecret(encrypted: string): string {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("safeStorage decryption is unavailable on this device.");
-  }
-
-  return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+  return readSecret(encrypted, {
+    allowLegacyUnprefixedSafeStorage: true,
+  });
 }
 
 export async function loadFeishuConfig(): Promise<FeishuConfig | null> {

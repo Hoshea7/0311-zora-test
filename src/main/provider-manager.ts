@@ -9,7 +9,6 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { safeStorage } from "electron";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -21,6 +20,7 @@ import type {
   RoleTestDetail,
 } from "../shared/types/provider";
 import { getPackagedSafeWorkingDirectory, getSDKRuntimeOptions } from "./sdk-runtime";
+import { readSecret, storeSecret } from "./utils/secret-storage";
 
 const MASKED_API_KEY = "••••••";
 const ZORA_DIR = path.join(homedir(), ".zora");
@@ -298,19 +298,13 @@ export class ProviderManager {
   }
 
   private encryptApiKey(plainKey: string): string {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("safeStorage encryption is unavailable on this device.");
-    }
-
-    return safeStorage.encryptString(plainKey).toString("base64");
+    return storeSecret(plainKey);
   }
 
   private decryptApiKeyValue(encryptedKey: string): string {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("safeStorage decryption is unavailable on this device.");
-    }
-
-    return safeStorage.decryptString(Buffer.from(encryptedKey, "base64"));
+    return readSecret(encryptedKey, {
+      allowLegacyUnprefixedSafeStorage: true,
+    });
   }
 
   private maskProvider(provider: ProviderConfig): ProviderConfig {

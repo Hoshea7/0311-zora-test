@@ -36,6 +36,7 @@ afterPack: scripts/after-pack.js
 
 mac:
   category: public.app-category.productivity
+  artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
     - target: dmg
   entitlements: build/entitlements.mac.plist
@@ -53,6 +54,7 @@ dmg:
       path: /Applications
 
 win:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
     - target: nsis
       arch:
