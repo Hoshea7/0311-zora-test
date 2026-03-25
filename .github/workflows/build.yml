@@ -2,16 +2,6 @@ name: Build & Release
 
 on:
   workflow_dispatch:
-    inputs:
-      platform:
-        description: "Target platform"
-        required: true
-        default: "all"
-        type: choice
-        options:
-          - all
-          - macos
-          - windows
   push:
     tags:
       - "v*"
@@ -44,7 +34,7 @@ jobs:
 
   build:
     needs: validate-release
-    if: ${{ (needs.validate-release.result == 'success' || needs.validate-release.result == 'skipped') && (github.event_name == 'push' || github.event.inputs.platform == 'all' || (github.event.inputs.platform == 'macos' && matrix.platform == 'mac') || (github.event.inputs.platform == 'windows' && matrix.platform == 'win')) }}
+    if: ${{ needs.validate-release.result == 'success' || needs.validate-release.result == 'skipped' }}
     strategy:
       fail-fast: false
       matrix:
