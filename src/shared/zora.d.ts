@@ -20,6 +20,7 @@ import type {
   ImportSelection,
   SkillMeta,
 } from "./types/skill";
+import type { UpdateStatus } from "./types/updater";
 import type {
   McpConfig,
   McpSaveInput,
@@ -197,6 +198,14 @@ export type AppPhase = "splash" | "awakening-visual" | "awakening-dialogue" | "a
 
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
+  openExternal: (url: string) => Promise<void>;
+  updater: {
+    getStatus: () => Promise<UpdateStatus>;
+    checkForUpdates: () => Promise<UpdateStatus>;
+    downloadUpdate: () => Promise<UpdateStatus>;
+    installUpdate: () => Promise<void>;
+    onStatusChanged: (callback: (status: UpdateStatus) => void) => () => void;
+  };
   listProviders: () => Promise<ProviderConfig[]>;
   createProvider: (input: ProviderCreateInput) => Promise<ProviderConfig>;
   updateProvider: (id: string, input: ProviderUpdateInput) => Promise<ProviderConfig>;

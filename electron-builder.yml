@@ -39,6 +39,13 @@ mac:
   artifactName: "${productName}-${version}-${arch}.${ext}"
   target:
     - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   files:
@@ -67,3 +74,8 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: Hoshea7
+  repo: ZoraAgent

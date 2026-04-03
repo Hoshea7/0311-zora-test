@@ -79,6 +79,15 @@ import {
   listExternalTools,
 } from "./skill-discovery";
 import { getPackagedSafeWorkingDirectory, getSDKRuntimeOptions } from "./sdk-runtime";
+import {
+  checkForUpdates,
+  cleanupAutoUpdater,
+  downloadUpdate,
+  getUpdateStatus,
+  initAutoUpdater,
+  installUpdate,
+  isInstallingUpdate,
+} from "./updater";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -607,10 +616,12 @@ function createWindow() {
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     window.loadURL(process.env.VITE_DEV_SERVER_URL);
+    initAutoUpdater();
     return;
   }
 
   window.loadFile(path.join(app.getAppPath(), "dist", "renderer", "index.html"));
+  initAutoUpdater();
 }
 
 app.whenReady().then(async () => {
@@ -619,6 +630,30 @@ app.whenReady().then(async () => {
   const mcpManager = setSharedMcpManager(new McpManager());
 
   ipcMain.handle("app:get-version", () => app.getVersion());
+
+  ipcMain.handle("app:open-external", async (_event, url: unknown) => {
+    if (typeof url !== "string" || url.trim().length === 0) {
+      throw new Error("A valid url is required.");
+    }
+
+    await shell.openExternal(url.trim());
+  });
+
+  ipcMain.handle("updater:get-status", () => {
+    return getUpdateStatus();
+  });
+
+  ipcMain.handle("updater:check", async () => {
+    return checkForUpdates();
+  });
+
+  ipcMain.handle("updater:download", async () => {
+    return downloadUpdate();
+  });
+
+  ipcMain.handle("updater:install", async () => {
+    installUpdate();
+  });
 
   ipcMain.handle("provider:list", () => {
     return providerManager.list();
@@ -1455,6 +1490,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async (event) => {
+  cleanupAutoUpdater();
+
+  if (isInstallingUpdate()) {
+    return;
+  }
+
   if (isQuitting) {
     return;
   }

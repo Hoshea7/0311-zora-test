@@ -28,6 +28,7 @@ import type {
   ImportResult,
   ImportSelection,
 } from "../shared/types/skill";
+import type { UpdateStatus } from "../shared/types/updater";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -46,6 +47,24 @@ import type {
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
+  openExternal: (url: string) => ipcRenderer.invoke("app:open-external", url) as Promise<void>,
+  updater: {
+    getStatus: () => ipcRenderer.invoke("updater:get-status") as Promise<UpdateStatus>,
+    checkForUpdates: () => ipcRenderer.invoke("updater:check") as Promise<UpdateStatus>,
+    downloadUpdate: () => ipcRenderer.invoke("updater:download") as Promise<UpdateStatus>,
+    installUpdate: () => ipcRenderer.invoke("updater:install") as Promise<void>,
+    onStatusChanged: (callback: (status: UpdateStatus) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: UpdateStatus) => {
+        callback(payload);
+      };
+
+      ipcRenderer.on("updater:status", handler);
+
+      return () => {
+        ipcRenderer.removeListener("updater:status", handler);
+      };
+    },
+  },
   listProviders: () =>
     ipcRenderer.invoke("provider:list") as Promise<ProviderConfig[]>,
   createProvider: (input: ProviderCreateInput) =>

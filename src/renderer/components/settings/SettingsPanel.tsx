@@ -1,4 +1,5 @@
 import { useAtom, useSetAtom } from "jotai";
+import { AboutSettings } from "./AboutSettings";
 import { FeishuSettings } from "./FeishuSettings";
 import { MemorySettings } from "./MemorySettings";
 import { McpSettings } from "./McpSettings";
@@ -55,6 +56,20 @@ const tabs = [
     icon: (
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+      </svg>
+    ),
+  },
+  {
+    id: "about",
+    label: "关于",
+    icon: (
+      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 8h.01M11 12h1v4h1m-7 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+        />
       </svg>
     ),
   },
@@ -119,6 +134,7 @@ export function SettingsPanel() {
             {settingsTab === "skills" ? <SkillManagerPanel /> : null}
             {settingsTab === "memory" ? <MemorySettings /> : null}
             {settingsTab === "mcp" ? <McpSettings /> : null}
+            {settingsTab === "about" ? <AboutSettings /> : null}
           </div>
         </main>
       </div>
