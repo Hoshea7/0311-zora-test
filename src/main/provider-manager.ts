@@ -97,6 +97,30 @@ function isProviderType(value: unknown): value is ProviderType {
   return typeof value === "string" && PROVIDER_TYPES.has(value as ProviderType);
 }
 
+function stripLegacyProviderFields(provider: ProviderConfig): ProviderConfig {
+  const sanitized: ProviderConfig = {
+    id: provider.id,
+    name: provider.name,
+    providerType: provider.providerType,
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
+    enabled: provider.enabled,
+    isDefault: provider.isDefault,
+    createdAt: provider.createdAt,
+    updatedAt: provider.updatedAt,
+  };
+
+  if (provider.modelId !== undefined) {
+    sanitized.modelId = provider.modelId;
+  }
+
+  if (provider.roleModels) {
+    sanitized.roleModels = { ...provider.roleModels };
+  }
+
+  return sanitized;
+}
+
 function toStringRecord(source: NodeJS.ProcessEnv | Record<string, string>): StringRecord {
   const result: StringRecord = {};
 
@@ -400,7 +424,7 @@ export class ProviderManager {
         throw new Error("Provider config file is malformed.");
       }
 
-      return parsed as ProviderConfig[];
+      return parsed.map((provider) => stripLegacyProviderFields(provider as ProviderConfig));
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -417,7 +441,8 @@ export class ProviderManager {
 
   private async writeProviders(providers: ProviderConfig[]): Promise<void> {
     await mkdir(ZORA_DIR, { recursive: true });
-    await replaceFileAtomically(PROVIDERS_FILE, `${JSON.stringify(providers, null, 2)}\n`);
+    const sanitized = providers.map((provider) => stripLegacyProviderFields(provider));
+    await replaceFileAtomically(PROVIDERS_FILE, `${JSON.stringify(sanitized, null, 2)}\n`);
   }
 
   private encryptApiKey(plainKey: string): string {

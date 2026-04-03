@@ -20,6 +20,7 @@ import {
   type FeishuConfig,
   type FeishuConnectionTestResult,
 } from "../shared/types/feishu";
+import type { DefaultModelSettings } from "../shared/types/default-model";
 import type { MemorySettings } from "../shared/types/memory";
 import type {
   DiscoveryResult,
@@ -173,6 +174,12 @@ const zoraApi: ZoraApi = {
     },
     getStatus: () =>
       ipcRenderer.invoke("memory:getStatus") as Promise<{ pending: number; processing: number }>,
+  },
+  defaultModel: {
+    getSettings: () =>
+      ipcRenderer.invoke("default-model:getSettings") as Promise<DefaultModelSettings>,
+    updateSettings: (settings: Partial<DefaultModelSettings>) =>
+      ipcRenderer.invoke("default-model:updateSettings", settings) as Promise<DefaultModelSettings>,
   },
   mcp: {
     getConfig: () => ipcRenderer.invoke("mcp:get-config") as Promise<McpConfig>,

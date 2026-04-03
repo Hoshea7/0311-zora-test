@@ -50,6 +50,7 @@ function resetWorkspaceSurface(set: Setter): void {
   set(sessionsAtom, []);
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
+  set(draftSelectedProviderIdAtom, undefined);
   set(draftSelectedModelIdAtom, undefined);
   set(clearDraftStateForSessionAtom, "__draft__");
   set(pinnedSessionIdsAtom, new Set<string>());
@@ -74,6 +75,11 @@ export const sessionsAtom = atom<Session[]>([]);
  * 当前会话 ID
  */
 export const currentSessionIdAtom = atom<string | null>(null);
+
+/**
+ * 新会话草稿态的 Provider 覆盖
+ */
+export const draftSelectedProviderIdAtom = atom<string | undefined>(undefined);
 
 /**
  * 新会话草稿态的模型覆盖
@@ -110,6 +116,17 @@ export const setDraftSelectedModelIdAtom = atom(
     set(
       draftSelectedModelIdAtom,
       trimmedModelId && trimmedModelId.length > 0 ? trimmedModelId : undefined
+    );
+  }
+);
+
+export const setDraftSelectedProviderIdAtom = atom(
+  null,
+  (_get, set, providerId?: string) => {
+    const trimmedProviderId = providerId?.trim();
+    set(
+      draftSelectedProviderIdAtom,
+      trimmedProviderId && trimmedProviderId.length > 0 ? trimmedProviderId : undefined
     );
   }
 );
@@ -279,6 +296,7 @@ export const deleteWorkspaceAtom = atom(
 export const startNewChatAtom = atom(null, (_get, set) => {
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
+  set(draftSelectedProviderIdAtom, undefined);
   set(draftSelectedModelIdAtom, undefined);
   set(clearDraftStateForSessionAtom, "__draft__");
 });

@@ -13,11 +13,14 @@ import {
   currentSessionIdAtom,
   currentWorkspaceIdAtom,
   createSessionAtom,
+  draftSelectedProviderIdAtom,
   draftSelectedModelIdAtom,
   touchSessionAtom,
+  setDraftSelectedProviderIdAtom,
   setDraftSelectedModelIdAtom,
   updateSessionMetaInStateAtom,
 } from "../../store/workspace";
+import { defaultModelSettingsAtom } from "../../store/default-model";
 import {
   normalizeOptionalModelId,
   resolveCurrentProviderAndModel,
@@ -39,12 +42,15 @@ export function MainArea() {
   const [draft, setDraft] = useAtom(draftAtom);
   const attachments = useAtomValue(draftAttachmentsAtom);
   const providers = useAtomValue(providersAtom);
+  const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
   const currentSession = useAtomValue(currentSessionAtom);
+  const draftSelectedProviderId = useAtomValue(draftSelectedProviderIdAtom);
   const draftSelectedModelId = useAtomValue(draftSelectedModelIdAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const [currentWorkspaceId] = useAtom(currentWorkspaceIdAtom);
   const createSession = useSetAtom(createSessionAtom);
   const touchSession = useSetAtom(touchSessionAtom);
+  const setDraftSelectedProviderId = useSetAtom(setDraftSelectedProviderIdAtom);
   const setDraftSelectedModelId = useSetAtom(setDraftSelectedModelIdAtom);
   const updateSessionMetaInState = useSetAtom(updateSessionMetaInStateAtom);
 
@@ -56,12 +62,28 @@ export function MainArea() {
       return;
     }
 
+    let effectiveDefaultModelSettings = defaultModelSettings;
+    if (
+      !effectiveDefaultModelSettings &&
+      !draftSelectedProviderId &&
+      !draftSelectedModelId
+    ) {
+      try {
+        effectiveDefaultModelSettings = await window.zora.defaultModel.getSettings();
+      } catch {
+        // Fall back to the active provider when settings cannot be loaded in time.
+      }
+    }
+
     const {
       provider: selectedProvider,
+      modelId: selectedModelId,
       isMissingLockedProvider,
     } = resolveCurrentProviderAndModel(
       providers,
       currentSession,
+      effectiveDefaultModelSettings,
+      draftSelectedProviderId,
       draftSelectedModelId
     );
 
@@ -85,7 +107,7 @@ export function MainArea() {
 
     const nextSelectedModelOverride = resolveSelectedModelOverride(
       selectedProvider,
-      currentSession?.selectedModelId ?? draftSelectedModelId
+      selectedModelId
     );
     const currentSelectedModelOverride =
       normalizeOptionalModelId(currentSession?.selectedModelId) ?? "";
@@ -118,6 +140,7 @@ export function MainArea() {
         selectedModelId: nextSelectedModelOverride || undefined,
       },
     });
+    setDraftSelectedProviderId(undefined);
     setDraftSelectedModelId(undefined);
 
     const chatText = text || "我发送了一些附件。";

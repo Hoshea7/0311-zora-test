@@ -10,6 +10,7 @@ import type {
   PermissionResponse,
 } from "../shared/zora";
 import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
+import type { DefaultModelSettings } from "../shared/types/default-model";
 import type { MemorySettings } from "../shared/types/memory";
 import type { McpSaveInput, McpServerEntry, McpTransportType } from "../shared/types/mcp";
 import type { ImportMethod, ImportResult, ImportSelection } from "../shared/types/skill";
@@ -31,6 +32,11 @@ import {
 } from "./hitl";
 import { memoryAgent } from "./memory-agent";
 import { loadMemorySettings, saveMemorySettings } from "./memory-settings";
+import {
+  loadDefaultModelSettings,
+  resolveDefaultModelTarget,
+  saveDefaultModelSettings,
+} from "./default-model-settings";
 import { ensureBootstrapScaffold } from "./memory-store";
 import {
   feishuBridge,
@@ -492,6 +498,44 @@ function parseMemorySettingsUpdateInput(input: unknown): Partial<MemorySettings>
   return updates;
 }
 
+function parseDefaultModelSettingsUpdateInput(
+  input: unknown
+): Partial<DefaultModelSettings> {
+  if (!isRecord(input)) {
+    throw new Error("A valid default model settings payload is required.");
+  }
+
+  const updates: Partial<DefaultModelSettings> = {};
+
+  if ("defaultProviderId" in input) {
+    const { defaultProviderId } = input;
+    if (defaultProviderId !== null && typeof defaultProviderId !== "string") {
+      throw new Error("defaultModel.defaultProviderId must be a string or null.");
+    }
+    const normalizedProviderId =
+      typeof defaultProviderId === "string" ? defaultProviderId.trim() : defaultProviderId;
+    updates.defaultProviderId =
+      typeof normalizedProviderId === "string" && normalizedProviderId.length === 0
+        ? null
+        : normalizedProviderId;
+  }
+
+  if ("defaultModelId" in input) {
+    const { defaultModelId } = input;
+    if (defaultModelId !== null && typeof defaultModelId !== "string") {
+      throw new Error("defaultModel.defaultModelId must be a string or null.");
+    }
+    const normalizedModelId =
+      typeof defaultModelId === "string" ? defaultModelId.trim() : defaultModelId;
+    updates.defaultModelId =
+      typeof normalizedModelId === "string" && normalizedModelId.length === 0
+        ? null
+        : normalizedModelId;
+  }
+
+  return updates;
+}
+
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 const DOCUMENT_EXTENSIONS = ["pdf"] as const;
 const TEXT_EXTENSIONS = [
@@ -676,7 +720,17 @@ app.whenReady().then(async () => {
       throw new Error("A valid providerId is required.");
     }
 
-    await providerManager.delete(id);
+    const providerId = id.trim();
+    await providerManager.delete(providerId);
+
+    const defaultModelSettings = await loadDefaultModelSettings();
+    if (defaultModelSettings.defaultProviderId === providerId) {
+      await saveDefaultModelSettings({
+        ...defaultModelSettings,
+        defaultProviderId: null,
+        defaultModelId: null,
+      });
+    }
   });
 
   ipcMain.handle("provider:set-default", async (_event, providerId: unknown) => {
@@ -813,6 +867,20 @@ app.whenReady().then(async () => {
     };
     await saveMemorySettings(updated);
     return loadMemorySettings();
+  });
+
+  ipcMain.handle("default-model:getSettings", async () => {
+    return loadDefaultModelSettings();
+  });
+
+  ipcMain.handle("default-model:updateSettings", async (_event, input: unknown) => {
+    const current = await loadDefaultModelSettings();
+    const updated: DefaultModelSettings = {
+      ...current,
+      ...parseDefaultModelSettingsUpdateInput(input),
+    };
+    await saveDefaultModelSettings(updated);
+    return loadDefaultModelSettings();
   });
 
   ipcMain.handle("memory:processNow", async () => {
@@ -1298,11 +1366,13 @@ app.whenReady().then(async () => {
       const sessionUpdates: Parameters<typeof updateSessionMeta>[1] = {};
 
       if (!session?.providerLocked) {
-        const defaultProvider = await providerManager.getDefaultProvider();
-        if (defaultProvider) {
-          providerId = defaultProvider.id;
-          sessionUpdates.providerId = defaultProvider.id;
+        const defaultTarget = await resolveDefaultModelTarget();
+        if (defaultTarget) {
+          providerId = defaultTarget.provider.id;
+          selectedModelId = defaultTarget.selectedModelId;
+          sessionUpdates.providerId = defaultTarget.provider.id;
           sessionUpdates.providerLocked = true;
+          sessionUpdates.selectedModelId = defaultTarget.selectedModelId;
         }
       }
 

@@ -4,6 +4,7 @@ import type {
   FeishuConnectionTestResult,
 } from "./types/feishu";
 import type { MemorySettings } from "./types/memory";
+import type { DefaultModelSettings } from "./types/default-model";
 import type {
   ProviderConfig,
   ProviderCreateInput,
@@ -250,6 +251,12 @@ export interface ZoraApi {
     getPendingCount: () => Promise<number>;
     onPendingChanged: (callback: (count: number) => void) => () => void;
     getStatus: () => Promise<{ pending: number; processing: number }>;
+  };
+  defaultModel: {
+    getSettings: () => Promise<DefaultModelSettings>;
+    updateSettings: (
+      settings: Partial<DefaultModelSettings>
+    ) => Promise<DefaultModelSettings>;
   };
   mcp: {
     getConfig: () => Promise<McpConfig>;

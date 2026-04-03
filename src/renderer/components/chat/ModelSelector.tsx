@@ -1,18 +1,21 @@
 import { useState, type ReactElement } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { loadProvidersAtom, providersAtom } from "../../store/provider";
+import { providersAtom } from "../../store/provider";
 import {
   currentSessionAtom,
+  draftSelectedProviderIdAtom,
   draftSelectedModelIdAtom,
+  setDraftSelectedProviderIdAtom,
   setDraftSelectedModelIdAtom,
   updateSessionMetaInStateAtom,
 } from "../../store/workspace";
+import { defaultModelSettingsAtom } from "../../store/default-model";
 import type { ProviderConfig } from "../../../shared/types/provider";
 import {
   getProviderModels,
-  resolveActiveProvider,
   resolveCurrentProviderAndModel,
+  resolveDraftProviderAndModel,
   resolveLockedProvider,
   resolveSelectedModelId,
   resolveSelectedModelOverride,
@@ -43,23 +46,30 @@ function LockIcon({ className }: { className?: string }) {
 
 export function ModelSelector({ trigger }: ModelSelectorProps) {
   const providers = useAtomValue(providersAtom);
+  const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
   const currentSession = useAtomValue(currentSessionAtom);
+  const draftSelectedProviderId = useAtomValue(draftSelectedProviderIdAtom);
   const draftSelectedModelId = useAtomValue(draftSelectedModelIdAtom);
-  const loadProviders = useSetAtom(loadProvidersAtom);
+  const setDraftSelectedProviderId = useSetAtom(setDraftSelectedProviderIdAtom);
   const setDraftSelectedModelId = useSetAtom(setDraftSelectedModelIdAtom);
   const updateSessionMetaInState = useSetAtom(updateSessionMetaInStateAtom);
   const [open, setOpen] = useState(false);
   const [pendingSelectionKey, setPendingSelectionKey] = useState<string | null>(null);
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const enabledProviders = providers.filter((provider) => provider.enabled);
-  const activeProvider = resolveActiveProvider(providers);
   const lockedProvider = resolveLockedProvider(providers, currentSession);
   const {
     provider: currentProvider,
     modelId: currentModelId,
     isLocked,
     isMissingLockedProvider,
-  } = resolveCurrentProviderAndModel(providers, currentSession, draftSelectedModelId);
+  } = resolveCurrentProviderAndModel(
+    providers,
+    currentSession,
+    defaultModelSettings,
+    draftSelectedProviderId,
+    draftSelectedModelId
+  );
 
   const handleSelectModel = async (
     provider: ProviderConfig,
@@ -81,17 +91,12 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
       return;
     }
 
-    const nextModelOverride = resolveSelectedModelOverride(provider, resolvedModelId);
     const selectionKey = `${provider.id}:${resolvedModelId}`;
     setPendingSelectionKey(selectionKey);
 
     try {
-      if (!currentSession?.providerLocked && provider.id !== activeProvider?.id) {
-        await window.zora.setDefaultProvider(provider.id);
-        await loadProviders();
-      }
-
-      if (currentSession?.id) {
+      if (currentSession?.providerLocked && currentSession.id) {
+        const nextModelOverride = resolveSelectedModelOverride(provider, resolvedModelId);
         await window.zora.switchSessionModel(currentSession.id, nextModelOverride);
         updateSessionMetaInState({
           sessionId: currentSession.id,
@@ -100,7 +105,14 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
           },
         });
       } else {
-        setDraftSelectedModelId(nextModelOverride || undefined);
+        const draftSelection = resolveDraftProviderAndModel(
+          providers,
+          defaultModelSettings,
+          provider,
+          resolvedModelId
+        );
+        setDraftSelectedProviderId(draftSelection.providerId);
+        setDraftSelectedModelId(draftSelection.modelId);
       }
 
       setOpen(false);

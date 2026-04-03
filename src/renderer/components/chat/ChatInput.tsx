@@ -12,8 +12,13 @@ import {
 import { activeProviderAtom, providersAtom } from "../../store/provider";
 import {
   currentSessionAtom,
+  draftSelectedProviderIdAtom,
   draftSelectedModelIdAtom,
 } from "../../store/workspace";
+import {
+  defaultModelSettingsAtom,
+  loadDefaultModelSettingsAtom,
+} from "../../store/default-model";
 import { isSettingsOpenAtom, settingsTabAtom } from "../../store/ui";
 import { resolveCurrentProviderAndModel } from "../../utils/provider-selection";
 import { Button } from "../ui/Button";
@@ -164,8 +169,11 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   const attachments = useAtomValue(draftAttachmentsAtom);
   const activeProvider = useAtomValue(activeProviderAtom);
   const providers = useAtomValue(providersAtom);
+  const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
   const currentSession = useAtomValue(currentSessionAtom);
+  const draftSelectedProviderId = useAtomValue(draftSelectedProviderIdAtom);
   const draftSelectedModelId = useAtomValue(draftSelectedModelIdAtom);
+  const loadDefaultModelSettings = useSetAtom(loadDefaultModelSettingsAtom);
   const addAttachments = useSetAtom(addDraftAttachmentsAtom);
   const removeAttachment = useSetAtom(removeDraftAttachmentAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
@@ -191,6 +199,8 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   } = resolveCurrentProviderAndModel(
     providers,
     currentSession,
+    defaultModelSettings,
+    draftSelectedProviderId,
     draftSelectedModelId
   );
   const displayProvider = resolvedProvider ?? fallbackProvider;
@@ -213,6 +223,12 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
       el.style.height = `${Math.min(el.scrollHeight, 180)}px`; // Max height around ~25vh
     }
   };
+
+  useEffect(() => {
+    void loadDefaultModelSettings().catch((error) => {
+      console.warn("[chat-input] Failed to load default model settings.", error);
+    });
+  }, [loadDefaultModelSettings]);
 
   useEffect(() => {
     handleInput();

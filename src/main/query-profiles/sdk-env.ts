@@ -1,6 +1,7 @@
 import type { ProviderConfig } from "../../shared/types/provider";
 import { buildProviderSdkEnv, providerManager } from "../provider-manager";
 import { loadMemorySettings } from "../memory-settings";
+import { resolveDefaultModelTarget } from "../default-model-settings";
 
 function normalizeOptionalModelId(value?: string | null): string | undefined {
   if (typeof value !== "string") {
@@ -58,6 +59,7 @@ export async function resolveSdkEnvForProfile(
 
   let result: Awaited<ReturnType<typeof providerManager.getProviderByIdWithKey>> | null = null;
   let memorySelectedModelId: string | undefined;
+  let defaultSelectedModelId: string | undefined;
 
   if (options?.providerId) {
     result = await providerManager.getProviderByIdWithKey(options.providerId);
@@ -99,6 +101,17 @@ export async function resolveSdkEnvForProfile(
     }
   }
 
+  if (!result && profileName !== "memory") {
+    const defaultTarget = await resolveDefaultModelTarget();
+    if (defaultTarget) {
+      result = {
+        provider: defaultTarget.provider,
+        apiKey: defaultTarget.apiKey,
+      };
+      defaultSelectedModelId = defaultTarget.selectedModelId;
+    }
+  }
+
   if (!result) {
     result = await providerManager.getDefaultProviderWithKey();
   }
@@ -112,7 +125,7 @@ export async function resolveSdkEnvForProfile(
 
   const { provider, apiKey } = result;
   const requestedModelId = normalizeOptionalModelId(
-    options?.selectedModelId ?? memorySelectedModelId
+    options?.selectedModelId ?? memorySelectedModelId ?? defaultSelectedModelId
   );
   const effectiveModelId =
     requestedModelId && hasConfiguredModel(provider, requestedModelId)

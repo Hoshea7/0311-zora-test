@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import type { DefaultModelSettings } from "../../../shared/types/default-model";
 import {
   PROVIDER_PRESETS,
   type ProviderConfig,
@@ -10,8 +12,20 @@ import {
   type ProviderType,
   type ProviderUpdateInput,
 } from "../../../shared/types/provider";
+import {
+  defaultModelSettingsAtom,
+  loadDefaultModelSettingsAtom,
+  updateDefaultModelSettingsAtom,
+} from "../../store/default-model";
 import { loadProvidersAtom, providersAtom } from "../../store/provider";
 import { getErrorMessage } from "../../utils/message";
+import {
+  getProviderModels,
+  normalizeOptionalModelId,
+  resolveActiveProvider,
+  resolveConfiguredDefaultTarget,
+  resolveSelectedModelId,
+} from "../../utils/provider-selection";
 import { Button } from "../ui/Button";
 import { cn } from "../../utils/cn";
 
@@ -46,6 +60,11 @@ interface ConnectionTestState {
   message: string;
   details?: RoleTestDetail[] | null;
 }
+
+type DefaultModelUiState = {
+  triggerLabel: string;
+  helperText: string;
+};
 
 const DEFAULT_PROVIDER_TYPE: ProviderType = "anthropic";
 const MASKED_API_KEY_DISPLAY = "••••••••••••••••••••";
@@ -90,6 +109,101 @@ function buildRoleModelsPayload(formState: ProviderFormState): RoleModels | unde
   }
 
   return Object.keys(roleModels).length > 0 ? roleModels : undefined;
+}
+
+function formatProviderModelText(
+  provider: ProviderConfig | null,
+  modelId?: string | null
+): string {
+  if (!provider) {
+    return "暂无可用模型";
+  }
+
+  const normalizedModelId = normalizeOptionalModelId(modelId);
+  return normalizedModelId ? `${provider.name} · ${normalizedModelId}` : provider.name;
+}
+
+function hasDefaultModelSettingsDifference(
+  settings: DefaultModelSettings,
+  patch: Partial<DefaultModelSettings>
+): boolean {
+  if (
+    patch.defaultProviderId !== undefined &&
+    patch.defaultProviderId !== settings.defaultProviderId
+  ) {
+    return true;
+  }
+
+  if (
+    patch.defaultModelId !== undefined &&
+    patch.defaultModelId !== settings.defaultModelId
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function createDefaultModelSelectionPatch(
+  providers: ProviderConfig[],
+  provider: ProviderConfig,
+  modelId: string
+): Partial<DefaultModelSettings> {
+  const activeProvider = resolveActiveProvider(providers);
+  const providerDefaultModelId = resolveSelectedModelId(provider);
+
+  if (activeProvider?.id === provider.id && providerDefaultModelId === modelId) {
+    return {
+      defaultProviderId: null,
+      defaultModelId: null,
+    };
+  }
+
+  return {
+    defaultProviderId: provider.id,
+    defaultModelId: providerDefaultModelId === modelId ? null : modelId,
+  };
+}
+
+function buildDefaultModelUiState(
+  settings: DefaultModelSettings,
+  providers: ProviderConfig[]
+): DefaultModelUiState {
+  const configuredDefault = resolveConfiguredDefaultTarget(providers, settings);
+  const fallbackText = formatProviderModelText(
+    configuredDefault.provider,
+    configuredDefault.modelId
+  );
+  const effectiveText = configuredDefault.provider
+    ? `当前生效：${fallbackText}`
+    : "当前暂无可用的默认模型配置";
+
+  if (!settings.defaultProviderId) {
+    return {
+      triggerLabel: "自动选择",
+      helperText: effectiveText,
+    };
+  }
+
+  const selectedProvider = providers.find((provider) => provider.id === settings.defaultProviderId);
+  if (!selectedProvider) {
+    return {
+      triggerLabel: "自动选择",
+      helperText: effectiveText,
+    };
+  }
+
+  if (!selectedProvider.enabled) {
+    return {
+      triggerLabel: "自动选择",
+      helperText: effectiveText,
+    };
+  }
+
+  return {
+    triggerLabel: formatProviderModelText(configuredDefault.provider, configuredDefault.modelId),
+    helperText: effectiveText,
+  };
 }
 
 function getFailingConfiguredRoles(
@@ -278,11 +392,15 @@ function ProviderTypeBadge({ providerType }: { providerType: ProviderType }) {
 }
 
 export function ProviderSettings() {
+  const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
+  const loadDefaultModelSettings = useSetAtom(loadDefaultModelSettingsAtom);
+  const updateDefaultModelSettings = useSetAtom(updateDefaultModelSettingsAtom);
   const providers = useAtomValue(providersAtom);
   const loadProviders = useSetAtom(loadProvidersAtom);
 
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [formState, setFormState] = useState<ProviderFormState>(createEmptyFormState);
+  const [defaultModelErrorMessage, setDefaultModelErrorMessage] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isLoadingApiKey, setIsLoadingApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -433,6 +551,13 @@ export function ProviderSettings() {
   }, []);
 
   useEffect(() => {
+    setDefaultModelErrorMessage(null);
+    void loadDefaultModelSettings().catch((error) => {
+      setDefaultModelErrorMessage(getErrorMessage(error));
+    });
+  }, [loadDefaultModelSettings]);
+
+  useEffect(() => {
     if (!formMode) {
       return;
     }
@@ -454,6 +579,25 @@ export function ProviderSettings() {
 
   const refreshProviders = async () => {
     await loadProviders();
+  };
+
+  const handleSelectDefaultModel = async (
+    patch: Partial<DefaultModelSettings>
+  ) => {
+    if (
+      !defaultModelSettings ||
+      !hasDefaultModelSettingsDifference(defaultModelSettings, patch)
+    ) {
+      return;
+    }
+
+    setDefaultModelErrorMessage(null);
+
+    try {
+      await updateDefaultModelSettings(patch);
+    } catch (error) {
+      setDefaultModelErrorMessage(getErrorMessage(error));
+    }
   };
 
   const focusField = (field: ValidationField) => {
@@ -605,20 +749,6 @@ export function ProviderSettings() {
       if (formMode?.type === "edit" && formMode.providerId === providerId) {
         closeForm();
       }
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    } finally {
-      setActiveCardActionId(null);
-    }
-  };
-
-  const handleSetDefault = async (providerId: string) => {
-    setActiveCardActionId(providerId);
-    setErrorMessage(null);
-
-    try {
-      await window.zora.setDefaultProvider(providerId);
-      await refreshProviders();
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     } finally {
@@ -783,6 +913,10 @@ export function ProviderSettings() {
 
   const mainModelTestDetail = findRoleTestDetail(connectionTestState?.details, "main");
   const connectionSummary = summarizeConnectionTest(connectionTestState);
+  const enabledProviders = providers.filter((provider) => provider.enabled);
+  const defaultModelUiState = defaultModelSettings
+    ? buildDefaultModelUiState(defaultModelSettings, providers)
+    : null;
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-4 w-full pb-12 duration-500">
@@ -799,7 +933,7 @@ export function ProviderSettings() {
         </Button>
       </div>
 
-      {errorMessage ? (
+        {errorMessage ? (
           <div
             className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200/60 bg-rose-50/80 px-4 py-2.5 text-[13px] text-rose-600"
             role="alert"
@@ -811,6 +945,108 @@ export function ProviderSettings() {
             <p className="font-medium">{errorMessage}</p>
           </div>
         ) : null}
+
+      {defaultModelErrorMessage ? (
+        <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-rose-200/60 bg-rose-50/80 px-4 py-2.5 text-[13px] text-rose-600">
+          <svg className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <p className="font-medium">{defaultModelErrorMessage}</p>
+        </div>
+      ) : null}
+
+      <div className="mb-4 rounded-xl border border-stone-200/60 bg-stone-50/50 p-4">
+        <div className="flex items-start gap-4">
+          <h3 className="w-[88px] shrink-0 pt-2 text-[15px] font-medium text-stone-900">
+            默认模型
+          </h3>
+
+          <div className="min-w-0 flex-1">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  className={cn(
+                    "flex h-10 w-full items-center justify-between rounded-lg bg-white px-3.5",
+                    "text-[13px] text-stone-700 ring-1 ring-stone-200/60 transition-all",
+                    "hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-stone-200/40"
+                  )}
+                >
+                  <span className="truncate">
+                    {defaultModelUiState?.triggerLabel ?? "自动选择"}
+                  </span>
+                  <svg className="ml-3 h-4 w-4 shrink-0 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  side="bottom"
+                  align="start"
+                  className="z-50 max-h-64 overflow-y-auto rounded-lg border border-stone-200/60 bg-white shadow-lg shadow-stone-200/50"
+                  style={{ minWidth: "var(--radix-dropdown-menu-trigger-width)" }}
+                >
+                  <DropdownMenu.Item
+                    className="cursor-pointer border-b border-stone-100 px-3 py-2.5 text-[13px] text-stone-600 outline-none hover:bg-stone-50 data-[highlighted]:bg-stone-50"
+                    onSelect={() =>
+                      void handleSelectDefaultModel({
+                        defaultProviderId: null,
+                        defaultModelId: null,
+                      })
+                    }
+                  >
+                    自动选择
+                  </DropdownMenu.Item>
+                  {enabledProviders.map((provider, providerIndex) => {
+                    const models = getProviderModels(provider);
+                    if (models.length === 0) {
+                      return null;
+                    }
+
+                    return (
+                      <div key={provider.id}>
+                        {providerIndex > 0 && <div className="border-t border-stone-100" />}
+                        <div className="bg-stone-50/80 px-3 py-1.5 text-[11px] font-medium text-stone-500">
+                          {provider.name}
+                        </div>
+                        {models.map((model) => (
+                          <DropdownMenu.Item
+                            key={`${provider.id}:${model.modelId}`}
+                            className="cursor-pointer px-4 py-2 text-[13px] text-stone-600 outline-none hover:bg-stone-50 data-[highlighted]:bg-stone-50"
+                            onSelect={() =>
+                              void handleSelectDefaultModel(
+                                createDefaultModelSelectionPatch(
+                                  providers,
+                                  provider,
+                                  model.modelId
+                                )
+                              )
+                            }
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-stone-300">·</span>
+                              <span className="truncate">{model.modelId}</span>
+                              {model.label ? (
+                                <span className="text-[11px] text-stone-400">
+                                  {model.label}
+                                </span>
+                              ) : null}
+                            </div>
+                          </DropdownMenu.Item>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+
+            <p className="mt-1.5 text-[12px] text-stone-400">
+              {defaultModelUiState?.helperText ?? "当前暂无可用的默认模型配置"}
+            </p>
+          </div>
+        </div>
+      </div>
 
         {providers.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-200/70 bg-stone-50/40 px-6 py-10 text-center">
@@ -832,7 +1068,7 @@ export function ProviderSettings() {
               return (
                 <div key={provider.id} className={cn(
                   "group relative flex items-center justify-between px-5 py-3.5 transition-all duration-200",
-                  provider.isDefault ? "bg-stone-50/30" : "hover:bg-stone-50/50"
+                  "hover:bg-stone-50/50"
                 )}>
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <div className="flex items-center gap-2">
@@ -854,18 +1090,6 @@ export function ProviderSettings() {
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2 pl-3">
-                    {!provider.isDefault && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={isCardBusy}
-                        onClick={() => void handleSetDefault(provider.id)}
-                        className="mr-1.5 h-7 px-2.5 text-[12px] text-stone-500 opacity-0 transition-opacity hover:text-stone-900 group-hover:opacity-100 focus-within:opacity-100"
-                      >
-                        设为默认
-                      </Button>
-                    )}
                     <button
                       type="button"
                       disabled={isCardBusy}
@@ -878,26 +1102,17 @@ export function ProviderSettings() {
                     </button>
                     <button
                       type="button"
-                      disabled={isCardBusy || provider.isDefault}
+                      disabled={isCardBusy}
                       onClick={() => void handleDelete(provider.id)}
                       className={cn(
-                        "flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30",
-                        provider.isDefault && "cursor-not-allowed"
+                        "flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30"
                       )}
-                      title={provider.isDefault ? "默认配置不能删除" : "删除"}
+                      title="删除"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
                     </button>
-                    
-                    {provider.isDefault && (
-                      <div className="ml-2 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    )}
                   </div>
                 </div>
               );
