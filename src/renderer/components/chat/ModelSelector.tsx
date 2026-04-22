@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { providersAtom } from "../../store/provider";
@@ -70,6 +70,11 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
     draftSelectedProviderId,
     draftSelectedModelId
   );
+
+  useEffect(() => {
+    setOpen(false);
+    setPendingSelectionKey(null);
+  }, [currentSession?.id, isMissingLockedProvider]);
 
   const handleSelectModel = async (
     provider: ProviderConfig,

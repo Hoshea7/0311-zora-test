@@ -27,16 +27,13 @@ export function encryptSecret(plain: string): string {
 }
 
 export function decryptSecret(encrypted: string): string {
-  return readSecret(encrypted, {
-    allowLegacyUnprefixedSafeStorage: true,
-  });
+  return readSecret(encrypted);
 }
 
 export async function loadFeishuConfig(): Promise<FeishuConfig | null> {
   try {
     const raw = await readFile(FEISHU_CONFIG_FILE, "utf8");
     const storedConfig = normalizeFeishuConfig(JSON.parse(raw) as unknown);
-
     return {
       ...storedConfig,
       appSecret: decryptSecret(storedConfig.appSecret),

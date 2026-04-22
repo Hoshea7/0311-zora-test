@@ -1,19 +1,26 @@
-export interface ReadSecretOptions {
-  legacySafeStoragePrefix?: string;
-  allowLegacyUnprefixedSafeStorage?: boolean;
+export interface ReadSecretOptions {}
+
+export interface ReadSecretResult {
+  value: string;
+  needsWriteBack: boolean;
 }
 
 export function storeSecret(secret: string): string {
   return secret;
 }
 
-export function readSecret(secret: string, options: ReadSecretOptions = {}): string {
-  if (
-    options.legacySafeStoragePrefix &&
-    secret.startsWith(options.legacySafeStoragePrefix)
-  ) {
-    return secret.slice(options.legacySafeStoragePrefix.length);
-  }
+export function readSecretDetailed(
+  secret: string,
+  options: ReadSecretOptions = {}
+): ReadSecretResult {
+  void options;
 
-  return secret;
+  return {
+    value: secret,
+    needsWriteBack: false,
+  };
+}
+
+export function readSecret(secret: string, options: ReadSecretOptions = {}): string {
+  return readSecretDetailed(secret, options).value;
 }

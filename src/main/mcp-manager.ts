@@ -30,7 +30,6 @@ import { isRecord } from "./utils/guards";
 import { isEnoentError, replaceFileAtomically } from "./utils/fs";
 
 const MASKED_SECRET = "••••••";
-const ENCRYPTED_PREFIX = "__ENCRYPTED:";
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const REMOTE_TEST_TIMEOUT_MS = 10_000;
 const MCP_TRANSPORT_TYPES = new Set<McpTransportType>(["stdio", "http", "sse", "sdk"]);
@@ -329,23 +328,12 @@ function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEYWORDS.some((keyword) => normalizedKey.includes(keyword));
 }
 
-function isEncryptedValue(value: string): boolean {
-  return value.startsWith(ENCRYPTED_PREFIX);
-}
-
 function encryptValue(value: string): string {
-  const storedValue = storeSecret(value);
-  return storedValue === value ? value : `${ENCRYPTED_PREFIX}${storedValue}`;
+  return storeSecret(value);
 }
 
 function decryptValue(value: string): string {
-  if (!isEncryptedValue(value)) {
-    return value;
-  }
-
-  return readSecret(value, {
-    legacySafeStoragePrefix: ENCRYPTED_PREFIX,
-  });
+  return readSecret(value);
 }
 
 function maskSensitiveRecord(record?: StringRecord): StringRecord | undefined {
@@ -381,7 +369,7 @@ function encryptSensitiveRecord(
       continue;
     }
 
-    encrypted[key] = isEncryptedValue(value) ? value : encryptValue(value);
+    encrypted[key] = encryptValue(value);
   }
 
   return encrypted;

@@ -1,13 +1,13 @@
 export interface DefaultModelSettings {
   /**
-   * 新会话默认使用的 Provider。
-   * null 表示跟随当前默认 Provider。
+   * 新会话默认使用的模型所属 Provider。
+   * 这是内部解析目标，不直接作为独立设置项暴露给用户。
    */
   defaultProviderId: string | null;
 
   /**
-   * 新会话默认使用的模型覆盖值。
-   * null 表示使用所选 Provider 的主模型。
+   * 新会话默认使用的模型 ID。
+   * null 表示当前没有显式默认模型。
    */
   defaultModelId: string | null;
 }

@@ -424,7 +424,9 @@ export class ProviderManager {
         throw new Error("Provider config file is malformed.");
       }
 
-      return parsed.map((provider) => stripLegacyProviderFields(provider as ProviderConfig));
+      return parsed.map((provider) =>
+        stripLegacyProviderFields(provider as ProviderConfig)
+      );
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -450,9 +452,7 @@ export class ProviderManager {
   }
 
   private decryptApiKeyValue(encryptedKey: string): string {
-    return readSecret(encryptedKey, {
-      allowLegacyUnprefixedSafeStorage: true,
-    });
+    return readSecret(encryptedKey);
   }
 
   private maskProvider(provider: ProviderConfig): ProviderConfig {

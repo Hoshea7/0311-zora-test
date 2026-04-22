@@ -72,6 +72,19 @@ function setStatus(next: Partial<UpdateStatus>): UpdateStatus {
   return currentStatus;
 }
 
+function setUpdateErrorState(message: string, error: unknown): UpdateStatus {
+  installingUpdate = false;
+
+  return setStatus({
+    state: "error",
+    supported: app.isPackaged,
+    message,
+    error: error instanceof Error ? error.message : String(error),
+    checkedAt: new Date().toISOString(),
+    progress: undefined,
+  });
+}
+
 function isBusyState(state: UpdateStatus["state"]): boolean {
   return state === "checking" || state === "downloading" || state === "installing";
 }
@@ -166,17 +179,11 @@ function configureAutoUpdaterEvents(): void {
   autoUpdater.on("error", (error) => {
     if (installingUpdate) {
       console.error("[updater] Install flow failed:", error);
+      setUpdateErrorState("安装更新失败，请稍后重试。", error);
       return;
     }
 
-    setStatus({
-      state: "error",
-      supported: app.isPackaged,
-      message: "更新失败，请稍后重试。",
-      error: error.message,
-      checkedAt: new Date().toISOString(),
-      progress: undefined,
-    });
+    setUpdateErrorState("更新失败，请稍后重试。", error);
   });
 }
 
@@ -264,13 +271,7 @@ export function installUpdate(): void {
     });
     autoUpdater.quitAndInstall(true, true);
   } catch (error) {
-    installingUpdate = false;
-    setStatus({
-      state: "error",
-      supported: true,
-      message: "安装更新失败，请稍后重试。",
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setUpdateErrorState("安装更新失败，请稍后重试。", error);
     throw error;
   }
 }

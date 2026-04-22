@@ -364,6 +364,8 @@ function isAbortLikeError(error: unknown) {
   );
 }
 
+const AGENT_INTERRUPT_GRACE_MS = 1500;
+
 function getMissingSdkSessionError(message: SDKMessage): MissingSdkSessionError | null {
   if (
     message.type !== "result" ||
@@ -511,15 +513,37 @@ export async function stopAgentForSession(sessionId: string) {
   if (!run) {
     return;
   }
+  if (run.stopping) {
+    return;
+  }
   run.stopping = true;
 
+  let interruptSettled = false;
+  const interruptPromise = Promise.resolve()
+    .then(() => run.query.interrupt())
+    .catch((error) => {
+      if (!isAbortLikeError(error)) {
+        console.warn(
+          `${getProfileLogPrefix(run.profileName)} Failed to interrupt agent for session ${sessionId}.`,
+          error
+        );
+      }
+    })
+    .finally(() => {
+      interruptSettled = true;
+    });
+
   try {
-    await run.query.interrupt();
-  } catch (error) {
-    if (!isAbortLikeError(error)) {
+    await Promise.race([
+      interruptPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, AGENT_INTERRUPT_GRACE_MS);
+      }),
+    ]);
+
+    if (!interruptSettled) {
       console.warn(
-        `${getProfileLogPrefix(run.profileName)} Failed to interrupt agent for session ${sessionId}.`,
-        error
+        `${getProfileLogPrefix(run.profileName)} Interrupt timed out after ${AGENT_INTERRUPT_GRACE_MS}ms for session ${sessionId}; forcing close.`
       );
     }
   } finally {

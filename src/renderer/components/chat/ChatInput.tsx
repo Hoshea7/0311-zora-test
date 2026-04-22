@@ -213,7 +213,7 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
     (draft.trim().length > 0 || attachments.length > 0) &&
     !isMissingLockedProvider;
   const shouldShowModelSelector =
-    hasEnabledProviders || isLocked || isMissingLockedProvider;
+    !isMissingLockedProvider && (hasEnabledProviders || isLocked);
 
   // Auto-resize textarea
   const handleInput = () => {
@@ -558,15 +558,23 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
 
             <div className="ml-1 h-4 w-px shrink-0 bg-stone-200" />
 
-            {shouldShowModelSelector ? (
+            {isMissingLockedProvider ? (
+              <button
+                type="button"
+                onClick={openProviderSettings}
+                className="inline-flex min-w-0 max-w-[260px] items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium text-rose-500 transition-colors duration-200 hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-200 focus-visible:ring-offset-1"
+                aria-label="此会话绑定的 Provider 已删除"
+                title="此会话绑定的 Provider 已被删除，打开设置查看模型配置。"
+              >
+                <span className="truncate">{providerLabel}</span>
+              </button>
+            ) : shouldShowModelSelector ? (
               <ModelSelector
                 trigger={
                   <button
                     type="button"
                     className={`inline-flex min-w-0 max-w-[260px] items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 focus-visible:ring-offset-1 ${
-                      isMissingLockedProvider
-                        ? "text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                        : "text-stone-500 hover:bg-stone-100 hover:text-stone-700"
+                      "text-stone-500 hover:bg-stone-100 hover:text-stone-700"
                     }`}
                     aria-label="切换当前模型渠道"
                   >

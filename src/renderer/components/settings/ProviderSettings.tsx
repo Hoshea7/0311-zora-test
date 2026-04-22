@@ -22,7 +22,6 @@ import { getErrorMessage } from "../../utils/message";
 import {
   getProviderModels,
   normalizeOptionalModelId,
-  resolveActiveProvider,
   resolveConfiguredDefaultTarget,
   resolveSelectedModelId,
 } from "../../utils/provider-selection";
@@ -64,6 +63,9 @@ interface ConnectionTestState {
 type DefaultModelUiState = {
   triggerLabel: string;
   helperText: string;
+  hasOptions: boolean;
+  selectedProviderId: string | null;
+  selectedModelId?: string;
 };
 
 const DEFAULT_PROVIDER_TYPE: ProviderType = "anthropic";
@@ -111,18 +113,6 @@ function buildRoleModelsPayload(formState: ProviderFormState): RoleModels | unde
   return Object.keys(roleModels).length > 0 ? roleModels : undefined;
 }
 
-function formatProviderModelText(
-  provider: ProviderConfig | null,
-  modelId?: string | null
-): string {
-  if (!provider) {
-    return "暂无可用模型";
-  }
-
-  const normalizedModelId = normalizeOptionalModelId(modelId);
-  return normalizedModelId ? `${provider.name} · ${normalizedModelId}` : provider.name;
-}
-
 function hasDefaultModelSettingsDifference(
   settings: DefaultModelSettings,
   patch: Partial<DefaultModelSettings>
@@ -145,23 +135,12 @@ function hasDefaultModelSettingsDifference(
 }
 
 function createDefaultModelSelectionPatch(
-  providers: ProviderConfig[],
   provider: ProviderConfig,
   modelId: string
 ): Partial<DefaultModelSettings> {
-  const activeProvider = resolveActiveProvider(providers);
-  const providerDefaultModelId = resolveSelectedModelId(provider);
-
-  if (activeProvider?.id === provider.id && providerDefaultModelId === modelId) {
-    return {
-      defaultProviderId: null,
-      defaultModelId: null,
-    };
-  }
-
   return {
     defaultProviderId: provider.id,
-    defaultModelId: providerDefaultModelId === modelId ? null : modelId,
+    defaultModelId: modelId,
   };
 }
 
@@ -169,40 +148,32 @@ function buildDefaultModelUiState(
   settings: DefaultModelSettings,
   providers: ProviderConfig[]
 ): DefaultModelUiState {
-  const configuredDefault = resolveConfiguredDefaultTarget(providers, settings);
-  const fallbackText = formatProviderModelText(
-    configuredDefault.provider,
-    configuredDefault.modelId
+  const availableProviders = providers.filter(
+    (provider) => provider.enabled && getProviderModels(provider).length > 0
   );
-  const effectiveText = configuredDefault.provider
-    ? `当前生效：${fallbackText}`
-    : "当前暂无可用的默认模型配置";
 
-  if (!settings.defaultProviderId) {
+  if (availableProviders.length === 0) {
     return {
-      triggerLabel: "自动选择",
-      helperText: effectiveText,
+      triggerLabel: "暂无模型",
+      helperText: "请先在下方为 Provider 配置至少一个模型。",
+      hasOptions: false,
+      selectedProviderId: null,
     };
   }
 
-  const selectedProvider = providers.find((provider) => provider.id === settings.defaultProviderId);
-  if (!selectedProvider) {
-    return {
-      triggerLabel: "自动选择",
-      helperText: effectiveText,
-    };
-  }
-
-  if (!selectedProvider.enabled) {
-    return {
-      triggerLabel: "自动选择",
-      helperText: effectiveText,
-    };
-  }
+  const configuredDefault = resolveConfiguredDefaultTarget(providers, settings);
+  const selectedProvider = configuredDefault.provider;
+  const selectedModelId = normalizeOptionalModelId(configuredDefault.modelId);
 
   return {
-    triggerLabel: formatProviderModelText(configuredDefault.provider, configuredDefault.modelId),
-    helperText: effectiveText,
+    triggerLabel: selectedModelId ?? "暂无模型",
+    helperText:
+      selectedProvider && selectedModelId
+        ? `新会话默认使用 ${selectedProvider.name} · ${selectedModelId}`
+        : "请先在下方为 Provider 配置至少一个模型。",
+    hasOptions: true,
+    selectedProviderId: selectedProvider?.id ?? null,
+    selectedModelId,
   };
 }
 
@@ -968,11 +939,14 @@ export function ProviderSettings() {
                   className={cn(
                     "flex h-10 w-full items-center justify-between rounded-lg bg-white px-3.5",
                     "text-[13px] text-stone-700 ring-1 ring-stone-200/60 transition-all",
-                    "hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-stone-200/40"
+                    "hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-stone-200/40",
+                    !defaultModelUiState?.hasOptions &&
+                      "cursor-not-allowed text-stone-400 hover:bg-white"
                   )}
+                  disabled={!defaultModelUiState?.hasOptions}
                 >
                   <span className="truncate">
-                    {defaultModelUiState?.triggerLabel ?? "自动选择"}
+                    {defaultModelUiState?.triggerLabel ?? "暂无模型"}
                   </span>
                   <svg className="ml-3 h-4 w-4 shrink-0 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -986,17 +960,6 @@ export function ProviderSettings() {
                   className="z-50 max-h-64 overflow-y-auto rounded-lg border border-stone-200/60 bg-white shadow-lg shadow-stone-200/50"
                   style={{ minWidth: "var(--radix-dropdown-menu-trigger-width)" }}
                 >
-                  <DropdownMenu.Item
-                    className="cursor-pointer border-b border-stone-100 px-3 py-2.5 text-[13px] text-stone-600 outline-none hover:bg-stone-50 data-[highlighted]:bg-stone-50"
-                    onSelect={() =>
-                      void handleSelectDefaultModel({
-                        defaultProviderId: null,
-                        defaultModelId: null,
-                      })
-                    }
-                  >
-                    自动选择
-                  </DropdownMenu.Item>
                   {enabledProviders.map((provider, providerIndex) => {
                     const models = getProviderModels(provider);
                     if (models.length === 0) {
@@ -1012,11 +975,15 @@ export function ProviderSettings() {
                         {models.map((model) => (
                           <DropdownMenu.Item
                             key={`${provider.id}:${model.modelId}`}
-                            className="cursor-pointer px-4 py-2 text-[13px] text-stone-600 outline-none hover:bg-stone-50 data-[highlighted]:bg-stone-50"
+                            className={cn(
+                              "cursor-pointer px-4 py-2 text-[13px] text-stone-600 outline-none hover:bg-stone-50 data-[highlighted]:bg-stone-50",
+                              defaultModelUiState?.selectedProviderId === provider.id &&
+                                defaultModelUiState.selectedModelId === model.modelId &&
+                                "bg-stone-50 font-medium text-stone-900"
+                            )}
                             onSelect={() =>
                               void handleSelectDefaultModel(
                                 createDefaultModelSelectionPatch(
-                                  providers,
                                   provider,
                                   model.modelId
                                 )
@@ -1024,7 +991,24 @@ export function ProviderSettings() {
                             }
                           >
                             <div className="flex items-center gap-2">
-                              <span className="text-stone-300">·</span>
+                              <span className="inline-flex h-4 w-4 items-center justify-center text-stone-400">
+                                {defaultModelUiState?.selectedProviderId === provider.id &&
+                                defaultModelUiState.selectedModelId === model.modelId ? (
+                                  <svg
+                                    className="h-3.5 w-3.5"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M5 13l4 4L19 7"
+                                    />
+                                  </svg>
+                                ) : null}
+                              </span>
                               <span className="truncate">{model.modelId}</span>
                               {model.label ? (
                                 <span className="text-[11px] text-stone-400">
@@ -1042,7 +1026,7 @@ export function ProviderSettings() {
             </DropdownMenu.Root>
 
             <p className="mt-1.5 text-[12px] text-stone-400">
-              {defaultModelUiState?.helperText ?? "当前暂无可用的默认模型配置"}
+              {defaultModelUiState?.helperText ?? "请先在下方为 Provider 配置至少一个模型。"}
             </p>
           </div>
         </div>

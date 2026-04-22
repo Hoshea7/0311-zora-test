@@ -296,7 +296,6 @@ bun run typecheck
 - 配置 API Key / Base URL / 默认模型
 - 配置 `smallFast / sonnet / opus / haiku` 角色模型
 - 测试连通性
-- 设置默认 Provider
 
 ### 2. 记忆设置
 
@@ -331,7 +330,7 @@ Zora 会把运行数据存储在 `~/.zora/` 下，方便长期记忆与会话管
 ```text
 ~/.zora/
 ├── providers.json                # Provider 配置（明文保存在本地）
-├── feishu-config.json            # 飞书配置（明文保存在本地）
+├── feishu.json                   # 飞书配置（明文保存在本地）
 ├── memory-settings.json          # 记忆模式设置
 ├── mcp.json                      # MCP 配置
 ├── workspaces.json               # 工作区元数据
