@@ -1,4 +1,7 @@
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  SDKMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import type {
   AgentRunInfo,
@@ -17,6 +20,7 @@ import { setSessionId } from "./session-manager";
 import { setSdkSessionId } from "./session-store";
 
 type JsonRecord = Record<string, unknown>;
+type SdkMessageUuid = NonNullable<SDKUserMessage["uuid"]>;
 export type AgentEventForwarder = (event: AgentStreamEvent) => void;
 
 export class MissingSdkSessionError extends Error {
@@ -41,8 +45,11 @@ type ActiveAgentRun = {
 
 const activeAgentRuns = new Map<string, ActiveAgentRun>();
 
-/** 活跃的 SDK Query 对象映射，供 streamInput() 使用 */
+/** 活跃的 SDK Query 对象映射，供生命周期检查使用 */
 const activeQueries = new Map<string, any>();
+
+/** 活跃的 SDK 输入流，保持 stdin 打开以支持权限控制请求和追加消息 */
+const activeInputStreams = new Map<string, AgentInputStream>();
 
 /** Query 就绪同步屏障 —— 在 SDK query 对象创建前缓冲队列消息 */
 const queryReadyPromises = new Map<string, Promise<void>>();
@@ -51,8 +58,97 @@ const queryReadyResolvers = new Map<string, () => void>();
 /** 队列消息 UUID 集合（防重） */
 const queuedMessageUuids = new Map<string, Set<string>>();
 
+/** 当前 run 尚未收到 result 的用户输入数量（初始消息 + 运行中追加消息） */
+const pendingUserTurnCounts = new Map<string, number>();
+
 /** 就绪等待超时 */
 const QUERY_READY_TIMEOUT_MS = 30_000;
+
+class AgentInputStream implements AsyncIterable<SDKUserMessage>, AsyncIterator<SDKUserMessage> {
+  private queue: SDKUserMessage[] = [];
+  private pendingResolve:
+    | ((result: IteratorResult<SDKUserMessage>) => void)
+    | undefined;
+  private pendingReject: ((reason?: unknown) => void) | undefined;
+  private closed = false;
+  private errorValue: unknown;
+  private started = false;
+
+  [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
+    if (this.started) {
+      throw new Error("Agent input stream can only be iterated once");
+    }
+    this.started = true;
+    return this;
+  }
+
+  next(): Promise<IteratorResult<SDKUserMessage>> {
+    if (this.queue.length > 0) {
+      return Promise.resolve({
+        done: false,
+        value: this.queue.shift() as SDKUserMessage,
+      });
+    }
+
+    if (this.errorValue) {
+      return Promise.reject(this.errorValue);
+    }
+
+    if (this.closed) {
+      return Promise.resolve({ done: true, value: undefined });
+    }
+
+    return new Promise<IteratorResult<SDKUserMessage>>((resolve, reject) => {
+      this.pendingResolve = resolve;
+      this.pendingReject = reject;
+    });
+  }
+
+  enqueue(message: SDKUserMessage): void {
+    if (this.closed) {
+      throw new Error("输入流已关闭");
+    }
+
+    if (this.pendingResolve) {
+      const resolve = this.pendingResolve;
+      this.pendingResolve = undefined;
+      this.pendingReject = undefined;
+      resolve({ done: false, value: message });
+      return;
+    }
+
+    this.queue.push(message);
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    if (this.pendingResolve) {
+      const resolve = this.pendingResolve;
+      this.pendingResolve = undefined;
+      this.pendingReject = undefined;
+      resolve({ done: true, value: undefined });
+    }
+  }
+
+  fail(error: unknown): void {
+    this.errorValue = error;
+    if (this.pendingReject) {
+      const reject = this.pendingReject;
+      this.pendingResolve = undefined;
+      this.pendingReject = undefined;
+      reject(error);
+    }
+  }
+
+  return(): Promise<IteratorResult<SDKUserMessage>> {
+    this.close();
+    return Promise.resolve({ done: true, value: undefined });
+  }
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null;
@@ -444,40 +540,47 @@ export async function runAgentWithProfile(
     attachments && attachments.length > 0
       ? buildMultimodalPrompt(profile.prompt, attachments)
       : profile.prompt;
+  const inputStream = new AgentInputStream();
 
   const readyPromise = new Promise<void>((resolve) => {
     queryReadyResolvers.set(sessionId, resolve);
   });
   queryReadyPromises.set(sessionId, readyPromise);
+  pendingUserTurnCounts.set(sessionId, 1);
 
-  async function* initialPromptStream() {
+  const enqueueInitialPrompt = async () => {
     if (typeof userContent === "string") {
-      yield {
+      inputStream.enqueue({
         type: "user" as const,
         session_id: sessionId,
         message: { role: "user" as const, content: userContent },
         parent_tool_use_id: null,
-      };
+      });
       return;
     }
 
     for await (const message of userContent) {
-      yield {
+      inputStream.enqueue({
         ...message,
         session_id: sessionId,
-      };
+      });
     }
-  }
+  };
 
   let response;
   try {
+    await enqueueInitialPrompt();
+    activeInputStreams.set(sessionId, inputStream);
     response = query({
-      prompt: initialPromptStream(),
+      prompt: inputStream,
       options: profile.options as any,
     });
   } catch (error) {
+    inputStream.fail(error);
+    activeInputStreams.delete(sessionId);
     queryReadyPromises.delete(sessionId);
     queryReadyResolvers.delete(sessionId);
+    pendingUserTurnCounts.delete(sessionId);
     throw error;
   }
 
@@ -501,6 +604,8 @@ export async function runAgentWithProfile(
 
   try {
     for await (const message of response) {
+      let shouldFinishAfterResult = false;
+
       if (message.type === "system" && message.subtype === "init") {
         const sid = message.session_id;
         if (typeof sid === "string" && sid.length > 0) {
@@ -526,9 +631,20 @@ export async function runAgentWithProfile(
         if (detectedMissingSession) {
           missingSdkSessionError = detectedMissingSession;
         }
+
+        const remainingUserTurns = Math.max(
+          (pendingUserTurnCounts.get(sessionId) ?? 1) - 1,
+          0
+        );
+        pendingUserTurnCounts.set(sessionId, remainingUserTurns);
+        shouldFinishAfterResult = remainingUserTurns === 0;
       }
 
       logSdkMessage(message, profile.name, onEvent);
+
+      if (shouldFinishAfterResult) {
+        break;
+      }
     }
     console.log(`${logPrefix} Query finished`);
     if (
@@ -551,6 +667,7 @@ export async function runAgentWithProfile(
     }
     emitAgentStatus(run.stopping ? "stopped" : "finished", onEvent, source);
   } finally {
+    inputStream.close();
     try {
       response.close();
     } catch {
@@ -558,9 +675,11 @@ export async function runAgentWithProfile(
     }
     clearAllPending();
     activeQueries.delete(sessionId);
+    activeInputStreams.delete(sessionId);
     queryReadyPromises.delete(sessionId);
     queryReadyResolvers.delete(sessionId);
     queuedMessageUuids.delete(sessionId);
+    pendingUserTurnCounts.delete(sessionId);
     if (activeAgentRuns.get(sessionId) === run) {
       activeAgentRuns.delete(sessionId);
     }
@@ -607,37 +726,41 @@ export async function sendQueuedMessage(
     }
   }
 
-  const activeQuery = activeQueries.get(sessionId);
-  if (!activeQuery) {
+  if (!activeQueries.has(sessionId)) {
     uuids.delete(messageUuid);
     throw new Error("无活跃查询可注入消息");
   }
 
-  if (typeof activeQuery.streamInput !== "function") {
+  const inputStream = activeInputStreams.get(sessionId);
+  if (!inputStream) {
     uuids.delete(messageUuid);
-    throw new Error("当前 SDK Query 不支持追加消息");
+    throw new Error("无活跃输入流可注入消息");
   }
 
-  const sdkMessage = {
+  const sdkMessage: SDKUserMessage = {
     type: "user" as const,
     session_id: sessionId,
     message: { role: "user" as const, content: text },
     parent_tool_use_id: null,
     priority: "now" as const,
-    uuid: messageUuid,
+    uuid: messageUuid as SdkMessageUuid,
   };
 
-  async function* singleMessage() {
-    yield sdkMessage;
-  }
-
   try {
-    await activeQuery.streamInput(singleMessage());
+    pendingUserTurnCounts.set(
+      sessionId,
+      (pendingUserTurnCounts.get(sessionId) ?? 0) + 1
+    );
+    inputStream.enqueue(sdkMessage);
     console.log(
-      `[agent] Queue message injected: sessionId=${sessionId}, uuid=${messageUuid}`
+      `[agent] Queue message enqueued: sessionId=${sessionId}, uuid=${messageUuid}`
     );
     return messageUuid;
   } catch (error) {
+    pendingUserTurnCounts.set(
+      sessionId,
+      Math.max((pendingUserTurnCounts.get(sessionId) ?? 1) - 1, 0)
+    );
     uuids.delete(messageUuid);
     throw error;
   }
