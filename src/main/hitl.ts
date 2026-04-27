@@ -23,6 +23,7 @@ interface CanUseToolOptions {
 type PendingPermission = {
   resolve: (result: PermissionResult) => void;
   request: PermissionRequest;
+  sessionId: string;
 };
 
 type PendingAskUser = {
@@ -30,11 +31,17 @@ type PendingAskUser = {
   request: AskUserRequest;
 };
 
+interface SessionWhitelist {
+  allowedTools: Set<string>;
+  allowedBashCommands: Set<string>;
+}
+
 type JsonRecord = Record<string, unknown>;
 type AgentEventForwarder = (event: AgentStreamEvent) => void;
 
 const pendingPermissions = new Map<string, PendingPermission>();
 const pendingAskUsers = new Map<string, PendingAskUser>();
+const sessionWhitelists = new Map<string, SessionWhitelist>();
 
 let currentPermissionMode: PermissionMode = "ask";
 
@@ -84,6 +91,125 @@ function summarizeToolInput(input: Record<string, unknown>) {
     keys: Object.keys(input),
     preview: stringifyContent(input).slice(0, 300),
   };
+}
+
+function extractBaseCommand(input: Record<string, unknown>): string | null {
+  if (typeof input.command !== "string") {
+    return null;
+  }
+
+  const words = input.command.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return null;
+  }
+
+  return words.slice(0, 2).join(" ");
+}
+
+function isDangerousCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return [
+    /(^|[\s;&|])sudo(\s|$)/,
+    /\brm\s+-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\/(?:\s|$|[*;&|])/,
+    /\bdd\b[\s\S]*\bof=/,
+    /\bmkfs(?:\.[A-Za-z0-9_-]+)?\b/,
+    />{1,2}\s*\/dev\//,
+  ].some((pattern) => pattern.test(trimmed));
+}
+
+function getSessionWhitelist(sessionId: string): SessionWhitelist {
+  let whitelist = sessionWhitelists.get(sessionId);
+  if (!whitelist) {
+    whitelist = {
+      allowedTools: new Set<string>(),
+      allowedBashCommands: new Set<string>(),
+    };
+    sessionWhitelists.set(sessionId, whitelist);
+  }
+  return whitelist;
+}
+
+function isWhitelisted(
+  sessionId: string,
+  toolName: string,
+  input: Record<string, unknown>
+): boolean {
+  const whitelist = sessionWhitelists.get(sessionId);
+  if (!whitelist) {
+    return false;
+  }
+
+  if (toolName !== "Bash") {
+    return whitelist.allowedTools.has(toolName);
+  }
+
+  const command = typeof input.command === "string" ? input.command : "";
+  if (isDangerousCommand(command)) {
+    console.warn(
+      "[hitl] Refusing whitelisted Bash auto-allow for dangerous command.",
+      {
+        sessionId,
+        command: command.slice(0, 200),
+      }
+    );
+    return false;
+  }
+
+  const baseCommand = extractBaseCommand(input);
+  return baseCommand !== null && whitelist.allowedBashCommands.has(baseCommand);
+}
+
+function addToWhitelist(
+  sessionId: string,
+  toolName: string,
+  input: Record<string, unknown>
+): void {
+  const whitelist = getSessionWhitelist(sessionId);
+
+  if (toolName === "Bash") {
+    const command = typeof input.command === "string" ? input.command : "";
+    if (isDangerousCommand(command)) {
+      console.warn("[hitl] Skipping dangerous Bash command whitelist entry.", {
+        sessionId,
+        command: command.slice(0, 200),
+      });
+      return;
+    }
+
+    const baseCommand = extractBaseCommand(input);
+    if (!baseCommand) {
+      console.warn(
+        "[hitl] Skipping Bash whitelist entry without a base command.",
+        {
+          sessionId,
+        }
+      );
+      return;
+    }
+
+    whitelist.allowedBashCommands.add(baseCommand);
+    console.log("[hitl] Added Bash command to session whitelist.", {
+      sessionId,
+      baseCommand,
+    });
+    return;
+  }
+
+  whitelist.allowedTools.add(toolName);
+  console.log("[hitl] Added tool to session whitelist.", {
+    sessionId,
+    toolName,
+  });
+}
+
+export function clearSessionWhitelist(sessionId: string): void {
+  if (sessionWhitelists.delete(sessionId)) {
+    console.log("[hitl] Cleared session whitelist.", { sessionId });
+  }
 }
 
 function isSafeBashCommand(command: string): boolean {
@@ -168,7 +294,10 @@ export function setPermissionMode(mode: PermissionMode) {
   currentPermissionMode = mode;
 }
 
-export function createCanUseTool(onEvent: AgentEventForwarder) {
+export function createCanUseTool(
+  onEvent: AgentEventForwarder,
+  sessionId: string
+) {
   return async (
     toolName: string,
     input: Record<string, unknown>,
@@ -184,6 +313,7 @@ export function createCanUseTool(onEvent: AgentEventForwarder) {
       permissionMode: currentPermissionMode,
       toolUseID: options.toolUseID,
       agentID: options.agentID ?? null,
+      sessionId,
       input: summarizeToolInput(input),
     });
 
@@ -245,6 +375,15 @@ export function createCanUseTool(onEvent: AgentEventForwarder) {
       return allow();
     }
 
+    if (isWhitelisted(sessionId, toolName, input)) {
+      console.log("[hitl] Auto-allow whitelisted tool.", {
+        toolName,
+        toolUseID: options.toolUseID,
+        sessionId,
+      });
+      return allow();
+    }
+
     if (currentPermissionMode === "yolo") {
       console.log("[hitl] Auto-allow because permission mode is yolo.", {
         toolName,
@@ -286,7 +425,7 @@ export function createCanUseTool(onEvent: AgentEventForwarder) {
     onEvent({ type: "permission_request", request });
 
     return new Promise<PermissionResult>((resolve) => {
-      pendingPermissions.set(requestId, { resolve, request });
+      pendingPermissions.set(requestId, { resolve, request, sessionId });
 
       const handleAbort = () => {
         console.warn("[hitl] Permission request aborted.", {
@@ -313,7 +452,7 @@ export function createCanUseTool(onEvent: AgentEventForwarder) {
 export function respondToPermission(
   requestId: string,
   behavior: "allow" | "deny",
-  _alwaysAllow: boolean,
+  alwaysAllow: boolean,
   userMessage?: string
 ) {
   const pending = pendingPermissions.get(requestId);
@@ -329,11 +468,22 @@ export function respondToPermission(
     requestId,
     toolName: pending.request.toolName,
     behavior,
+    alwaysAllow,
     hasUserMessage: Boolean(userMessage?.trim()),
   });
 
   if (behavior === "allow") {
-    pending.resolve({ behavior: "allow", updatedInput: pending.request.toolInput });
+    if (alwaysAllow) {
+      addToWhitelist(
+        pending.sessionId,
+        pending.request.toolName,
+        pending.request.toolInput
+      );
+    }
+    pending.resolve({
+      behavior: "allow",
+      updatedInput: pending.request.toolInput,
+    });
   } else {
     const baseMsg = "用户拒绝了此操作";
     const message = userMessage ? `${baseMsg}：${userMessage}` : baseMsg;

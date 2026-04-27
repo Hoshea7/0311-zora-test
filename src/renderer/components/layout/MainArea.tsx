@@ -3,6 +3,7 @@ import {
   clearDraftAttachmentsAtom,
   draftAttachmentsAtom,
   startConversationAtom,
+  queueConversationAtom,
   failTurnAtom,
   draftAtom,
   setSessionRunningAtom,
@@ -36,6 +37,7 @@ import { AskUserBanner } from "../chat/AskUserBanner";
 
 export function MainArea() {
   const startConversation = useSetAtom(startConversationAtom);
+  const queueConversation = useSetAtom(queueConversationAtom);
   const failTurn = useSetAtom(failTurnAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const clearAttachments = useSetAtom(clearDraftAttachmentsAtom);
@@ -185,6 +187,25 @@ export function MainArea() {
     }
   };
 
+  const handleQueueMessage = async () => {
+    const text = draft.trim();
+    const sessionId = currentSessionId;
+
+    if (!text || !sessionId) {
+      return;
+    }
+
+    queueConversation(sessionId, text);
+    touchSession(sessionId);
+    setDraft("");
+
+    try {
+      await window.zora.queueMessage(sessionId, text, currentWorkspaceId);
+    } catch (error) {
+      console.error("[chat] Queue message failed:", error);
+    }
+  };
+
   return (
     <section className="flex h-full flex-col overflow-hidden bg-white">
       <ChatHeader />
@@ -197,7 +218,11 @@ export function MainArea() {
         <div className="mx-auto w-full max-w-[920px]">
           <PermissionBanner />
           <AskUserBanner />
-          <ChatInput onSubmit={handleSubmit} onStop={handleStop} />
+          <ChatInput
+            onSubmit={handleSubmit}
+            onQueueMessage={handleQueueMessage}
+            onStop={handleStop}
+          />
         </div>
       </footer>
     </section>

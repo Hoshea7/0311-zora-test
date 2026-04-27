@@ -174,6 +174,7 @@ export async function runProductivitySession({
     onEvent: forwardEvent,
     isFirstTurn: !existingSDKSessionId && !shouldRecoverFromTranscript,
     sessionId: existingSDKSessionId,
+    localSessionId: sessionId,
     providerId,
     selectedModelId,
   });
@@ -213,6 +214,7 @@ export async function runProductivitySession({
       onEvent: forwardEvent,
       isFirstTurn: false,
       sessionId: undefined,
+      localSessionId: sessionId,
       providerId,
       selectedModelId,
     });

@@ -159,10 +159,11 @@ async function buildAttachmentFromBrowserFile(
 
 export interface ChatInputProps {
   onSubmit: () => void;
+  onQueueMessage: () => void;
   onStop: () => void;
 }
 
-export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
+export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) {
   const [draft, setDraft] = useAtom(draftAtom);
   const isRunning = useAtomValue(isRunningAtom);
   const currentRunSource = useAtomValue(currentSessionRunSourceAtom);
@@ -182,7 +183,6 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   const dragDepthRef = useRef(0);
   const dropNoticeTimerRef = useRef<number | null>(null);
   const textareaScrollTimerRef = useRef<number | null>(null);
-  const [showToast, setShowToast] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isTextareaScrolling, setIsTextareaScrolling] = useState(false);
   const [dropNotice, setDropNotice] = useState<string | null>(null);
@@ -212,6 +212,15 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   const canSubmit =
     (draft.trim().length > 0 || attachments.length > 0) &&
     !isMissingLockedProvider;
+  const canQueueMessage =
+    draft.trim().length > 0 && !isMissingLockedProvider && !isFeishuRunning;
+  const showQueueButton = isRunning && canQueueMessage;
+  const sendButtonDisabled = isRunning ? !canQueueMessage : !canSubmit;
+  const sendButtonTitle = isRunning
+    ? "发送追加消息"
+    : isMissingLockedProvider
+      ? "此会话绑定的 Provider 已被删除，请创建新会话"
+      : "发送";
   const shouldShowModelSelector =
     !isMissingLockedProvider && (hasEnabledProviders || isLocked);
 
@@ -263,9 +272,8 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
       event.preventDefault();
       if (!isRunning && canSubmit) {
         onSubmit();
-      } else if (isRunning) {
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 2000);
+      } else if (isRunning && canQueueMessage) {
+        onQueueMessage();
       }
     }
   };
@@ -452,11 +460,6 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
   return (
     <div className="relative">
       <div className="absolute -top-12 left-0 right-0 flex flex-col items-center gap-2 pointer-events-none z-50">
-        {showToast && (
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 bg-stone-800 text-white text-xs px-3 py-1.5 rounded-md shadow-lg">
-            先停止对话才能发送消息
-          </div>
-        )}
         {dropNotice && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 bg-amber-50 text-amber-800 border border-amber-200 text-xs px-4 py-2 rounded-xl shadow-lg max-w-[90%] text-center leading-relaxed backdrop-blur-sm bg-amber-50/95">
             {dropNotice}
@@ -622,7 +625,7 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {isRunning ? (
+            {isRunning && !showQueueButton ? (
               <Button
                 variant="primary"
                 onClick={onStop}
@@ -636,14 +639,10 @@ export function ChatInput({ onSubmit, onStop }: ChatInputProps) {
             ) : (
               <Button
                 variant="primary"
-                onClick={onSubmit}
-                disabled={!canSubmit}
+                onClick={isRunning ? onQueueMessage : onSubmit}
+                disabled={sendButtonDisabled}
                 className="w-8 h-8 p-0 rounded-full shadow-sm flex items-center justify-center cursor-pointer"
-                title={
-                  isMissingLockedProvider
-                    ? "此会话绑定的 Provider 已被删除，请创建新会话"
-                    : "发送"
-                }
+                title={sendButtonTitle}
               >
                 <svg className="w-4 h-4 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

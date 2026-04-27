@@ -1,4 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
 import type {
   AgentRunInfo,
   AgentRunSource,
@@ -39,6 +40,19 @@ type ActiveAgentRun = {
 };
 
 const activeAgentRuns = new Map<string, ActiveAgentRun>();
+
+/** 活跃的 SDK Query 对象映射，供 streamInput() 使用 */
+const activeQueries = new Map<string, any>();
+
+/** Query 就绪同步屏障 —— 在 SDK query 对象创建前缓冲队列消息 */
+const queryReadyPromises = new Map<string, Promise<void>>();
+const queryReadyResolvers = new Map<string, () => void>();
+
+/** 队列消息 UUID 集合（防重） */
+const queuedMessageUuids = new Map<string, Set<string>>();
+
+/** 就绪等待超时 */
+const QUERY_READY_TIMEOUT_MS = 30_000;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null;
@@ -426,12 +440,53 @@ export async function runAgentWithProfile(
 
   await ensureZoraDir();
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const prompt =
+  const userContent =
     attachments && attachments.length > 0
       ? buildMultimodalPrompt(profile.prompt, attachments)
       : profile.prompt;
 
-  const response = query({ prompt, options: profile.options as any });
+  const readyPromise = new Promise<void>((resolve) => {
+    queryReadyResolvers.set(sessionId, resolve);
+  });
+  queryReadyPromises.set(sessionId, readyPromise);
+
+  async function* initialPromptStream() {
+    if (typeof userContent === "string") {
+      yield {
+        type: "user" as const,
+        session_id: sessionId,
+        message: { role: "user" as const, content: userContent },
+        parent_tool_use_id: null,
+      };
+      return;
+    }
+
+    for await (const message of userContent) {
+      yield {
+        ...message,
+        session_id: sessionId,
+      };
+    }
+  }
+
+  let response;
+  try {
+    response = query({
+      prompt: initialPromptStream(),
+      options: profile.options as any,
+    });
+  } catch (error) {
+    queryReadyPromises.delete(sessionId);
+    queryReadyResolvers.delete(sessionId);
+    throw error;
+  }
+
+  activeQueries.set(sessionId, response);
+  const resolveReady = queryReadyResolvers.get(sessionId);
+  if (resolveReady) {
+    resolveReady();
+    queryReadyResolvers.delete(sessionId);
+  }
 
   const run: ActiveAgentRun = {
     query: response,
@@ -502,9 +557,89 @@ export async function runAgentWithProfile(
       // Ignore close errors while tearing down a finished or aborted run.
     }
     clearAllPending();
+    activeQueries.delete(sessionId);
+    queryReadyPromises.delete(sessionId);
+    queryReadyResolvers.delete(sessionId);
+    queuedMessageUuids.delete(sessionId);
     if (activeAgentRuns.get(sessionId) === run) {
       activeAgentRuns.delete(sessionId);
     }
+  }
+}
+
+export async function sendQueuedMessage(
+  sessionId: string,
+  text: string,
+  uuid?: string
+): Promise<string> {
+  if (!activeAgentRuns.has(sessionId)) {
+    throw new Error("会话未运行，无法追加消息");
+  }
+
+  const messageUuid = uuid || randomUUID();
+  const uuids = queuedMessageUuids.get(sessionId) ?? new Set<string>();
+  if (uuids.has(messageUuid)) {
+    console.log(
+      `[agent] Duplicate queued message ignored: sessionId=${sessionId}, uuid=${messageUuid}`
+    );
+    return messageUuid;
+  }
+
+  uuids.add(messageUuid);
+  queuedMessageUuids.set(sessionId, uuids);
+
+  const readyPromise = queryReadyPromises.get(sessionId);
+  if (readyPromise) {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error("等待 SDK 初始化超时")),
+        QUERY_READY_TIMEOUT_MS
+      );
+    });
+
+    try {
+      await Promise.race([readyPromise, timeout]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  const activeQuery = activeQueries.get(sessionId);
+  if (!activeQuery) {
+    uuids.delete(messageUuid);
+    throw new Error("无活跃查询可注入消息");
+  }
+
+  if (typeof activeQuery.streamInput !== "function") {
+    uuids.delete(messageUuid);
+    throw new Error("当前 SDK Query 不支持追加消息");
+  }
+
+  const sdkMessage = {
+    type: "user" as const,
+    session_id: sessionId,
+    message: { role: "user" as const, content: text },
+    parent_tool_use_id: null,
+    priority: "now" as const,
+    uuid: messageUuid,
+  };
+
+  async function* singleMessage() {
+    yield sdkMessage;
+  }
+
+  try {
+    await activeQuery.streamInput(singleMessage());
+    console.log(
+      `[agent] Queue message injected: sessionId=${sessionId}, uuid=${messageUuid}`
+    );
+    return messageUuid;
+  } catch (error) {
+    uuids.delete(messageUuid);
+    throw error;
   }
 }
 

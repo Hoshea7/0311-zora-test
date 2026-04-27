@@ -272,6 +272,12 @@ export interface ZoraApi {
     workspaceId?: string,
     attachments?: FileAttachment[]
   ) => Promise<void>;
+  /** 在 Agent 运行期间追加用户消息 */
+  queueMessage: (
+    sessionId: string,
+    text: string,
+    workspaceId?: string
+  ) => Promise<string>;
   isAgentRunning: (sessionId: string) => Promise<boolean>;
   getAgentRunInfo: (sessionId: string) => Promise<AgentRunInfo>;
   listSkills: () => Promise<SkillMeta[]>;

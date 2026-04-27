@@ -23,9 +23,11 @@ import {
   getAgentRunInfo,
   isAgentRunningForSession,
   runAgentWithProfile,
+  sendQueuedMessage,
   stopAgentForSession,
 } from "./agent";
 import {
+  clearSessionWhitelist,
   respondToAskUser,
   respondToPermission,
   setPermissionMode,
@@ -1194,6 +1196,7 @@ app.whenReady().then(async () => {
     }
 
     await deleteSession(sessionId, resolveWorkspaceId(workspaceId));
+    clearSessionWhitelist(sessionId);
     console.log(`[index] Session deleted: ${sessionId}`);
   });
 
@@ -1430,6 +1433,40 @@ app.whenReady().then(async () => {
       }).catch((err) => {
         console.error(`[index] Agent run failed for session ${sessionId}:`, err);
       });
+    }
+  );
+
+  ipcMain.handle(
+    "agent:queue-message",
+    async (_event, sessionId: unknown, text: unknown, workspaceId: unknown) => {
+      if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+        throw new Error("A valid sessionId is required.");
+      }
+      if (typeof text !== "string" || text.trim().length === 0) {
+        throw new Error("A non-empty text is required.");
+      }
+
+      const targetSessionId = sessionId.trim();
+      const trimmedText = text.trim();
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+      const messageUuid = await sendQueuedMessage(targetSessionId, trimmedText);
+
+      await appendMessageRecord(
+        targetSessionId,
+        {
+          kind: "user",
+          message: {
+            id: `user-${messageUuid}`,
+            role: "user",
+            text: trimmedText,
+            timestamp: Date.now(),
+          },
+        },
+        targetWorkspaceId
+      );
+      memoryAgent.scheduleProcessing(targetSessionId, targetWorkspaceId);
+
+      return messageUuid;
     }
   );
 

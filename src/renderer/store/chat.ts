@@ -322,6 +322,10 @@ function isAssistantTurnMessage(
 function getActiveTurn(messages: ConversationMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    if (message.role === "user") {
+      return null;
+    }
+
     if (isAssistantTurnMessage(message) && message.turn.status === "streaming") {
       return message;
     }
@@ -336,6 +340,10 @@ function updateActiveTurn(
 ) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    if (message.role === "user") {
+      return messages;
+    }
+
     if (!isAssistantTurnMessage(message) || message.turn.status !== "streaming") {
       continue;
     }
@@ -429,6 +437,33 @@ function completePendingThinkingSteps(turn: AssistantTurn, completedAt: number) 
         processSteps,
       }
     : turn;
+}
+
+function completeStreamingTurnsForQueue(
+  messages: ConversationMessage[],
+  completedAt: number
+): ConversationMessage[] {
+  let changed = false;
+
+  const nextMessages = messages.map((message) => {
+    if (!isAssistantTurnMessage(message) || message.turn.status !== "streaming") {
+      return message;
+    }
+
+    changed = true;
+    const nextTurn = completePendingThinkingSteps(message.turn, completedAt);
+
+    return {
+      ...message,
+      turn: {
+        ...nextTurn,
+        status: "done" as const,
+        completedAt: nextTurn.completedAt ?? completedAt,
+      },
+    };
+  });
+
+  return changed ? nextMessages : messages;
 }
 
 function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResult: string) {
@@ -786,6 +821,24 @@ export const completeTurnAtom = atom<null, [string, "done" | "stopped"], void>(
         }
       )
     );
+  }
+);
+
+export const queueConversationAtom = atom<null, [string, string], void>(
+  null,
+  (_get, set, sessionId: string, prompt: string) => {
+    const timestamp = Date.now();
+
+    set(setSessionMessagesAtom, sessionId, (current) => [
+      ...completeStreamingTurnsForQueue(current, timestamp),
+      {
+        id: createId("user"),
+        role: "user",
+        text: prompt.length > 0 ? prompt : undefined,
+        timestamp,
+      },
+      createAssistantTurnMessage(timestamp),
+    ]);
   }
 );
 

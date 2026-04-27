@@ -32,7 +32,10 @@ export async function buildProductivityProfile(ctx: ProfileBuildContext): Promis
     strictMcpConfig: true,
     systemPrompt,
     permissionMode: "default",
-    canUseTool: createCanUseTool(ctx.onEvent) as QueryProfile["options"]["canUseTool"],
+    canUseTool: createCanUseTool(
+      ctx.onEvent,
+      ctx.localSessionId ?? "__default__"
+    ) as QueryProfile["options"]["canUseTool"],
   };
 
   if (ctx.sessionId) {

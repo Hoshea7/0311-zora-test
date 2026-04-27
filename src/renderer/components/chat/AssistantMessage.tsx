@@ -29,6 +29,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   const hasBody = bodySegments.length > 0;
   const copyContent = bodySegments.map((segment) => segment.text).join("\n\n");
 
+  if (!isStreaming && !hasProcess && !hasBody && !turn.error) {
+    return null;
+  }
+
   return (
     <article className="group mr-auto mt-8 w-full">
       <div className="mx-auto max-w-[820px] overflow-hidden">
