@@ -319,10 +319,18 @@ function isAssistantTurnMessage(
   return message.role === "assistant" && Boolean(message.turn);
 }
 
+function isPendingQueuedUserMessage(message: ConversationMessage) {
+  return message.role === "user" && message.queueState === "pending";
+}
+
 function getActiveTurn(messages: ConversationMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role === "user") {
+      if (isPendingQueuedUserMessage(message)) {
+        continue;
+      }
+
       return null;
     }
 
@@ -341,6 +349,10 @@ function updateActiveTurn(
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role === "user") {
+      if (isPendingQueuedUserMessage(message)) {
+        continue;
+      }
+
       return messages;
     }
 
@@ -365,7 +377,14 @@ function updateActiveTurn(
 }
 
 function ensureActiveTurn(messages: ConversationMessage[]) {
-  return getActiveTurn(messages) ? messages : [...messages, createAssistantTurnMessage()];
+  if (getActiveTurn(messages)) {
+    return messages;
+  }
+
+  const activatedQueuedMessages = activatePendingQueuedConversation(messages, Date.now());
+  return activatedQueuedMessages !== messages
+    ? activatedQueuedMessages
+    : [...messages, createAssistantTurnMessage()];
 }
 
 function updateOrCreateActiveTurn(
@@ -439,31 +458,69 @@ function completePendingThinkingSteps(turn: AssistantTurn, completedAt: number) 
     : turn;
 }
 
-function completeStreamingTurnsForQueue(
+function activatePendingQueuedConversation(
   messages: ConversationMessage[],
-  completedAt: number
+  timestamp: number,
+  queueUuid?: string
 ): ConversationMessage[] {
-  let changed = false;
+  let firstPendingIndex = -1;
+  let lastPendingIndex = -1;
+  let hasMatchingQueueUuid = queueUuid === undefined;
 
-  const nextMessages = messages.map((message) => {
-    if (!isAssistantTurnMessage(message) || message.turn.status !== "streaming") {
-      return message;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (isPendingQueuedUserMessage(message)) {
+      firstPendingIndex = index;
+      if (lastPendingIndex === -1) {
+        lastPendingIndex = index;
+      }
+      if (queueUuid !== undefined && message.queueUuid === queueUuid) {
+        hasMatchingQueueUuid = true;
+      }
+      continue;
     }
 
-    changed = true;
-    const nextTurn = completePendingThinkingSteps(message.turn, completedAt);
+    if (lastPendingIndex !== -1) {
+      break;
+    }
+  }
 
-    return {
-      ...message,
-      turn: {
-        ...nextTurn,
-        status: "done" as const,
-        completedAt: nextTurn.completedAt ?? completedAt,
-      },
-    };
+  if (firstPendingIndex === -1 || lastPendingIndex === -1 || !hasMatchingQueueUuid) {
+    return messages;
+  }
+
+  const activatedMessages = messages.map((message, index) => {
+    if (index < firstPendingIndex && isAssistantTurnMessage(message)) {
+      if (message.turn.status !== "streaming") {
+        return message;
+      }
+
+      const completedTurn = completePendingThinkingSteps(message.turn, timestamp);
+      return {
+        ...message,
+        turn: {
+          ...completedTurn,
+          status: "done" as const,
+          completedAt: completedTurn.completedAt ?? timestamp,
+        },
+      };
+    }
+
+    if (
+      index >= firstPendingIndex &&
+      index <= lastPendingIndex &&
+      isPendingQueuedUserMessage(message)
+    ) {
+      return {
+        ...message,
+        queueState: "accepted" as const,
+      };
+    }
+
+    return message;
   });
 
-  return changed ? nextMessages : messages;
+  return [...activatedMessages, createAssistantTurnMessage(timestamp)];
 }
 
 function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResult: string) {
@@ -824,21 +881,38 @@ export const completeTurnAtom = atom<null, [string, "done" | "stopped"], void>(
   }
 );
 
-export const queueConversationAtom = atom<null, [string, string], void>(
+export const queueConversationAtom = atom<null, [string, string, string?], void>(
   null,
-  (_get, set, sessionId: string, prompt: string) => {
+  (_get, set, sessionId: string, prompt: string, queueUuid?: string) => {
     const timestamp = Date.now();
 
     set(setSessionMessagesAtom, sessionId, (current) => [
-      ...completeStreamingTurnsForQueue(current, timestamp),
+      ...current,
       {
-        id: createId("user"),
+        id: queueUuid ? `user-${queueUuid}` : createId("user"),
         role: "user",
         text: prompt.length > 0 ? prompt : undefined,
+        queueState: "pending",
+        queueUuid,
         timestamp,
       },
-      createAssistantTurnMessage(timestamp),
     ]);
+  }
+);
+
+export const activateQueuedConversationAtom = atom<null, [string, string?], boolean>(
+  null,
+  (_get, set, sessionId: string, queueUuid?: string) => {
+    let activated = false;
+    const timestamp = Date.now();
+
+    set(setSessionMessagesAtom, sessionId, (current) => {
+      const next = activatePendingQueuedConversation(current, timestamp, queueUuid);
+      activated = next !== current;
+      return next;
+    });
+
+    return activated;
   }
 );
 

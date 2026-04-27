@@ -63,8 +63,11 @@ export function SessionList() {
   const renderSession = (session: Session) => (
     <div
       key={session.id}
+      role="button"
+      tabIndex={renamingId === session.id ? -1 : 0}
       className={cn(
-        "group relative flex items-center gap-2.5 rounded-[16px] border px-3 py-2.5 transition-all duration-200",
+        "group relative flex cursor-pointer items-center gap-2.5 rounded-[16px] border px-3 py-2.5 transition-all duration-200",
+        "outline-none focus:outline-none focus:ring-0 focus-visible:outline-none",
         currentSessionId === session.id && !isSettingsOpen
           ? cn(
               "border-stone-200/80 bg-white shadow-[0_2px_10px_rgba(28,25,23,0.05)]"
@@ -78,28 +81,26 @@ export function SessionList() {
       onMouseLeave={() =>
         setHoveredId((current) => (current === session.id ? null : current))
       }
+      onClick={() => {
+        if (renamingId !== session.id) {
+          handleSwitchSession(session.id);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (renamingId === session.id) {
+          return;
+        }
+
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleSwitchSession(session.id);
+        }
+      }}
     >
       <div
-        role="button"
-        tabIndex={0}
-        onClick={() => {
-          if (renamingId !== session.id) {
-            handleSwitchSession(session.id);
-          }
-        }}
-        onKeyDown={(event) => {
-          if (renamingId === session.id) {
-            return;
-          }
-
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            handleSwitchSession(session.id);
-          }
-        }}
         className={cn(
-          "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left",
-          "rounded-xl outline-none focus:outline-none focus:ring-0 focus-visible:outline-none"
+          "flex min-w-0 flex-1 items-center gap-2.5 text-left",
+          "rounded-xl"
         )}
       >
         <div className="flex h-4 w-4 items-center justify-center">

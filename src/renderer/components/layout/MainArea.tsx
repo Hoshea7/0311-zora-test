@@ -35,6 +35,13 @@ import { ChatInput } from "../chat/ChatInput";
 import { PermissionBanner } from "../chat/PermissionBanner";
 import { AskUserBanner } from "../chat/AskUserBanner";
 
+function createQueueMessageUuid() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `queue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
+}
+
 export function MainArea() {
   const startConversation = useSetAtom(startConversationAtom);
   const queueConversation = useSetAtom(queueConversationAtom);
@@ -195,12 +202,14 @@ export function MainArea() {
       return;
     }
 
-    queueConversation(sessionId, text);
+    const messageUuid = createQueueMessageUuid();
+
+    queueConversation(sessionId, text, messageUuid);
     touchSession(sessionId);
     setDraft("");
 
     try {
-      await window.zora.queueMessage(sessionId, text, currentWorkspaceId);
+      await window.zora.queueMessage(sessionId, text, currentWorkspaceId, messageUuid);
     } catch (error) {
       console.error("[chat] Queue message failed:", error);
     }

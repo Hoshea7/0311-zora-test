@@ -30,6 +30,9 @@ export async function buildProductivityProfile(ctx: ProfileBuildContext): Promis
     ],
     mcpServers,
     strictMcpConfig: true,
+    extraArgs: {
+      "replay-user-messages": null,
+    },
     systemPrompt,
     permissionMode: "default",
     canUseTool: createCanUseTool(

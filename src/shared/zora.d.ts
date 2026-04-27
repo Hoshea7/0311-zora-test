@@ -118,6 +118,8 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   text?: string;
   attachments?: FileAttachment[];
+  queueState?: "pending" | "accepted";
+  queueUuid?: string;
   turn?: AssistantTurn;
   timestamp: number;
 }
@@ -276,7 +278,8 @@ export interface ZoraApi {
   queueMessage: (
     sessionId: string,
     text: string,
-    workspaceId?: string
+    workspaceId?: string,
+    uuid?: string
   ) => Promise<string>;
   isAgentRunning: (sessionId: string) => Promise<boolean>;
   getAgentRunInfo: (sessionId: string) => Promise<AgentRunInfo>;

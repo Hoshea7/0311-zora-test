@@ -23,6 +23,7 @@ export interface QueryProfile {
     plugins?: SdkPluginConfig[];
     mcpServers?: Record<string, McpServerConfig>;
     strictMcpConfig?: boolean;
+    extraArgs?: Record<string, string | null>;
     systemPrompt: {
       type: "preset";
       preset: "claude_code";

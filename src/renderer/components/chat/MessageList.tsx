@@ -37,7 +37,10 @@ export function MessageList() {
   const rafIdRef = useRef(0);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const lastMessage = messages[messages.length - 1];
-  const shouldShowPendingAssistantRow = isRunning && lastMessage?.role !== "assistant";
+  const shouldShowPendingAssistantRow =
+    isRunning &&
+    lastMessage?.role !== "assistant" &&
+    lastMessage?.queueState !== "pending";
 
   useEffect(() => {
     if (previousSessionIdRef.current !== currentSessionId) {

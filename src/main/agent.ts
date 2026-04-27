@@ -23,6 +23,16 @@ type JsonRecord = Record<string, unknown>;
 type SdkMessageUuid = NonNullable<SDKUserMessage["uuid"]>;
 export type AgentEventForwarder = (event: AgentStreamEvent) => void;
 
+export interface QueuedAgentMessage {
+  uuid: string;
+  text: string;
+}
+
+export interface AgentRunResult {
+  lateQueuedMessages: QueuedAgentMessage[];
+  sdkSessionId?: string;
+}
+
 export class MissingSdkSessionError extends Error {
   readonly sdkSessionId?: string;
 
@@ -58,8 +68,11 @@ const queryReadyResolvers = new Map<string, () => void>();
 /** 队列消息 UUID 集合（防重） */
 const queuedMessageUuids = new Map<string, Set<string>>();
 
-/** 当前 run 尚未收到 result 的用户输入数量（初始消息 + 运行中追加消息） */
-const pendingUserTurnCounts = new Map<string, number>();
+/** 尚未收到 SDK replay ack 的队列消息 UUID */
+const pendingQueuedMessageUuids = new Map<string, Set<string>>();
+
+/** 队列消息正文，用于 result 到达前仍未被 SDK replay 的 late queue 补跑 */
+const queuedMessagePayloads = new Map<string, Map<string, QueuedAgentMessage>>();
 
 /** 就绪等待超时 */
 const QUERY_READY_TIMEOUT_MS = 30_000;
@@ -220,6 +233,32 @@ function extractAssistantContent(message: unknown): string {
       }
 
       return stringifyContent(block);
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractUserContent(message: unknown): string {
+  if (!isRecord(message)) {
+    return stringifyContent(message);
+  }
+
+  const content = message.content;
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return stringifyContent(message);
+  }
+
+  return content
+    .map((block) => {
+      if (!isRecord(block)) {
+        return "";
+      }
+
+      return block.type === "text" && typeof block.text === "string" ? block.text : "";
     })
     .filter(Boolean)
     .join("\n");
@@ -423,6 +462,21 @@ function logSdkMessage(
     return;
   }
 
+  if (message.type === "user") {
+    if (message.tool_use_result !== undefined) {
+      console.log(`${profilePrefix}[tool_result]`, stringifyContent(message.tool_use_result));
+      return;
+    }
+
+    const replay = "isReplay" in message && message.isReplay === true ? ":replay" : "";
+    const uuid = typeof message.uuid === "string" ? ` uuid=${message.uuid}` : "";
+    console.log(
+      `${profilePrefix}[user${replay}]${uuid}`,
+      truncateForLog(extractUserContent(message.message))
+    );
+    return;
+  }
+
   if (message.type === "system") {
     const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
 
@@ -474,7 +528,31 @@ function isAbortLikeError(error: unknown) {
   );
 }
 
-const AGENT_INTERRUPT_GRACE_MS = 1500;
+function isExpectedStopError(error: unknown) {
+  return (
+    isAbortLikeError(error) ||
+    (error instanceof Error &&
+      /query closed|closed before response|operation aborted/i.test(error.message))
+  );
+}
+
+function startInterrupt(run: ActiveAgentRun, sessionId: string): void {
+  let interruptPromise: Promise<void>;
+  try {
+    interruptPromise = run.query.interrupt();
+  } catch (error) {
+    interruptPromise = Promise.reject(error);
+  }
+
+  void interruptPromise.catch((error) => {
+    if (!isExpectedStopError(error)) {
+      console.warn(
+        `${getProfileLogPrefix(run.profileName)} Failed to interrupt agent for session ${sessionId}.`,
+        error
+      );
+    }
+  });
+}
 
 function getMissingSdkSessionError(message: SDKMessage): MissingSdkSessionError | null {
   if (
@@ -520,7 +598,7 @@ export async function runAgentWithProfile(
   attachments?: FileAttachment[],
   workspaceId = "default",
   source: AgentRunSource = "desktop"
-): Promise<void> {
+): Promise<AgentRunResult> {
   if (activeAgentRuns.has(sessionId)) {
     throw new Error(`An agent is already running for session ${sessionId}.`);
   }
@@ -546,7 +624,6 @@ export async function runAgentWithProfile(
     queryReadyResolvers.set(sessionId, resolve);
   });
   queryReadyPromises.set(sessionId, readyPromise);
-  pendingUserTurnCounts.set(sessionId, 1);
 
   const enqueueInitialPrompt = async () => {
     if (typeof userContent === "string") {
@@ -580,7 +657,8 @@ export async function runAgentWithProfile(
     activeInputStreams.delete(sessionId);
     queryReadyPromises.delete(sessionId);
     queryReadyResolvers.delete(sessionId);
-    pendingUserTurnCounts.delete(sessionId);
+    pendingQueuedMessageUuids.delete(sessionId);
+    queuedMessagePayloads.delete(sessionId);
     throw error;
   }
 
@@ -601,14 +679,27 @@ export async function runAgentWithProfile(
   emitAgentStatus("started", onEvent, source);
 
   let missingSdkSessionError: MissingSdkSessionError | null = null;
+  let latestSdkSessionId: string | undefined;
+  const lateQueuedMessages: QueuedAgentMessage[] = [];
 
   try {
     for await (const message of response) {
       let shouldFinishAfterResult = false;
 
+      if (
+        message.type === "user" &&
+        "isReplay" in message &&
+        message.isReplay === true &&
+        typeof message.uuid === "string"
+      ) {
+        pendingQueuedMessageUuids.get(sessionId)?.delete(message.uuid);
+        queuedMessagePayloads.get(sessionId)?.delete(message.uuid);
+      }
+
       if (message.type === "system" && message.subtype === "init") {
         const sid = message.session_id;
         if (typeof sid === "string" && sid.length > 0) {
+          latestSdkSessionId = sid;
           if (sessionId === "__awakening__") {
             setSessionId("awakening", sid);
           } else {
@@ -620,6 +711,7 @@ export async function runAgentWithProfile(
       if (message.type === "result") {
         const sid = message.session_id;
         if (typeof sid === "string" && sid.length > 0) {
+          latestSdkSessionId = sid;
           if (sessionId === "__awakening__") {
             setSessionId("awakening", sid);
           } else {
@@ -632,12 +724,22 @@ export async function runAgentWithProfile(
           missingSdkSessionError = detectedMissingSession;
         }
 
-        const remainingUserTurns = Math.max(
-          (pendingUserTurnCounts.get(sessionId) ?? 1) - 1,
-          0
-        );
-        pendingUserTurnCounts.set(sessionId, remainingUserTurns);
-        shouldFinishAfterResult = remainingUserTurns === 0;
+        const pendingQueuedUuids = pendingQueuedMessageUuids.get(sessionId);
+        if (pendingQueuedUuids && pendingQueuedUuids.size > 0) {
+          const payloads = queuedMessagePayloads.get(sessionId);
+          for (const uuid of pendingQueuedUuids) {
+            const queuedMessage = payloads?.get(uuid);
+            if (queuedMessage) {
+              lateQueuedMessages.push(queuedMessage);
+            }
+          }
+
+          console.warn(
+            `${logPrefix} Result arrived with ${pendingQueuedUuids.size} queued message(s) without replay ack; scheduling a follow-up run.`
+          );
+          pendingQueuedUuids.clear();
+        }
+        shouldFinishAfterResult = true;
       }
 
       logSdkMessage(message, profile.name, onEvent);
@@ -679,11 +781,17 @@ export async function runAgentWithProfile(
     queryReadyPromises.delete(sessionId);
     queryReadyResolvers.delete(sessionId);
     queuedMessageUuids.delete(sessionId);
-    pendingUserTurnCounts.delete(sessionId);
+    pendingQueuedMessageUuids.delete(sessionId);
+    queuedMessagePayloads.delete(sessionId);
     if (activeAgentRuns.get(sessionId) === run) {
       activeAgentRuns.delete(sessionId);
     }
   }
+
+  return {
+    lateQueuedMessages,
+    sdkSessionId: latestSdkSessionId,
+  };
 }
 
 export async function sendQueuedMessage(
@@ -706,6 +814,12 @@ export async function sendQueuedMessage(
 
   uuids.add(messageUuid);
   queuedMessageUuids.set(sessionId, uuids);
+  const pendingUuids = pendingQueuedMessageUuids.get(sessionId) ?? new Set<string>();
+  pendingUuids.add(messageUuid);
+  pendingQueuedMessageUuids.set(sessionId, pendingUuids);
+  const payloads = queuedMessagePayloads.get(sessionId) ?? new Map<string, QueuedAgentMessage>();
+  payloads.set(messageUuid, { uuid: messageUuid, text });
+  queuedMessagePayloads.set(sessionId, payloads);
 
   const readyPromise = queryReadyPromises.get(sessionId);
   if (readyPromise) {
@@ -728,12 +842,16 @@ export async function sendQueuedMessage(
 
   if (!activeQueries.has(sessionId)) {
     uuids.delete(messageUuid);
+    pendingUuids.delete(messageUuid);
+    payloads.delete(messageUuid);
     throw new Error("无活跃查询可注入消息");
   }
 
   const inputStream = activeInputStreams.get(sessionId);
   if (!inputStream) {
     uuids.delete(messageUuid);
+    pendingUuids.delete(messageUuid);
+    payloads.delete(messageUuid);
     throw new Error("无活跃输入流可注入消息");
   }
 
@@ -742,26 +860,20 @@ export async function sendQueuedMessage(
     session_id: sessionId,
     message: { role: "user" as const, content: text },
     parent_tool_use_id: null,
-    priority: "now" as const,
+    priority: "next" as const,
     uuid: messageUuid as SdkMessageUuid,
   };
 
   try {
-    pendingUserTurnCounts.set(
-      sessionId,
-      (pendingUserTurnCounts.get(sessionId) ?? 0) + 1
-    );
     inputStream.enqueue(sdkMessage);
     console.log(
-      `[agent] Queue message enqueued: sessionId=${sessionId}, uuid=${messageUuid}`
+      `[agent] Queue message enqueued: sessionId=${sessionId}, uuid=${messageUuid}, priority=next`
     );
     return messageUuid;
   } catch (error) {
-    pendingUserTurnCounts.set(
-      sessionId,
-      Math.max((pendingUserTurnCounts.get(sessionId) ?? 1) - 1, 0)
-    );
     uuids.delete(messageUuid);
+    pendingUuids.delete(messageUuid);
+    payloads.delete(messageUuid);
     throw error;
   }
 }
@@ -776,42 +888,14 @@ export async function stopAgentForSession(sessionId: string) {
   }
   run.stopping = true;
 
-  let interruptSettled = false;
-  const interruptPromise = Promise.resolve()
-    .then(() => run.query.interrupt())
-    .catch((error) => {
-      if (!isAbortLikeError(error)) {
-        console.warn(
-          `${getProfileLogPrefix(run.profileName)} Failed to interrupt agent for session ${sessionId}.`,
-          error
-        );
-      }
-    })
-    .finally(() => {
-      interruptSettled = true;
-    });
-
+  startInterrupt(run, sessionId);
+  activeInputStreams.get(sessionId)?.close();
   try {
-    await Promise.race([
-      interruptPromise,
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, AGENT_INTERRUPT_GRACE_MS);
-      }),
-    ]);
-
-    if (!interruptSettled) {
-      console.warn(
-        `${getProfileLogPrefix(run.profileName)} Interrupt timed out after ${AGENT_INTERRUPT_GRACE_MS}ms for session ${sessionId}; forcing close.`
-      );
-    }
-  } finally {
-    try {
-      run.query.close();
-    } catch (error) {
-      console.warn(
-        `${getProfileLogPrefix(run.profileName)} Failed to close agent for session ${sessionId}.`,
-        error
-      );
-    }
+    run.query.close();
+  } catch (error) {
+    console.warn(
+      `${getProfileLogPrefix(run.profileName)} Failed to close agent for session ${sessionId}.`,
+      error
+    );
   }
 }

@@ -1438,7 +1438,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     "agent:queue-message",
-    async (_event, sessionId: unknown, text: unknown, workspaceId: unknown) => {
+    async (_event, sessionId: unknown, text: unknown, workspaceId: unknown, uuid: unknown) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
       }
@@ -1449,7 +1449,9 @@ app.whenReady().then(async () => {
       const targetSessionId = sessionId.trim();
       const trimmedText = text.trim();
       const targetWorkspaceId = resolveWorkspaceId(workspaceId);
-      const messageUuid = await sendQueuedMessage(targetSessionId, trimmedText);
+      const requestedUuid =
+        typeof uuid === "string" && uuid.trim().length > 0 ? uuid.trim() : undefined;
+      const messageUuid = await sendQueuedMessage(targetSessionId, trimmedText, requestedUuid);
 
       await appendMessageRecord(
         targetSessionId,

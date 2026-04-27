@@ -5,7 +5,9 @@ import type {
   FileAttachment,
 } from "../shared/zora";
 import {
+  type AgentRunResult,
   MissingSdkSessionError,
+  type QueuedAgentMessage,
   runAgentWithProfile,
 } from "./agent";
 import { buildProductivityProfile } from "./query-profiles";
@@ -20,6 +22,7 @@ import { getWorkspacePath } from "./workspace-store";
 const RECOVERY_MAX_MESSAGES = 80;
 const RECOVERY_MAX_TRANSCRIPT_CHARS = 100_000;
 const RECOVERY_MAX_TOOL_IO_CHARS = 4_000;
+const LATE_QUEUE_FOLLOW_UP_MAX_RUNS = 20;
 
 export interface RunProductivitySessionParams {
   sessionId: string;
@@ -137,6 +140,16 @@ function applyPermissionMode(
   }
 }
 
+function buildLateQueuedPrompt(messages: QueuedAgentMessage[]): string {
+  if (messages.length === 1) {
+    return messages[0]?.text ?? "";
+  }
+
+  return messages
+    .map((message, index) => `Queued message ${index + 1}:\n${message.text}`)
+    .join("\n\n");
+}
+
 export async function runProductivitySession({
   sessionId,
   text,
@@ -180,8 +193,10 @@ export async function runProductivitySession({
   });
   applyPermissionMode(profile, permissionMode);
 
+  let runResult: AgentRunResult;
+
   try {
-    await runAgentWithProfile(
+    runResult = await runAgentWithProfile(
       sessionId,
       profile,
       forwardEvent,
@@ -220,11 +235,55 @@ export async function runProductivitySession({
     });
     applyPermissionMode(recoveredProfile, permissionMode);
 
-    await runAgentWithProfile(
+    runResult = await runAgentWithProfile(
       sessionId,
       recoveredProfile,
       forwardEvent,
       attachments,
+      workspaceId,
+      source
+    );
+  }
+
+  let followUpCount = 0;
+  while (runResult.lateQueuedMessages.length > 0) {
+    followUpCount += 1;
+    if (followUpCount > LATE_QUEUE_FOLLOW_UP_MAX_RUNS) {
+      console.warn(
+        `[productivity-runner] Stopped after ${LATE_QUEUE_FOLLOW_UP_MAX_RUNS} late queue follow-up run(s) for session ${sessionId}.`
+      );
+      break;
+    }
+
+    const followUpPrompt = buildLateQueuedPrompt(runResult.lateQueuedMessages);
+    if (!followUpPrompt.trim()) {
+      break;
+    }
+
+    const resumeSessionId =
+      runResult.sdkSessionId ?? await getSdkSessionId(sessionId, workspaceId);
+    console.log(
+      `[productivity-runner] Starting late queue follow-up run for session ${sessionId} with ${runResult.lateQueuedMessages.length} message(s).`
+    );
+
+    const followUpProfile = await buildProductivityProfile({
+      userPrompt: followUpPrompt,
+      cwd: workspacePath,
+      sdkRuntime,
+      onEvent: forwardEvent,
+      isFirstTurn: false,
+      sessionId: resumeSessionId,
+      localSessionId: sessionId,
+      providerId,
+      selectedModelId,
+    });
+    applyPermissionMode(followUpProfile, permissionMode);
+
+    runResult = await runAgentWithProfile(
+      sessionId,
+      followUpProfile,
+      forwardEvent,
+      undefined,
       workspaceId,
       source
     );
