@@ -14,3 +14,14 @@ logo-source*.png.*
 logo_source*.png
 logo_source*.png.*
 build/icon.iconset/
+
+# Test artifacts
+tests/.artifacts/
+test-report.md
+coverage/
+playwright-report/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
