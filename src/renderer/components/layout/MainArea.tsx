@@ -2,6 +2,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   clearDraftAttachmentsAtom,
   draftAttachmentsAtom,
+  messagesAtom,
   startConversationAtom,
   queueConversationAtom,
   failTurnAtom,
@@ -34,6 +35,7 @@ import { MessageList } from "../chat/MessageList";
 import { ChatInput } from "../chat/ChatInput";
 import { PermissionBanner } from "../chat/PermissionBanner";
 import { AskUserBanner } from "../chat/AskUserBanner";
+import { EmptyState } from "../chat/EmptyState";
 
 function createQueueMessageUuid() {
   return (
@@ -49,6 +51,7 @@ export function MainArea() {
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
   const clearAttachments = useSetAtom(clearDraftAttachmentsAtom);
   const [draft, setDraft] = useAtom(draftAtom);
+  const messages = useAtomValue(messagesAtom);
   const attachments = useAtomValue(draftAttachmentsAtom);
   const providers = useAtomValue(providersAtom);
   const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
@@ -62,6 +65,7 @@ export function MainArea() {
   const setDraftSelectedProviderId = useSetAtom(setDraftSelectedProviderIdAtom);
   const setDraftSelectedModelId = useSetAtom(setDraftSelectedModelIdAtom);
   const updateSessionMetaInState = useSetAtom(updateSessionMetaInStateAtom);
+  const isEmptyConversation = messages.length === 0;
 
   const handleSubmit = async () => {
     const text = draft.trim();
@@ -219,21 +223,43 @@ export function MainArea() {
     <section className="flex h-full flex-col overflow-hidden bg-white">
       <ChatHeader />
 
-      <div className="titlebar-no-drag flex-1 overflow-hidden">
-        <MessageList />
-      </div>
-
-      <footer className="titlebar-no-drag shrink-0 bg-white px-5 py-4 sm:px-8">
-        <div className="mx-auto w-full max-w-[920px]">
-          <PermissionBanner />
-          <AskUserBanner />
-          <ChatInput
-            onSubmit={handleSubmit}
-            onQueueMessage={handleQueueMessage}
-            onStop={handleStop}
-          />
+      {isEmptyConversation ? (
+        <div className="titlebar-no-drag min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 sm:px-8">
+          <div className="mx-auto flex min-h-full w-full max-w-[720px] items-center justify-center py-8">
+            <div className="w-full -translate-y-[2vh]">
+              <EmptyState />
+              <div className="mt-7 w-full">
+                <PermissionBanner />
+                <AskUserBanner />
+                <ChatInput
+                  onSubmit={handleSubmit}
+                  onQueueMessage={handleQueueMessage}
+                  onStop={handleStop}
+                  variant="hero"
+                />
+              </div>
+            </div>
+          </div>
         </div>
-      </footer>
+      ) : (
+        <>
+          <div className="titlebar-no-drag flex-1 overflow-hidden">
+            <MessageList />
+          </div>
+
+          <footer className="titlebar-no-drag shrink-0 bg-white px-5 py-4 sm:px-8">
+            <div className="mx-auto w-full max-w-[920px]">
+              <PermissionBanner />
+              <AskUserBanner />
+              <ChatInput
+                onSubmit={handleSubmit}
+                onQueueMessage={handleQueueMessage}
+                onStop={handleStop}
+              />
+            </div>
+          </footer>
+        </>
+      )}
     </section>
   );
 }

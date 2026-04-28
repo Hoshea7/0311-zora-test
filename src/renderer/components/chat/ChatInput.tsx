@@ -161,9 +161,15 @@ export interface ChatInputProps {
   onSubmit: () => void;
   onQueueMessage: () => void;
   onStop: () => void;
+  variant?: "default" | "hero";
 }
 
-export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) {
+export function ChatInput({
+  onSubmit,
+  onQueueMessage,
+  onStop,
+  variant = "default",
+}: ChatInputProps) {
   const [draft, setDraft] = useAtom(draftAtom);
   const isRunning = useAtomValue(isRunningAtom);
   const currentRunSource = useAtomValue(currentSessionRunSourceAtom);
@@ -223,6 +229,12 @@ export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) 
       : "发送";
   const shouldShowModelSelector =
     !isMissingLockedProvider && (hasEnabledProviders || isLocked);
+  const isHeroVariant = variant === "hero";
+  const inputShellClass = isHeroVariant
+    ? "relative flex flex-col rounded-[22px] border border-stone-200/80 bg-white px-4 py-3 shadow-[0_16px_42px_rgba(41,37,36,0.07),0_2px_10px_rgba(41,37,36,0.035)] transition-all focus-within:border-stone-300 focus-within:shadow-[0_18px_48px_rgba(41,37,36,0.09),0_2px_10px_rgba(41,37,36,0.04)]"
+    : "relative flex flex-col rounded-[24px] border border-stone-200 bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all focus-within:border-stone-300 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.06)]";
+  const draggingClass =
+    "border-sky-300 ring-2 ring-sky-400/35 shadow-[0_0_0_1px_rgba(125,211,252,0.16),0_10px_28px_rgba(14,165,233,0.10)]";
 
   // Auto-resize textarea
   const handleInput = () => {
@@ -474,11 +486,7 @@ export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) 
         onDrop={(event) => {
           void handleDrop(event);
         }}
-        className={`relative flex flex-col rounded-[24px] border border-stone-200 bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all focus-within:border-stone-300 focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.06)] ${
-          isDragging
-            ? "border-sky-300 ring-2 ring-sky-400/35 shadow-[0_0_0_1px_rgba(125,211,252,0.16),0_10px_28px_rgba(14,165,233,0.10)]"
-            : ""
-        }`}
+        className={`${inputShellClass} ${isDragging ? draggingClass : ""}`}
       >
         {isDragging ? (
           <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-[18px] border border-dashed border-sky-300 bg-sky-50/90 px-6 text-sky-700 backdrop-blur-[1px]">
@@ -512,7 +520,11 @@ export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) 
           placeholder={
             isFeishuRunning ? "飞书端运行中…" : "给 Zora 发消息… Enter 发送，Shift+Enter 换行"
           }
-          className={`w-full resize-none border-0 bg-transparent px-2 py-1 text-[14.5px] leading-[1.62] outline-none placeholder:text-stone-400 input-scrollbar ${
+          className={`w-full resize-none border-0 bg-transparent outline-none placeholder:text-stone-400 input-scrollbar ${
+            isHeroVariant
+              ? "px-1 py-0.5 text-[15px] leading-[1.55]"
+              : "px-2 py-1 text-[14.5px] leading-[1.62]"
+          } ${
             isFeishuRunning ? "cursor-not-allowed text-stone-400" : "text-stone-900"
           }`}
           rows={1}
@@ -521,7 +533,11 @@ export function ChatInput({ onSubmit, onQueueMessage, onStop }: ChatInputProps) 
 
 
 
-        <div className="mt-2 flex items-end justify-between px-1 pb-0.5">
+        <div
+          className={`flex items-end justify-between ${
+            isHeroVariant ? "mt-3 px-0.5 pb-0" : "mt-2 px-1 pb-0.5"
+          }`}
+        >
           <div className="flex min-w-0 items-center gap-1.5">
             <button
               type="button"
