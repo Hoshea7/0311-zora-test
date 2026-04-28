@@ -669,7 +669,7 @@ export class ProviderManager {
     if (!activeProvider || !activeProvider.enabled) {
       return {
         success: false,
-        message: "当前没有可用的默认 Provider，请先完成模型配置。",
+        message: "当前没有可用的默认模型服务，请先完成模型配置。",
       };
     }
 
@@ -678,7 +678,7 @@ export class ProviderManager {
     if (!decryptedApiKey) {
       return {
         success: false,
-        message: "无法读取当前默认 Provider 的 API Key。",
+        message: "无法读取当前默认模型服务的密钥。",
       };
     }
 
@@ -898,25 +898,25 @@ export class ProviderManager {
       label: string;
       modelId: string | undefined;
     }> = [
-      { role: "main", label: "主模型", modelId: normalizedModelId },
+      { role: "main", label: "默认模型", modelId: normalizedModelId },
       {
         role: "sonnet",
-        label: "Sonnet",
+        label: "探索与搜索",
         modelId: normalizeOptionalString(roleModels?.sonnetModel),
       },
       {
         role: "opus",
-        label: "Opus",
+        label: "规划与深度思考",
         modelId: normalizeOptionalString(roleModels?.opusModel),
       },
       {
         role: "haiku",
-        label: "Haiku",
+        label: "快速响应",
         modelId: normalizeOptionalString(roleModels?.haikuModel),
       },
       {
         role: "small",
-        label: "Small",
+        label: "摘要压缩",
         modelId: normalizeOptionalString(roleModels?.smallFastModel),
       },
     ];

@@ -23,14 +23,14 @@ export function getProviderModels(provider: ProviderConfig): ProviderModelOption
   const normalizedModelId = normalizeOptionalModelId(provider.modelId);
 
   if (normalizedModelId) {
-    modelMap.set(normalizedModelId, ["主模型"]);
+    modelMap.set(normalizedModelId, ["默认模型"]);
   }
 
   const roleEntries = [
-    { key: "sonnetModel", label: "Sonnet" },
-    { key: "opusModel", label: "Opus" },
-    { key: "haikuModel", label: "Haiku" },
-    { key: "smallFastModel", label: "Small" },
+    { key: "sonnetModel", label: "探索与搜索" },
+    { key: "opusModel", label: "规划与深度思考" },
+    { key: "haikuModel", label: "快速响应" },
+    { key: "smallFastModel", label: "摘要压缩" },
   ] as const;
 
   for (const { key, label } of roleEntries) {

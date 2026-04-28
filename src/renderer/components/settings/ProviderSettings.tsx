@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAtomValue, useSetAtom } from "jotai";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { DefaultModelSettings } from "../../../shared/types/default-model";
@@ -71,14 +72,14 @@ type DefaultModelUiState = {
 const DEFAULT_PROVIDER_TYPE: ProviderType = "anthropic";
 const MASKED_API_KEY_DISPLAY = "••••••••••••••••••••";
 const inputClassName = [
-  "w-full border-0 border-b border-stone-200 bg-transparent px-0 py-2.5 text-[14px] text-stone-900",
+  "h-9 w-full rounded-[6px] border border-stone-200/80 bg-white/55 px-2.5 text-[13px] text-stone-900",
   "outline-none transition-colors placeholder:text-stone-400",
-  "focus:border-stone-500 focus:ring-0",
+  "focus:border-stone-400 focus:bg-white focus:ring-2 focus:ring-stone-200/50",
   "disabled:cursor-not-allowed disabled:opacity-60",
 ].join(" ");
 const technicalInputClassName = cn(
   inputClassName,
-  "font-mono text-[13.5px] tracking-tight"
+  "font-mono text-[13px] tracking-tight"
 );
 const VALIDATION_FIELD_ORDER: ValidationField[] = ["name", "baseUrl", "apiKey"];
 const DIALOG_TITLE_ID = "provider-settings-dialog-title";
@@ -87,10 +88,26 @@ const ROLE_MODEL_FIELDS: Array<{
   role: Exclude<ProviderTestRoleKey, "main">;
   label: string;
 }> = [
-  { field: "sonnetModel", role: "sonnet", label: "Sonnet (探索/搜索)" },
-  { field: "opusModel", role: "opus", label: "Opus (规划/深度思考)" },
-  { field: "haikuModel", role: "haiku", label: "Haiku (快速/轻量)" },
-  { field: "smallFastModel", role: "small", label: "Small (压缩/摘要)" },
+  {
+    field: "sonnetModel",
+    role: "sonnet",
+    label: "探索与搜索",
+  },
+  {
+    field: "opusModel",
+    role: "opus",
+    label: "规划与深度思考",
+  },
+  {
+    field: "haikuModel",
+    role: "haiku",
+    label: "快速响应",
+  },
+  {
+    field: "smallFastModel",
+    role: "small",
+    label: "摘要压缩",
+  },
 ];
 
 function findRoleTestDetail(
@@ -155,7 +172,7 @@ function buildDefaultModelUiState(
   if (availableProviders.length === 0) {
     return {
       triggerLabel: "暂无模型",
-      helperText: "请先在下方为 Provider 配置至少一个模型。",
+      helperText: "请先添加一个可用模型。",
       hasOptions: false,
       selectedProviderId: null,
     };
@@ -170,7 +187,7 @@ function buildDefaultModelUiState(
     helperText:
       selectedProvider && selectedModelId
         ? `新会话默认使用 ${selectedProvider.name} · ${selectedModelId}`
-        : "请先在下方为 Provider 配置至少一个模型。",
+        : "请先添加一个可用模型。",
     hasOptions: true,
     selectedProviderId: selectedProvider?.id ?? null,
     selectedModelId,
@@ -186,7 +203,7 @@ function getFailingConfiguredRoles(
   const mainDetail = findRoleTestDetail(details, "main");
 
   if (mainModelId && mainDetail && !mainDetail.success) {
-    failingRoles.push("主模型");
+    failingRoles.push("默认模型");
   }
 
   for (const { field, role, label } of ROLE_MODEL_FIELDS) {
@@ -291,16 +308,17 @@ function FormRow({
     <>
       <div
         className={cn(
-          "group py-3",
+          "group py-2.5",
           vertical
-            ? "flex flex-col gap-2"
-            : "grid gap-2.5 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center sm:gap-5"
+            ? "flex flex-col gap-1.5"
+            : "grid gap-2 sm:grid-cols-[104px_minmax(0,1fr)] sm:items-start sm:gap-5"
         )}
       >
         <span
           className={cn(
-            "text-[12px] font-medium tracking-[0.02em] text-stone-500",
-            !vertical && "whitespace-nowrap"
+            "pt-2 text-[12.5px] font-medium text-stone-500",
+            !vertical && "whitespace-nowrap",
+            vertical && "pt-0"
           )}
         >
           {label}
@@ -312,7 +330,7 @@ function FormRow({
             <p
               id={helperTextId}
               className={cn(
-                "pt-1 text-[11px] leading-relaxed",
+                "pt-1 text-[11.5px] leading-relaxed",
                 error ? "text-rose-600" : "text-stone-400"
               )}
             >
@@ -321,7 +339,7 @@ function FormRow({
           ) : null}
         </div>
       </div>
-      {!isLast && <div className="h-px bg-stone-100" />}
+      {!isLast && <div className="h-px bg-stone-100/70" />}
     </>
   );
 }
@@ -609,11 +627,11 @@ export function ProviderSettings() {
     }
 
     if (!formState.baseUrl.trim()) {
-      nextErrors.baseUrl = "请填写 Base URL";
+      nextErrors.baseUrl = "请填写接口地址";
     }
 
     if (!isEditing && !formState.apiKey.trim()) {
-      nextErrors.apiKey = "请填写 API Key";
+      nextErrors.apiKey = "请填写密钥";
     }
 
     const missingCount = Object.keys(nextErrors).length;
@@ -768,8 +786,8 @@ export function ProviderSettings() {
         setValidationError(
           "apiKey",
           isEditing
-            ? "当前 API Key 无法读取，请点击右侧图标重新填写后再测试。"
-            : "请先填写 API Key 后再测试连接。"
+            ? "当前密钥无法读取，请点击右侧图标重新填写后再测试。"
+            : "请先填写密钥后再测试连接。"
         );
         return;
       }
@@ -863,7 +881,7 @@ export function ProviderSettings() {
 
         if (!currentApiKey) {
           setShowApiKey(true);
-          setValidationError("apiKey", "未能读取当前 API Key，请重新输入后再试。");
+          setValidationError("apiKey", "未能读取当前密钥，请重新输入后再试。");
           return;
         }
 
@@ -1026,7 +1044,7 @@ export function ProviderSettings() {
             </DropdownMenu.Root>
 
             <p className="mt-1.5 text-[12px] text-stone-400">
-              {defaultModelUiState?.helperText ?? "请先在下方为 Provider 配置至少一个模型。"}
+              {defaultModelUiState?.helperText ?? "请先添加一个可用模型。"}
             </p>
           </div>
         </div>
@@ -1104,9 +1122,9 @@ export function ProviderSettings() {
           </div>
         )}
 
-      {formMode ? (
+      {formMode ? createPortal(
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-stone-900/20 p-3 backdrop-blur-sm animate-in fade-in duration-200 sm:p-4"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-stone-900/24 p-3 backdrop-blur-sm animate-in fade-in duration-200 sm:p-4"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !isFormBusy) {
               closeForm();
@@ -1114,15 +1132,20 @@ export function ProviderSettings() {
           }}
         >
           <div
-            className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-[540px] flex-col overflow-hidden rounded-[22px] bg-white shadow-2xl ring-1 ring-black/5 animate-in zoom-in-95 duration-200 slide-in-from-bottom-4 sm:max-h-[calc(100vh-2rem)]"
+            className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-[620px] flex-col overflow-hidden rounded-[22px] bg-[#fffdf9] shadow-2xl shadow-stone-950/20 ring-1 ring-black/5 animate-in zoom-in-95 slide-in-from-bottom-4 duration-200 sm:max-h-[calc(100vh-2rem)]"
             role="dialog"
             aria-modal="true"
             aria-labelledby={DIALOG_TITLE_ID}
           >
-            <div className="flex items-center justify-between border-b border-stone-100 px-6 py-4">
-              <h3 id={DIALOG_TITLE_ID} className="text-[16px] font-semibold tracking-tight text-stone-900">
-                {formMode.type === "edit" ? "编辑配置" : "新增配置"}
-              </h3>
+            <div className="flex items-start justify-between border-b border-stone-100 px-6 py-4">
+              <div className="min-w-0">
+                <h3 id={DIALOG_TITLE_ID} className="text-[16px] font-semibold tracking-tight text-stone-900">
+                  {formMode.type === "edit" ? "编辑模型配置" : "新增模型配置"}
+                </h3>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-stone-500">
+                  连接一个模型服务，并按任务需要覆盖默认模型。
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={closeForm}
@@ -1188,11 +1211,14 @@ export function ProviderSettings() {
               </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
               <div className="flex flex-col gap-5">
-                <div className="space-y-0">
+                <section className="space-y-0">
+                  <div className="mb-2">
+                    <h4 className="text-[13px] font-semibold text-stone-800">连接信息</h4>
+                  </div>
                   <FormRow
-                    label="名称"
+                    label="配置名称"
                     required
                     helperText={fieldErrors.name}
                     helperTextId="provider-name-message"
@@ -1206,14 +1232,14 @@ export function ProviderSettings() {
                       )}
                       value={formState.name}
                       onChange={(e) => updateField("name", e.target.value)}
-                      placeholder="我的模型"
+                      placeholder="例如：工作模型"
                       disabled={isTestingConnection}
                       aria-invalid={Boolean(fieldErrors.name)}
                       aria-describedby={fieldErrors.name ? "provider-name-message" : undefined}
                     />
                   </FormRow>
                   
-                  <FormRow label="供应商">
+                  <FormRow label="服务商">
                     <select
                       className={cn(inputClassName, "cursor-pointer appearance-none")}
                       value={formState.providerType}
@@ -1230,7 +1256,7 @@ export function ProviderSettings() {
                   </FormRow>
                   
                   <FormRow
-                    label="Base URL"
+                    label="接口地址"
                     required
                     helperText={fieldErrors.baseUrl}
                     helperTextId="provider-base-url-message"
@@ -1252,13 +1278,13 @@ export function ProviderSettings() {
                   </FormRow>
                   
                   <FormRow
-                    label="API Key"
+                    label="密钥"
                     isLast={true}
                     required={!isEditing}
                     helperText={
                       fieldErrors.apiKey ??
                       (isEditing
-                        ? "留空会保留当前 API Key；测试连接会自动使用已保存的 Key。"
+                        ? "不填写则继续使用已保存的密钥。"
                         : undefined)
                     }
                     helperTextId="provider-api-key-message"
@@ -1276,7 +1302,7 @@ export function ProviderSettings() {
                         )}
                         value={isApiKeyLocked ? MASKED_API_KEY_DISPLAY : formState.apiKey}
                         onChange={(e) => updateField("apiKey", e.target.value)}
-                        placeholder={isEditing ? "保留当前 Key，点击右侧查看或替换" : "sk-..."}
+                        placeholder={isEditing ? "保留或替换密钥" : "粘贴服务商密钥"}
                         disabled={isTestingConnection}
                         readOnly={isApiKeyLocked}
                         tabIndex={isApiKeyLocked ? -1 : 0}
@@ -1287,7 +1313,7 @@ export function ProviderSettings() {
                         type="button"
                         onClick={() => void handleToggleApiKeyVisibility()}
                         disabled={isLoadingApiKey || isTestingConnection}
-                        aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                        aria-label={showApiKey ? "隐藏密钥" : "显示密钥"}
                         className="absolute right-2 flex h-6 w-6 items-center justify-center text-stone-400 hover:text-stone-700 disabled:opacity-50"
                       >
                         {isLoadingApiKey ? (
@@ -1300,16 +1326,19 @@ export function ProviderSettings() {
                       </button>
                     </div>
                   </FormRow>
-                </div>
+                </section>
 
-                <div className="border-t border-stone-100 pt-4">
-                  <FormRow label="主模型 ID" vertical>
+                <section className="border-t border-stone-100 pt-4">
+                  <div className="mb-2">
+                    <h4 className="text-[13px] font-semibold text-stone-800">模型选择</h4>
+                  </div>
+                  <FormRow label="默认模型" vertical>
                     <div className="relative flex items-center">
                       <input
                         className={cn(technicalInputClassName, "pr-8")}
                         value={formState.modelId}
                         onChange={(e) => updateField("modelId", e.target.value)}
-                        placeholder="留空使用默认"
+                        placeholder="不填则使用服务商默认模型"
                         disabled={isTestingConnection}
                       />
                       {isTestingConnection && testingFieldKeys.includes("modelId") && (
@@ -1322,25 +1351,25 @@ export function ProviderSettings() {
                       )}
                     </div>
                     {mainModelTestDetail && !mainModelTestDetail.success && (
-                       <p className="mt-1 text-[11px] text-rose-500">{mainModelTestDetail.message}</p>
+                       <p className="mt-1 text-[11.5px] text-rose-500">{mainModelTestDetail.message}</p>
                     )}
                   </FormRow>
 
                   <div className="border-t border-stone-100 pt-3">
                     <button
                       type="button"
-                      className="flex w-full items-center gap-1.5 text-left text-[12.5px] font-medium text-stone-500 transition-colors hover:text-stone-700"
+                      className="flex w-full items-center justify-between rounded-[6px] px-2 py-2 text-left text-[13px] font-medium text-stone-600 transition-colors hover:bg-stone-100/60 hover:text-stone-900"
                       onClick={() => setShowRoleModels((prev) => !prev)}
                     >
+                      <span>按任务指定模型</span>
                       <svg
-                        className={`h-3 w-3 transition-transform ${showRoleModels ? "rotate-90" : ""}`}
+                        className={`h-3.5 w-3.5 transition-transform ${showRoleModels ? "rotate-180" : ""}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M19 9l-7 7-7-7" />
                       </svg>
-                      高级：角色模型映射 (仅支持多模型供应商)
                     </button>
                   </div>
 
@@ -1355,7 +1384,7 @@ export function ProviderSettings() {
                                 type="text"
                                 value={formState[field]}
                                 onChange={(e) => updateField(field, e.target.value)}
-                                placeholder="留空则使用主模型"
+                                placeholder="不填则跟随默认模型"
                                 disabled={isTestingConnection}
                                 className={cn(technicalInputClassName, "pr-8")}
                               />
@@ -1369,22 +1398,19 @@ export function ProviderSettings() {
                               )}
                             </div>
                             {testDetail && !testDetail.success && formState[field].trim() !== "" && (
-                              <p className="mt-1 text-[11px] text-rose-500">{testDetail.message}</p>
+                              <p className="mt-1 text-[11.5px] text-rose-500">{testDetail.message}</p>
                             )}
                           </FormRow>
                         );
                       })}
-                      <p className="pt-3 text-[11px] leading-relaxed text-stone-400">
-                        留空的角色会自动回退到上方主模型，仅在同一 Provider 支持多模型时再单独填写。
-                      </p>
                     </div>
                   )}
-                </div>
+                </section>
               </div>
 
             </div>
 
-            <div className="shrink-0 border-t border-stone-100 bg-white px-6 py-4">
+            <div className="shrink-0 border-t border-stone-100 bg-[#fffdf9] px-6 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <Button
                   type="button"
@@ -1393,23 +1419,39 @@ export function ProviderSettings() {
                     void (isTestingConnection ? handleStopConnectionTest() : handleTestConnection())
                   }
                   disabled={isTestingConnection ? false : !canTestConnection || isSaving}
-                  className="w-full sm:w-auto"
+                  className={cn(
+                    "h-9 w-full rounded-[10px] px-4 text-[13px] font-medium sm:w-auto",
+                    !isTestingConnection &&
+                      "border-stone-200/80 bg-white/70 text-stone-600 shadow-none hover:bg-stone-50 hover:text-stone-800 disabled:bg-white/50"
+                  )}
                 >
                   {isTestingConnection ? "停止测试" : "测试连接"}
                 </Button>
 
-                <div className="flex w-full gap-2 sm:w-auto sm:justify-end">
-                  <Button type="button" variant="ghost" onClick={closeForm} disabled={isFormBusy} className="flex-1 sm:flex-none">
+                <div className="flex w-full items-center gap-2 sm:w-auto sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={closeForm}
+                    disabled={isFormBusy}
+                    className="h-9 flex-1 rounded-[10px] px-4 text-[13px] font-medium text-stone-600 hover:bg-stone-100/70 sm:flex-none"
+                  >
                     取消
                   </Button>
-                  <Button type="button" onClick={() => void handleSave()} disabled={isFormBusy} className="min-w-[80px] flex-1 sm:flex-none">
+                  <Button
+                    type="button"
+                    onClick={() => void handleSave()}
+                    disabled={isFormBusy}
+                    className="h-9 min-w-[76px] flex-1 rounded-[10px] px-5 text-[13px] font-semibold shadow-none hover:shadow-none sm:flex-none"
+                  >
                     {isSaving ? "保存中" : "保存"}
                   </Button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </section>
   );
