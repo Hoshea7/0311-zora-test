@@ -141,7 +141,7 @@ export function AwakeningCanvas() {
   const [firstTokenArrived, setFirstTokenArrived] = useState(false);
   const [firstMessageDone, setFirstMessageDone] = useState(false);
 
-  const displayed = useTypewriter("有什么正在苏醒...", 100);
+  const displayed = useTypewriter("Zora 正在苏醒...", 100);
 
   useEffect(() => {
     const timer = setTimeout(() => setAnimReady(true), 2000);
