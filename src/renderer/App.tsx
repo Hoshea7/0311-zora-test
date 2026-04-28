@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom, useStore } from "jotai";
 import {
   addThinkingStepAtom,
   addToolStepAtom,
+  applyAssistantSnapshotAtom,
   appendBodyTextAtom,
   appendThinkingAtom,
   appendToolInputAtom,
@@ -16,6 +17,7 @@ import {
   isAgentIdleAtom,
   messagesAtom,
   sessionMessagesAtom,
+  setSessionMessagesAtom,
   setSessionRunningAtom,
   startBodySegmentAtom,
 } from "./store/chat";
@@ -33,11 +35,17 @@ import {
 } from "./store/hitl";
 import { loadMcpConfigAtom } from "./store/mcp";
 import { loadProvidersAtom } from "./store/provider";
-import { currentSessionIdAtom } from "./store/workspace";
+import {
+  currentSessionIdAtom,
+  currentWorkspaceIdAtom,
+  sessionsAtom,
+} from "./store/workspace";
 import type {
   AgentRunSource,
   AskUserRequest,
+  ConversationMessage,
   PermissionRequest,
+  SessionMeta,
 } from "../shared/zora";
 import {
   extractStreamChunks,
@@ -103,6 +111,65 @@ function getSdkStopReason(event: Record<string, unknown>) {
     : null;
 }
 
+function isConversationMessage(value: unknown): value is ConversationMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.role === "user" || value.role === "assistant") &&
+    typeof value.timestamp === "number"
+  );
+}
+
+function isSessionMeta(value: unknown): value is SessionMeta {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+function mergeConversationMessages(
+  current: ConversationMessage[],
+  incoming: ConversationMessage[]
+): ConversationMessage[] {
+  if (incoming.length === 0) {
+    return current;
+  }
+
+  const nextMessages = [...current];
+  const indexesById = new Map(current.map((message, index) => [message.id, index]));
+  let changed = false;
+
+  for (const message of incoming) {
+    const existingIndex = indexesById.get(message.id);
+    if (existingIndex === undefined) {
+      indexesById.set(message.id, nextMessages.length);
+      nextMessages.push(message);
+      changed = true;
+      continue;
+    }
+
+    const existing = nextMessages[existingIndex];
+    if (
+      existing.role === "assistant" &&
+      existing.turn?.status === "streaming" &&
+      message.role === "assistant"
+    ) {
+      continue;
+    }
+
+    nextMessages[existingIndex] = {
+      ...existing,
+      ...message,
+    };
+    changed = true;
+  }
+
+  return changed ? nextMessages : current;
+}
+
 export default function App() {
   const appPhase = useAtomValue(appPhaseAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
@@ -121,10 +188,12 @@ export default function App() {
   const loadProviders = useSetAtom(loadProvidersAtom);
   const loadMcpConfig = useSetAtom(loadMcpConfigAtom);
   const setMessages = useSetAtom(messagesAtom);
+  const setSessionMessages = useSetAtom(setSessionMessagesAtom);
 
   const ensureActiveTurn = useSetAtom(ensureActiveTurnAtom);
   const startBodySegment = useSetAtom(startBodySegmentAtom);
   const appendBodyText = useSetAtom(appendBodyTextAtom);
+  const applyAssistantSnapshot = useSetAtom(applyAssistantSnapshotAtom);
   const addThinkingStep = useSetAtom(addThinkingStepAtom);
   const appendThinking = useSetAtom(appendThinkingAtom);
   const completeThinkingStep = useSetAtom(completeThinkingStepAtom);
@@ -341,6 +410,51 @@ export default function App() {
       const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
       const targetSessionId = eventSessionId ?? activeMessageSessionId;
 
+      if (streamEvent.type === "session_sync") {
+        const workspaceId =
+          typeof streamEvent.workspaceId === "string" ? streamEvent.workspaceId : undefined;
+        if (workspaceId && workspaceId !== store.get(currentWorkspaceIdAtom)) {
+          return;
+        }
+
+        const syncSessionId =
+          typeof streamEvent.sessionId === "string" ? streamEvent.sessionId : undefined;
+        if (!syncSessionId) {
+          return;
+        }
+
+        const session = isSessionMeta(streamEvent.session) ? streamEvent.session : null;
+        const syncedMessages = Array.isArray(streamEvent.messages)
+          ? streamEvent.messages.filter(isConversationMessage)
+          : [];
+
+        if (session) {
+          store.set(sessionsAtom, (current) => {
+            const existingIndex = current.findIndex((item) => item.id === session.id);
+            if (existingIndex === -1) {
+              return [session, ...current];
+            }
+
+            const next = [...current];
+            next[existingIndex] = {
+              ...next[existingIndex],
+              ...session,
+            };
+            return next;
+          });
+        }
+
+        const cachedMessages = store.get(sessionMessagesAtom);
+        if (Object.prototype.hasOwnProperty.call(cachedMessages, syncSessionId)) {
+          setSessionMessages(syncSessionId, (current) =>
+            mergeConversationMessages(current, syncedMessages)
+          );
+        } else {
+          setSessionMessages(syncSessionId, syncedMessages);
+        }
+        return;
+      }
+
       if (streamEvent.type === "permission_request" && "request" in streamEvent) {
         const request = streamEvent.request as PermissionRequest;
         if (targetSessionId) {
@@ -537,6 +651,12 @@ export default function App() {
       }
 
       if (streamEvent.type === "assistant") {
+        if (isRecord(streamEvent.message)) {
+          applyAssistantSnapshot(targetSessionId, streamEvent.message);
+          if (isCurrentSessionEvent) {
+            bumpContentActivity();
+          }
+        }
         return;
       }
 
@@ -681,6 +801,7 @@ export default function App() {
     ensureActiveTurn,
     startBodySegment,
     appendBodyText,
+    applyAssistantSnapshot,
     addThinkingStep,
     appendThinking,
     completeThinkingStep,
@@ -695,6 +816,7 @@ export default function App() {
     store,
     completeAwakening,
     setMessages,
+    setSessionMessages,
     setSessionRunning,
     pushPermission,
     resolvePermission,

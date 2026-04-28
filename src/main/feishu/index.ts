@@ -14,6 +14,8 @@ import { memoryAgent } from "../memory-agent";
 import { runProductivitySession } from "../productivity-runner";
 import {
   appendMessageRecord,
+  getSessionMeta,
+  loadMessages,
   persistAssistantMessage,
   persistToolResults,
   updateSessionMeta,
@@ -137,12 +139,41 @@ export class FeishuBridge {
     }
   }
 
+  private notifyAgentStreamEvent(sessionId: string, payload: AgentStreamEvent): void {
+    const event = {
+      ...payload,
+      sessionId,
+    };
+
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send("agent:stream", event);
+      }
+    }
+  }
+
+  private async notifySessionSync(binding: FeishuChatBinding): Promise<void> {
+    const [session, messages] = await Promise.all([
+      getSessionMeta(binding.sessionId, binding.workspaceId),
+      loadMessages(binding.sessionId, binding.workspaceId),
+    ]);
+
+    this.notifyAgentStreamEvent(binding.sessionId, {
+      type: "session_sync",
+      source: "feishu",
+      workspaceId: binding.workspaceId,
+      session,
+      messages,
+    });
+  }
+
   private createFeishuForwarder(
     sessionId: string,
     workspaceId: string
   ): (payload: AgentStreamEvent) => void {
     return (payload: AgentStreamEvent) => {
       this.sender.handleAgentEvent(sessionId, payload);
+      this.notifyAgentStreamEvent(sessionId, payload);
 
       if (typeof payload !== "object" || payload === null) return;
 
@@ -201,6 +232,7 @@ export class FeishuBridge {
 
     try {
       await this.persistIncomingMessage(binding, text, userMessageId);
+      await this.notifySessionSync(binding);
       await runProductivitySession({
         sessionId: binding.sessionId,
         text,

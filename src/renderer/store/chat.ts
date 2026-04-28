@@ -6,7 +6,7 @@ import type {
   ProcessStep,
 } from "../types";
 import type { AgentRunSource } from "../../shared/zora";
-import { createId, stringifyUnknown } from "../utils/message";
+import { createId, isRecord, stringifyUnknown } from "../utils/message";
 import { normalizeThinkingContent } from "../utils/thinking";
 import { currentSessionIdAtom } from "./workspace";
 import { appPhaseAtom } from "./zora";
@@ -547,7 +547,130 @@ function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResu
         ...turn,
         processSteps,
       }
-    : turn;
+      : turn;
+}
+
+function getAssistantSnapshotBlocks(sdkMessage: unknown): Record<string, unknown>[] {
+  if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
+    return [];
+  }
+
+  return sdkMessage.content.filter(isRecord);
+}
+
+function getSnapshotText(blocks: Record<string, unknown>[]): string {
+  return blocks
+    .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+    .join("");
+}
+
+function mergeAssistantSnapshotIntoTurn(
+  turn: AssistantTurn,
+  blocks: Record<string, unknown>[],
+  timestamp: number
+): AssistantTurn {
+  let nextTurn = turn;
+  const snapshotText = getSnapshotText(blocks);
+  const currentText = turn.bodySegments.map((segment) => segment.text).join("");
+
+  if (
+    snapshotText.length > 0 &&
+    snapshotText !== currentText &&
+    snapshotText.length >= currentText.length
+  ) {
+    nextTurn = {
+      ...nextTurn,
+      bodySegments: [
+        {
+          id: nextTurn.bodySegments[0]?.id ?? createId("segment"),
+          text: snapshotText,
+        },
+      ],
+    };
+  }
+
+  let processSteps = nextTurn.processSteps;
+
+  for (const block of blocks) {
+    if (block.type === "thinking" && typeof block.thinking === "string") {
+      const thinkingId = typeof block.id === "string" ? block.id : "";
+      const alreadyExists = processSteps.some(
+        (step) =>
+          step.type === "thinking" &&
+          (step.thinking.id === thinkingId || step.thinking.content === block.thinking)
+      );
+
+      if (!alreadyExists) {
+        processSteps = [
+          ...processSteps,
+          {
+            type: "thinking",
+            thinking: {
+              id: thinkingId || createId("thinking"),
+              content: normalizeThinkingContent(block.thinking),
+              startedAt: timestamp,
+              completedAt: timestamp,
+            },
+          },
+        ];
+      }
+      continue;
+    }
+
+    if (block.type !== "tool_use") {
+      continue;
+    }
+
+    const toolId = typeof block.id === "string" ? block.id : "";
+    const toolName = typeof block.name === "string" ? block.name : "unknown";
+    if (!toolId) {
+      continue;
+    }
+
+    const toolInput = stringifyUnknown(block.input);
+    let updatedExistingTool = false;
+    processSteps = processSteps.map<ProcessStep>((step) => {
+      if (step.type !== "tool" || step.tool.id !== toolId) {
+        return step;
+      }
+
+      updatedExistingTool = true;
+      if (step.tool.input.length > 0 || toolInput.length === 0) {
+        return step;
+      }
+
+      return {
+        type: "tool",
+        tool: {
+          ...step.tool,
+          input: toolInput,
+        },
+      };
+    });
+
+    if (!updatedExistingTool) {
+      processSteps = [
+        ...processSteps,
+        {
+          type: "tool",
+          tool: {
+            id: toolId,
+            name: toolName,
+            input: toolInput,
+            status: "running",
+            startedAt: timestamp,
+          },
+        },
+      ];
+    }
+  }
+
+  return processSteps !== nextTurn.processSteps
+    ? {
+        ...nextTurn,
+        processSteps,
+      }
+    : nextTurn;
 }
 
 export const createAssistantTurnAtom = atom<null, [string], void>(
@@ -564,6 +687,36 @@ export const ensureActiveTurnAtom = atom<null, [string], void>(
   null,
   (_get, set, sessionId: string) => {
     set(setSessionMessagesAtom, sessionId, (current) => ensureActiveTurn(current));
+  }
+);
+
+export const applyAssistantSnapshotAtom = atom<null, [string, unknown], void>(
+  null,
+  (_get, set, sessionId: string, sdkMessage: unknown) => {
+    const blocks = getAssistantSnapshotBlocks(sdkMessage);
+    if (blocks.length === 0) {
+      return;
+    }
+
+    const hasRenderableContent = blocks.some(
+      (block) =>
+        (block.type === "text" && typeof block.text === "string" && block.text.length > 0) ||
+        (block.type === "thinking" &&
+          typeof block.thinking === "string" &&
+          block.thinking.length > 0) ||
+        block.type === "tool_use"
+    );
+
+    if (!hasRenderableContent) {
+      return;
+    }
+
+    const timestamp = Date.now();
+    set(setSessionMessagesAtom, sessionId, (current) =>
+      updateOrCreateActiveTurn(current, (turn) =>
+        mergeAssistantSnapshotIntoTurn(turn, blocks, timestamp)
+      )
+    );
   }
 );
 
