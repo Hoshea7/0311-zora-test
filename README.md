@@ -1,94 +1,137 @@
+# Zora
 
-# ZoraAgent
+<div align="center">
+  <img src="./logo_03.png" alt="Zora" width="128" />
+  <p><strong>通用 AI Agent 桌面应用</strong></p>
+</div>
 
-**有灵魂的桌面 AI 伴侣**
+Zora 是一个集成通用 Agent 的桌面应用，支持桌面对话、Agent 执行、长期记忆、Skills/MCP、多模型渠道和飞书远程协作。它把本地项目目录、常用工具、飞书私聊和群聊作为 Agent 的工作入口。
 
-基于 Claude Agent SDK 构建的桌面级 AI 伴侣应用，  
-让每一个 AI 都拥有独特的人格、持久的记忆和更真实的陪伴感。
----
+在桌面端，Zora 可以围绕当前工作区处理代码、调研、写作和项目资料；在飞书中，它可以通过私聊或群聊接收任务，并在对应工作区继续执行。用户画像、项目背景、重要决定、每日记录、技能方法和工具入口会以本地文件或配置形式保存；文件写入、命令执行等操作由权限模式控制。
 
-## 目录
+<p align="center">
+  <img src="./docs/images/zora-主界面.png" alt="Zora 主界面" width="900" />
+  <br />
+  <sub>主界面</sub>
+</p>
 
-- [什么是 Zora](#什么是-zora)
-- [功能亮点](#功能亮点)
-- [应用截图](#应用截图)
-- [架构设计](#架构设计)
-- [项目结构](#项目结构)
-- [快速开始](#快速开始)
-- [配置说明](#配置说明)
-- [数据目录](#数据目录)
-- [技术栈](#技术栈)
-- [工作原理](#工作原理)
-- [参与贡献](#参与贡献)
-- [许可证](#许可证)
+### ✦ 核心能力
 
----
+> Agent · 自主任务执行  │  唤醒 · 初始化角色和用户画像  │  记忆 · 跨会话保留上下文  │  Skills & MCP · 可扩展工具链
+>
+> 飞书远程 · 私聊和群聊入口  │  多 Provider · 灵活接入模型  │  本地优先 · 本地文件存储  │  HITL · 关键操作由用户确认
 
-## 什么是 Zora
+Zora 的设计重点是把 Agent 运行所需的上下文、工具、记忆和权限规则保存下来，并通过桌面端和飞书入口提供访问方式。
 
-Zora 不只是一个聊天窗口，它更像一个会持续成长的 AI 伴侣。
+- **上下文连续**：Zora 会维护偏好、项目背景、重要决定和沟通方式，减少长期对话中的重复说明。
+- **任务落地**：Zora 可连接本地工作区、Skills、MCP 和飞书，围绕文件、工具和团队消息执行任务。
+- **权限可控**：文件写入、命令执行等操作受权限模式约束；敏感配置和运行数据优先保存在本地。
 
-大多数 AI 应用在关闭窗口后就失去了上下文，下一次打开时只能重新开始。Zora 试图解决这个问题：它会逐步形成自己的设定、记住你的偏好、沉淀长期记忆，并把这些信息持续带入之后的对话里。通过唤醒流程、结构化记忆、会话恢复和技能系统，Zora 更接近一个真正长期协作的数字伙伴，而不只是一次性工具。
+## Zora 能做什么
 
-核心理念：**让 AI 不只是工具，而是真正能陪你长期协作的伙伴。**
+### 通用 Agent：从回答问题到完成任务
 
----
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/zora-通用Agent-调研案例01.png" alt="Zora 通用 Agent 调研案例" />
+      <br />
+      <sub>调研任务中的搜索、抓取和整理过程</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/images/zora-通用Agent-调研案例02.png" alt="Zora 通用 Agent 调研案例结果" />
+      <br />
+      <sub>调研结果中的结构化整理</sub>
+    </td>
+  </tr>
+</table>
 
-## 功能亮点
+Zora 提供可在本地工作环境中行动的 Agent。
 
-### 觉醒系统（Awakening）
+用户可以提交目标明确的任务，由 Agent 拆解步骤、读取项目文件、搜索资料、调用 MCP、使用 Skills、编辑文件、运行命令，并在需要确认时向用户请求授权。输出可以是回复文本，也可以是项目文件、代码修改、总结、方案或后续任务。
 
-首次进入时，Zora 会通过一段引导式自然对话完成“唤醒”。在这个过程中，它会逐步生成 `SOUL.md`、`IDENTITY.md` 和 `USER.md`，建立自己的行为风格、身份设定和用户画像，让每个实例都带着独特的起点进入后续对话。
+工作区用于绑定本地目录和会话历史。Agent 在对应目录中读取、搜索、编辑和运行工具；当 Claude SDK session 不可用时，Zora 会基于本地会话记录尽量恢复上下文。
 
-### 结构化记忆
+Zora 当前覆盖个人通用 Agent 的基础运行能力：上下文、工具、文件、记忆、权限和远程入口。
 
-Zora 采用分层记忆结构：`SOUL`、`IDENTITY`、`USER`、`MEMORY` 加上按日期归档的 `memory/YYYY-MM-DD.md` 日志。对话结束后，后台 Memory Agent 会自动提取高价值信息并写入长期记忆。支持三种模式：
+### 唤醒：初始化角色和用户画像
 
-- **Immediate**：对话结束后延迟处理
-- **Batch**：按空闲时间批量处理
-- **Manual**：由用户手动触发
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/zora-唤醒.png" alt="Zora 唤醒启动" />
+      <br />
+      <sub>唤醒启动</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/images/zora-唤醒02.png" alt="Zora 唤醒对话" />
+      <br />
+      <sub>唤醒对话</sub>
+    </td>
+  </tr>
+</table>
 
-### 会话持久化与恢复
+首次启动时，Zora 会通过一段自然对话完成“唤醒”。它会了解怎么称呼你、你在做什么、你希望它扮演什么角色，并生成自己的基础设定。
 
-会话消息会落盘保存，本地维护独立的 session 数据。当 Claude SDK 的 session 丢失或不可恢复时，Zora 会从本地历史记录重建上下文，尽量无缝继续当前对话。
+这些设定会保存为本地文件：
 
-### 工作区与文件树
+- `SOUL.md`：Zora 的行为规则和沟通风格。
+- `IDENTITY.md`：Zora 的身份、名字和关系定位。
+- `USER.md`：用户画像、工作背景和偏好。
 
-Zora 支持多工作区管理。每个工作区都可以绑定自己的会话历史和本地目录，并通过侧边栏文件树浏览内容，方便把 AI 协作和真实项目目录连接起来。
+如果跳过唤醒，Zora 会从默认助手模板开始，之后通过对话持续更新相关信息。
 
-### 三级权限控制（HITL）
+### 记忆：跨会话保存上下文
 
-- **Ask**：每次敏感工具调用前都询问
-- **Smart**：只对有风险的操作询问，安全读操作自动放行
-- **Yolo**：全部放行
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/zora-记忆.png" alt="Zora 记忆设置" />
+      <br />
+      <sub>记忆模式和记忆模型设置</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/images/zora-记忆2-对话展示.png" alt="Zora 基于记忆回答" />
+      <br />
+      <sub>对话中使用已保存的项目上下文</sub>
+    </td>
+  </tr>
+</table>
 
-这套权限系统让桌面 Agent 既能保持执行力，也能在真实工作流里更可控。
+Zora 会在对话结束后把需要保留的信息交给后台 Memory Agent 处理，更新长期记忆和每日记录。记忆内容以结构化文件形式保存。
 
-### 多 Provider 架构
+当前支持三种记忆模式：
 
-当前支持 6 种 Provider：**Anthropic / 火山引擎 / 智谱 / Moonshot / DeepSeek / 自定义**。  
-每个 Provider 支持主模型和 4 个角色模型映射：
+| 模式 | 适合场景 |
+|------|----------|
+| Immediate | 每次对话结束后尽快处理记忆 |
+| Batch | 累积多次对话后统一处理，节省 token |
+| Manual | 在用户明确要求或手动触发时处理 |
 
-- `smallFast`
-- `sonnet`
-- `opus`
-- `haiku`
+你也可以为记忆任务指定单独的 Provider 和模型，让日常对话和记忆整理使用不同模型配置。
 
-所有敏感凭证直接写入本地配置文件，避免触发 macOS 钥匙串弹窗。
+### Skills & MCP：把能力变成可复用工具链
 
-### 飞书深度集成
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/images/zora-技能.png" alt="Zora 技能管理" />
+      <br />
+      <sub>Skills 管理和发现</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/images/zora-MCP.png" alt="Zora MCP 设置" />
+      <br />
+      <sub>内置 Web Search / Web Fetch MCP</sub>
+    </td>
+  </tr>
+</table>
 
-Zora 可通过飞书桥接能力进入团队协作场景，支持：
+Zora 的 Skills 使用 Markdown 定义，可以描述一套工作流、领域知识或工具使用方式。它们适合把你反复使用的做事方法固化下来：比如怎么写周报、怎么整理会议纪要、怎么审查 PR、怎么处理某类文档。
 
-- WebSocket 长连接
-- 新建会话与会话绑定
-- 交互卡片消息
-- 任务状态反馈
-- 斜杠命令：`/help`、`/new`、`/stop`、`/status`
+Zora 会按需加载技能，避免把所有技能一次性放入上下文。它也可以复用其他 Agent 工具中已有的技能资产。
 
-### 技能生态系统
-
-技能使用 Markdown 定义，并支持从多个外部工具自动发现和导入技能。目前支持扫描：
+它还能发现并导入你本机其他 AI 工具中的技能：
 
 - Claude Code
 - Codex CLI
@@ -96,247 +139,154 @@ Zora 可通过飞书桥接能力进入团队协作场景，支持：
 - Gemini CLI
 - Agents Shared
 
-可通过 `symlink` 或复制导入到 Zora 自己的技能目录，实现跨工具技能复用。
+MCP 方面，Zora 支持 `stdio`、`http`、`sse`、`sdk` 类型的 MCP Server，并内置两个常用只读能力：
 
-### MCP 集成
+- `Web Search`：基于 Tavily 的网页搜索。
+- `Web Fetch`：基于 Jina Reader 的网页正文读取。
 
-除了可手动配置 `stdio / http / sse / sdk` 类型的 MCP Server，Zora 还内置了两类实用 MCP 能力：
+### 飞书远程：私聊和群聊入口
 
-- **Web Search**：基于 Tavily
-- **Web Fetch**：基于 Jina Reader
+<p align="center">
+  <img src="./docs/images/zora-飞书.png" alt="Zora 飞书远程入口" width="900" />
+</p>
 
-适合补足时效性信息、网页抓取和链接内容读取场景。
+Zora 可以通过飞书机器人接收消息，并把桌面端 Agent 能力带到私聊或群聊中。
 
-### 富文本与附件对话
+当前飞书能力包括：
 
-聊天界面支持：
+- WebSocket 长连接，无需公网回调地址。
+- 私聊和群聊消息接入；群聊中需要 @ 机器人。
+- 飞书会话与 Zora 本地 session 绑定。
+- 支持默认工作区绑定。
+- 回复任务状态、交互卡片和打字状态提示。
+- 斜杠命令：`/help`、`/new`、`/stop`、`/status`。
 
-- Markdown 渲染
-- GFM 表格、任务列表等语法
-- 代码高亮
-- Mermaid 图表
-- 附件输入与图片预览
+用户可以在手机上发起调研、让 Zora 处理桌面工作区里的任务，也可以把 Zora 加入群聊作为团队共享的 Agent 入口。
 
-适合技术讨论、方案设计和项目协作等重内容场景。
+### 多 Provider：按任务选择模型
 
----
+<p align="center">
+  <img src="./docs/images/zora-provider.png" alt="Zora Provider 设置" width="900" />
+</p>
 
-## 应用截图
+Zora 目前提供这些 Provider 预设：
 
-> 截图待补充。
->
-> 建议后续补充这些画面：
->
-> - 主对话界面
-> - 唤醒引导流程
-> - 设置面板
-> - 飞书集成效果
-> - 工作区与文件树
+- Anthropic
+- 火山引擎
+- 智谱 AI
+- Kimi / Moonshot
+- DeepSeek
+- 自定义端点
 
----
+每个 Provider 可以配置主模型，也可以配置 Claude Agent SDK 使用的角色模型映射：
 
-## 架构设计
+- `smallFastModel`：压缩、摘要、轻量任务。
+- `sonnetModel`：探索、搜索、常规协作。
+- `opusModel`：规划、深度思考。
+- `haikuModel`：快速、轻量响应。
 
-Zora 采用 Electron 的主进程 / 预加载 / 渲染进程三层结构，通过 `contextBridge` 暴露受控 API，兼顾能力与安全性。
+新会话可以选择默认模型；记忆任务也可以使用独立模型。
 
-```text
-┌────────────────────────────────────────────────────────────┐
-│                     Renderer (React)                       │
-│        Chat / Awakening / Settings / Sidebar / FileTree    │
-│                 Jotai + Tailwind CSS v4                    │
-└───────────────────────┬────────────────────────────────────┘
-                        │ IPC via contextBridge
-┌───────────────────────▼────────────────────────────────────┐
-│                     Preload Bridge                         │
-│              window.zora API 安全暴露给前端                │
-└───────────────────────┬────────────────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────────────────┐
-│                        Main Process                        │
-│  Agent Runner / Prompt Builder / Provider Manager         │
-│  Memory Agent / Session Store / Workspace Store           │
-│  Skill Manager / MCP Manager / Feishu Bridge / HITL       │
-└───────────────────────┬────────────────────────────────────┘
-                        │
-┌───────────────────────▼────────────────────────────────────┐
-│                    Local Persistent Data                   │
-│   ~/.zora/providers.json / mcp.json / zoras/ / workspaces/ │
-└────────────────────────────────────────────────────────────┘
-```
+### HITL 权限：控制 Agent 的工具调用
 
-**关键设计取舍：**
+<p align="center">
+  <img src="./docs/images/zora-权限.png" alt="Zora 权限确认" width="900" />
+</p>
 
-| 选择 | 原因 |
+Zora 的桌面 Agent 可以读文件、写文件、调用工具和执行命令。为了让这些能力可控，它提供三种权限模式：
+
+| 模式 | 行为 |
 |------|------|
-| Bun | 更快的安装与脚本执行体验 |
-| Electron | 提供桌面能力、文件访问和系统级集成 |
-| esbuild 构建主进程 | 构建速度快，适合 Electron 主进程场景 |
-| Vite 构建渲染进程 | 启动快、HMR 流畅 |
-| Jotai | 原子化状态管理，适合复杂桌面 UI |
-| `contextBridge` | 控制渲染进程暴露能力，减少直接 Node 访问 |
-| 本地文件存储 | 将 API Key 与敏感配置直接保存在本地配置文件中，避免依赖系统钥匙串 |
+| Ask | 读操作自动放行，写入或高风险操作需要确认 |
+| Smart | 常见读写和编辑操作自动放行，命令类操作按风险继续确认 |
+| YOLO | 尽量自动执行所有操作，适合完全可信的本地任务 |
 
----
-
-## 项目结构
-
-```text
-ZoraAgent/
-├── AGENT.md
-├── CLAUDE.md
-├── LICENSE
-├── package.json
-├── bun.lock
-├── tsconfig.json
-├── vite.config.ts
-├── esbuild.config.ts
-├── electron-builder.yml
-├── skills/
-│   └── bootstrap/
-│       ├── SKILL.md
-│       ├── references/
-│       └── templates/
-├── src/
-│   ├── main/
-│   │   ├── index.ts                # Electron 主进程入口与 IPC 注册
-│   │   ├── agent.ts                # Claude Agent SDK 运行封装
-│   │   ├── prompt-builder.ts       # 系统提示词组装
-│   │   ├── productivity-runner.ts  # 日常会话执行与恢复
-│   │   ├── provider-manager.ts     # Provider 管理与本地配置存储
-│   │   ├── memory-agent.ts         # 后台记忆提取代理
-│   │   ├── memory-store.ts         # Zora 记忆文件读写
-│   │   ├── session-store.ts        # 本地会话消息持久化
-│   │   ├── workspace-store.ts      # 工作区管理
-│   │   ├── skill-manager.ts        # 技能加载与导入
-│   │   ├── skill-discovery.ts      # 外部工具技能发现
-│   │   ├── hitl.ts                 # 权限询问与 AskUser 交互
-│   │   ├── mcp-manager.ts          # MCP 配置、连接与内置能力
-│   │   ├── builtin-mcp/            # 内置 Web Search / Web Fetch
-│   │   ├── feishu/                 # 飞书桥接
-│   │   └── query-profiles/         # productivity / awakening / memory
-│   ├── preload/
-│   │   └── index.ts
-│   ├── renderer/
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   ├── components/
-│   │   │   ├── awakening/
-│   │   │   ├── chat/
-│   │   │   ├── filetree/
-│   │   │   ├── layout/
-│   │   │   ├── settings/
-│   │   │   ├── sidebar/
-│   │   │   └── ui/
-│   │   ├── store/
-│   │   ├── styles/
-│   │   ├── types/
-│   │   └── utils/
-│   ├── shared/
-│   │   ├── zora.d.ts
-│   │   └── types/
-│   └── types/
-└── dist/
-```
-
----
+当 Agent 需要确认时，Zora 会在界面中展示具体工具、命令或文件路径，你可以允许、拒绝，或把同类操作加入本次会话白名单。
 
 ## 快速开始
 
 ### 前置要求
 
-- **Bun** 1.3+（仓库当前使用 `bun@1.3.10`）
-- **Node.js** 20+
-- **Git**
-- 至少一个可用的 Provider API Key
+- Bun 1.3+（仓库当前声明 `bun@1.3.10`）
+- Git
+- 至少一个可用的模型 API Key
 
-### 安装与启动
+### 本地开发启动
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/Hoshea7/ZoraAgent.git
 cd ZoraAgent
-
-# 2. 安装依赖
 bun install
-
-# 3. 启动开发环境
 bun run dev
 ```
 
-首次启动后，进入应用内的 **设置 → 模型配置** 添加 Provider。完成后即可开始对话；如果当前 Zora 还未初始化，会先进入唤醒流程。
+首次启动后，进入应用内的 **设置 → 模型配置** 添加 Provider，并配置 API Key、Base URL 和模型。完成后即可开始对话；如果当前 Zora 还未初始化，会先进入唤醒流程。
 
 ### 常用命令
 
 ```bash
-# 启动开发模式
+# 开发模式：主进程、渲染进程和 Electron 一起启动
 bun run dev
 
-# 仅构建主进程
-bun run build:main
+# 类型检查
+bun run typecheck
 
-# 仅构建渲染进程
-bun run build:renderer
+# 运行测试
+bun run test
 
-# 生产构建并打包到 release/
+# 构建主进程和渲染进程
 bun run build
 
-# TypeScript 类型检查
-bun run typecheck
+# 打包 macOS 版本
+bun run dist:mac
 ```
 
----
+## 配置指南
 
-## 配置说明
+### 模型配置
 
-### 1. 模型配置
+在 **设置 → 模型配置** 中可以添加 Provider、设置默认模型、配置角色模型，并对每个已填写模型做连通性测试。
 
-在 **设置 → 模型配置** 中可以：
+Zora 当前通过 Claude Agent SDK 运行 Agent，因此自定义 Provider 需要提供兼容 Claude/Anthropic 风格的接口或网关。
 
-- 添加或编辑 Provider
-- 配置 API Key / Base URL / 默认模型
-- 配置 `smallFast / sonnet / opus / haiku` 角色模型
-- 测试连通性
+### 记忆设置
 
-### 2. 记忆设置
+在 **设置 → 记忆** 中可以切换 Immediate、Batch、Manual 三种模式，调整批处理空闲时间，并选择专门用于记忆整理的 Provider/模型。
 
-在 **设置 → 记忆** 中可以：
+### 飞书设置
 
-- 选择记忆模式：Immediate / Batch / Manual
-- 配置 Batch 模式的空闲时间
-- 指定独立的记忆 Provider / 模型，降低长期运行成本
+在 **设置 → 飞书** 中填写飞书自建应用的 App ID 和 App Secret，测试连接后即可启动 Bridge。应用需要启用 Bot 能力，并订阅 `im.message.receive_v1` 事件的长连接模式。
 
-### 3. 飞书设置
+### 技能管理
 
-在 **设置 → 飞书** 中可配置飞书接入信息，并启用桌面端与飞书之间的消息桥接。
+在 **设置 → 技能** 中可以扫描外部工具里的技能目录，并通过软链接或复制的方式导入到 Zora 的全局技能目录。
 
-### 4. 技能管理
-
-在 **设置 → 技能** 中可以扫描外部技能目录，并把技能导入到 Zora 的全局技能目录中。
-
-### 5. MCP 设置
+### MCP 设置
 
 在 **设置 → MCP** 中可以：
 
-- 启用内置 `Web Search` / `Web Fetch`
-- 配置对应的 Tavily / Jina Key
-- 手动添加或编辑自定义 MCP Server
+- 启用内置 `Web Search` / `Web Fetch`。
+- 配置 Tavily / Jina API Key。
+- 手动添加自定义 MCP Server。
+- 导入或合并 JSON 格式的 MCP 配置。
+- 测试 MCP Server 的连接状态。
 
----
+## 数据本地存储
 
-## 数据目录
-
-Zora 会把运行数据存储在 `~/.zora/` 下，方便长期记忆与会话管理。
+Zora 的运行数据默认保存在 `~/.zora/`。会话、记忆、工作区和技能都能随本机长期保留；
 
 ```text
 ~/.zora/
-├── providers.json                # Provider 配置（明文保存在本地）
-├── feishu.json                   # 飞书配置（明文保存在本地）
-├── memory-settings.json          # 记忆模式设置
-├── mcp.json                      # MCP 配置
-├── workspaces.json               # 工作区元数据
-├── skills/                       # Zora 全局技能目录
+├── providers.json
+├── feishu.json
+├── feishu-bindings.json
+├── feishu-dedup.json
+├── memory-settings.json
+├── mcp.json
+├── workspaces.json
+├── skills/
 ├── .claude-plugin/
-│   └── plugin.json               # Claude Agent SDK 插件清单
+│   └── plugin.json
 ├── workspaces/
 │   └── {workspaceId}/
 │       └── sessions/
@@ -353,102 +303,56 @@ Zora 会把运行数据存储在 `~/.zora/` 下，方便长期记忆与会话管
             └── YYYY-MM-DD.md
 ```
 
----
-
 ## 技术栈
 
 | 分类 | 技术 |
 |------|------|
-| 运行时 | Electron 39 |
-| 包管理 | Bun 1.3 |
-| AI 核心 | Claude Agent SDK 0.2.x |
-| 前端框架 | React 18.3 |
-| 状态管理 | Jotai 2.12 |
-| 样式方案 | Tailwind CSS v4 |
+| 桌面框架 | Electron 39 |
+| 前端 | React 18 + Vite 7 |
+| 状态管理 | Jotai |
+| 样式 | Tailwind CSS v4 |
+| Agent 核心 | Claude Agent SDK 0.2.x |
 | 主进程构建 | esbuild |
-| 渲染进程构建 | Vite 7 |
-| 语言 | TypeScript 5.8 |
-| 富文本渲染 | react-markdown + remark-gfm |
-| 目录增强 | rehype-slug + rehype-autolink-headings + remark-toc |
+| 包管理 / 运行脚本 | Bun |
+| 语言 | TypeScript |
+| Markdown 渲染 | react-markdown + remark-gfm |
 | 图表 | Mermaid |
-| 代码高亮 | react-syntax-highlighter |
-| UI 基础组件 | Radix UI |
 | 飞书集成 | `@larksuiteoapi/node-sdk` |
-| 打包分发 | electron-builder |
+| 打包 | electron-builder |
 
----
-
-## 工作原理
-
-### 1. 首次唤醒
+## 项目结构
 
 ```text
-首次启动
-  → 检测是否已完成基础设定
-  → 未完成则进入 Awakening Profile
-  → 通过引导对话生成基础人格与用户画像
-  → 保存到 ~/.zora/zoras/default/
-  → 切换到日常对话模式
+src/
+├── main/
+│   ├── agent.ts
+│   ├── productivity-runner.ts
+│   ├── prompt-builder.ts
+│   ├── provider-manager.ts
+│   ├── memory-agent.ts
+│   ├── session-store.ts
+│   ├── workspace-store.ts
+│   ├── skill-manager.ts
+│   ├── mcp-manager.ts
+│   ├── feishu/
+│   └── query-profiles/
+├── preload/
+├── renderer/
+│   ├── components/
+│   ├── store/
+│   ├── styles/
+│   └── utils/
+└── shared/
 ```
 
-### 2. 日常对话
+## Roadmap
+这些能力正在路上：
 
-```text
-用户输入
-  → Renderer 收集消息 / 附件 / 当前会话信息
-  → 通过 preload 暴露的 IPC API 发送到 Main
-  → productivity-runner 选择工作区与 session
-  → prompt-builder 组装系统提示词
-     [SOUL] + [IDENTITY] + [USER] + [技能说明] + [MEMORY] + [最近日志]
-  → Claude Agent SDK 执行
-  → 流式消息返回前端实时渲染
-  → 会话记录落盘保存
-```
+- 微信渠道对接
+- SKill自动进化能力
+- 记忆的自动做梦能力
+- 权限体系的自动审查模式
 
-### 3. 会话恢复
-
-```text
-已存在本地会话
-  → Claude SDK session 丢失或失效
-  → 从本地消息历史中截取恢复上下文
-  → 构造 recovered prompt
-  → 重新拉起新的 SDK session
-  → 尽量继续原对话
-```
-
-### 4. 记忆提取
-
-```text
-对话结束
-  → MemoryAgent 入队
-  → 根据设置选择 Immediate / Batch / Manual
-  → 读取 MEMORY.md + USER.md + 最近对话摘要
-  → 启动独立 memory profile（maxTurns = 7）
-  → 更新 MEMORY.md / USER.md / memory/YYYY-MM-DD.md
-```
-
----
-
-## 参与贡献
-
-欢迎 Issue、PR 或任何形式的建议。下面这些方向都很适合继续完善：
-
-- 更多 Provider 适配
-- 更多内置技能与技能市场能力
-- MCP 使用体验与生态兼容
-- 飞书交互体验打磨
-- 桌面端 UI/UX 细节优化
-- 国际化支持
-- 文档、示例与截图补充
-
-### 开发提示
-
-- 修改主进程后通常需要重新启动应用
-- 修改渲染进程后，Vite HMR 会自动刷新
-- 开发模式下 Electron 使用远程调试端口 `9222`
-- 提交前建议运行 `bun run typecheck`
-
----
 
 ## 许可证
 
