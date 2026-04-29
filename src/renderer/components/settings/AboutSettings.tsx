@@ -5,6 +5,7 @@ import { getErrorMessage } from "../../utils/message";
 import { Button } from "../ui/Button";
 
 const PROJECT_URL = "https://github.com/Hoshea7/ZoraAgent";
+const RELEASES_URL = `${PROJECT_URL}/releases`;
 
 const statusMeta: Record<
   UpdateStatus["state"],
@@ -28,7 +29,7 @@ const statusMeta: Record<
   available: {
     label: "发现更新",
     textClassName: "text-emerald-600",
-    description: "已经发现新版本，可以开始下载。",
+    description: "已经发现新版本。",
   },
   "not-available": {
     label: "已是最新",
@@ -129,6 +130,7 @@ export function AboutSettings() {
       setStatus({
         state: "unsupported",
         supported: false,
+        installMode: "manual",
         currentVersion: appVersion,
         message: "当前运行中的应用尚未加载更新模块，请重启应用后再试。",
         error: "未检测到 window.zora.updater 接口。",
@@ -179,6 +181,7 @@ export function AboutSettings() {
       status ?? {
         state: "idle",
         supported: false,
+        installMode: "manual",
         currentVersion: appVersion,
         message: "正在读取更新状态…",
       }
@@ -222,6 +225,14 @@ export function AboutSettings() {
     }
   };
 
+  const handleOpenManualUpdate = async () => {
+    try {
+      await window.zora.openExternal(effectiveStatus.manualUpdateUrl ?? RELEASES_URL);
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    }
+  };
+
   const handleInstall = async () => {
     const updaterApi = getUpdaterApi();
     if (!updaterApi) {
@@ -247,7 +258,9 @@ export function AboutSettings() {
 
   const primaryUpdateAction =
     effectiveStatus.state === "available"
-      ? { label: "下载更新", onClick: handleDownload, variant: "primary" as const }
+      ? effectiveStatus.installMode === "manual"
+        ? { label: "前往下载", onClick: handleOpenManualUpdate, variant: "primary" as const }
+        : { label: "下载更新", onClick: handleDownload, variant: "primary" as const }
       : effectiveStatus.state === "downloaded"
         ? { label: "安装并重启", onClick: handleInstall, variant: "primary" as const }
         : { label: effectiveStatus.state === "checking" ? "检查中…" : "检查更新", onClick: handleCheck, variant: "secondary" as const };
@@ -289,7 +302,9 @@ export function AboutSettings() {
             <p className="text-[15px] font-semibold text-stone-900">软件更新</p>
             <p className={cn("mt-1 text-[13px] leading-5", meta.textClassName)}>
               {effectiveStatus.state === "available" && effectiveStatus.latestVersion
-                ? `发现新版本 v${effectiveStatus.latestVersion}`
+                ? effectiveStatus.installMode === "manual"
+                  ? `发现新版本 v${effectiveStatus.latestVersion}，请前往下载页面手动安装`
+                  : `发现新版本 v${effectiveStatus.latestVersion}`
                 : effectiveStatus.state === "downloaded" && effectiveStatus.latestVersion
                   ? `v${effectiveStatus.latestVersion} 已下载完成，可直接安装`
                   : effectiveStatus.message ?? meta.description}

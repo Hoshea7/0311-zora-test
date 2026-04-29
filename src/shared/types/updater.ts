@@ -9,6 +9,8 @@ export type UpdateState =
   | "installing"
   | "error";
 
+export type UpdateInstallMode = "automatic" | "manual";
+
 export interface UpdateProgress {
   percent: number;
   transferred: number;
@@ -19,9 +21,11 @@ export interface UpdateProgress {
 export interface UpdateStatus {
   state: UpdateState;
   supported: boolean;
+  installMode: UpdateInstallMode;
   currentVersion: string;
   latestVersion?: string;
   releaseNotes?: string;
+  manualUpdateUrl?: string;
   progress?: UpdateProgress;
   checkedAt?: string;
   message?: string;

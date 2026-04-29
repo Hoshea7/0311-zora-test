@@ -232,6 +232,10 @@ bun run build
 bun run dist:mac
 ```
 
+### 软件更新策略
+
+Zora 会在应用内检查 GitHub Releases 中的新版本。由于当前 macOS 版本未使用 Apple Developer 证书签名，macOS 与 Linux 发现新版本后会打开发布页，由用户手动下载安装；Windows 版本保留应用内下载并重启安装。
+
 ## 配置指南
 
 ### 模型配置
