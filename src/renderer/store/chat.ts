@@ -9,7 +9,6 @@ import type { AgentRunSource } from "../../shared/zora";
 import { createId, isRecord, stringifyUnknown } from "../utils/message";
 import { normalizeThinkingContent } from "../utils/thinking";
 import { currentSessionIdAtom } from "./workspace";
-import { appPhaseAtom } from "./zora";
 
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
@@ -24,10 +23,6 @@ const EMPTY_DRAFT = "";
 const EMPTY_ATTACHMENTS: FileAttachment[] = [];
 
 function resolveActiveSessionKey(get: Getter): string {
-  if (get(appPhaseAtom).startsWith("awakening")) {
-    return "__awakening__";
-  }
-
   return get(currentSessionIdAtom) ?? "__draft__";
 }
 
@@ -238,21 +233,15 @@ export const runningSessionSourcesAtom = atom<Record<string, AgentRunSource>>({}
 
 /**
  * 派生：当前会话是否正在运行
- * 没有当前会话时，回退到 awakening 会话，兼容唤醒阶段 UI。
  */
 export const isCurrentSessionRunningAtom = atom((get) => {
   const currentId = get(currentSessionIdAtom);
-  if (currentId) {
-    return get(runningSessionsAtom).has(currentId);
-  }
-
-  return get(runningSessionsAtom).has("__awakening__");
+  return currentId ? get(runningSessionsAtom).has(currentId) : false;
 });
 
 export const currentSessionRunSourceAtom = atom<AgentRunSource | undefined>((get) => {
   const currentId = get(currentSessionIdAtom);
-  const targetSessionId = currentId ?? "__awakening__";
-  return get(runningSessionSourcesAtom)[targetSessionId];
+  return currentId ? get(runningSessionSourcesAtom)[currentId] : undefined;
 });
 
 /**

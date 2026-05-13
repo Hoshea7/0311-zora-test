@@ -35,14 +35,14 @@ export function ProcessCollapsible({
     : undefined;
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 min-w-0">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() =>
           setUserExpanded((current) => (current === null ? !expanded : !current))
         }
-        className="flex w-full items-center gap-2 rounded-md py-1 text-left text-stone-500 transition-colors duration-200 hover:bg-stone-50/80 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left text-stone-500 transition-colors duration-200 hover:bg-stone-50/80 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -79,9 +79,9 @@ export function ProcessCollapsible({
       <div
         aria-hidden={!expanded}
         className={cn(
-          "ml-1.5 mt-1 border-l-[1.5px] border-stone-200 pl-3 space-y-0.5",
-          "overflow-hidden transition-all duration-200 ease-out motion-reduce:transition-none",
-          expanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"
+          "ml-1.5 mt-1 min-w-0 border-l-[1.5px] border-stone-200 pl-3 space-y-1",
+          "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          expanded ? "opacity-100" : "max-h-0 overflow-hidden opacity-0 pointer-events-none"
         )}
       >
         {steps.map((step) =>

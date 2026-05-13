@@ -6,7 +6,7 @@ import type { AgentStreamEvent } from "../../shared/zora";
 import type { SDKRuntimeOptions } from "../sdk-runtime";
 
 export type AgentEventForwarder = (event: AgentStreamEvent) => void;
-export type QueryProfileName = "awakening" | "productivity" | "memory";
+export type QueryProfileName = "productivity" | "memory";
 
 export interface QueryProfile {
   name: QueryProfileName;

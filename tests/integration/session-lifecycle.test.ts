@@ -143,6 +143,14 @@ function createForwardEvent(sink: AgentStreamEvent[]) {
   };
 }
 
+async function readFirstSdkUserPrompt(query: ReturnType<typeof vi.fn>) {
+  const promptStream = query.mock.calls[0]?.[0]?.prompt as AsyncIterableIterator<{
+    message?: { content?: unknown };
+  }>;
+  const firstPrompt = await promptStream[Symbol.asyncIterator]().next();
+  return firstPrompt.value?.message?.content;
+}
+
 afterEach(() => {
   vi.doUnmock("node:os");
   vi.doUnmock("@anthropic-ai/claude-agent-sdk");
@@ -211,6 +219,9 @@ describe("integration session lifecycle", () => {
     const messages = await waitForMessages(sessionStoreModule.loadMessages, session.id, 3);
 
     expect(mocks.query).toHaveBeenCalledTimes(1);
+    const firstSdkUserPrompt = await readFirstSdkUserPrompt(mocks.query);
+    expect(firstSdkUserPrompt).toEqual(expect.stringContaining("<zora_dynamic_context>"));
+    expect(firstSdkUserPrompt).toEqual(expect.stringContaining("帮我更新这个文件。"));
     expect(mocks.buildSdkMcpServers).toHaveBeenCalledTimes(1);
     expect(events).toEqual(
       expect.arrayContaining([

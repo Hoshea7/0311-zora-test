@@ -23,11 +23,12 @@ export function createTestZoraHome(): TestZoraHome {
   const homeDir = join(homesRoot, `zora-live-test-${randomUUID()}`);
   const path = join(homeDir, ".zora");
   const sessionsDir = join(path, "workspaces", "default", "sessions");
-  const memoryDir = join(path, "zoras", "default", "memory");
+  const memoryDir = join(path, "memory");
+  const dailyDir = join(memoryDir, "daily");
 
   mkdirSync(homesRoot, { recursive: true });
   mkdirSync(sessionsDir, { recursive: true });
-  mkdirSync(memoryDir, { recursive: true });
+  mkdirSync(dailyDir, { recursive: true });
 
   return {
     homeDir,

@@ -16,7 +16,6 @@ import { memoryAgent } from "./memory-agent";
 import { ensureZoraDir } from "./memory-store";
 import type { QueryProfile } from "./query-profiles/types";
 export { resolveSDKCliPath } from "./sdk-runtime";
-import { setSessionId } from "./session-manager";
 import { setSdkSessionId } from "./session-store";
 
 type JsonRecord = Record<string, unknown>;
@@ -700,11 +699,7 @@ export async function runAgentWithProfile(
         const sid = message.session_id;
         if (typeof sid === "string" && sid.length > 0) {
           latestSdkSessionId = sid;
-          if (sessionId === "__awakening__") {
-            setSessionId("awakening", sid);
-          } else {
-            void setSdkSessionId(sessionId, sid, workspaceId);
-          }
+          void setSdkSessionId(sessionId, sid, workspaceId);
         }
       }
 
@@ -712,11 +707,7 @@ export async function runAgentWithProfile(
         const sid = message.session_id;
         if (typeof sid === "string" && sid.length > 0) {
           latestSdkSessionId = sid;
-          if (sessionId === "__awakening__") {
-            setSessionId("awakening", sid);
-          } else {
-            void setSdkSessionId(sessionId, sid, workspaceId);
-          }
+          void setSdkSessionId(sessionId, sid, workspaceId);
         }
 
         const detectedMissingSession = getMissingSdkSessionError(message);
@@ -749,11 +740,7 @@ export async function runAgentWithProfile(
       }
     }
     console.log(`${logPrefix} Query finished`);
-    if (
-      !run.stopping &&
-      profile.name !== "memory" &&
-      profile.name !== "awakening"
-    ) {
+    if (!run.stopping && profile.name !== "memory") {
       memoryAgent.onConversationEnd(sessionId, workspaceId).catch((err) => {
         console.error(`${logPrefix} Memory extraction failed:`, err);
       });

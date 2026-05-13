@@ -7,7 +7,7 @@ import {
   getMemorySettingsSync,
   loadMemorySettings,
 } from "./memory-settings";
-import { getZoraDirPath, loadFile } from "./memory-store";
+import { getZoraMemoryDirPath, loadFile } from "./memory-store";
 import { buildMemoryProfile } from "./query-profiles";
 import { getSDKRuntimeOptions } from "./sdk-runtime";
 import { listSessions, loadMessages } from "./session-store";
@@ -85,6 +85,21 @@ function serializeMemoryMessage(
   return null;
 }
 
+function buildMemoryStateSection(
+  memoryContent: string | null,
+  userContent: string | null
+) {
+  return [
+    "## Current Memory State",
+    "",
+    "### MEMORY.md",
+    memoryContent?.trim() || "(empty — not created yet)",
+    "",
+    "### USER.md",
+    userContent?.trim() || "(empty — not created yet)",
+  ].join("\n");
+}
+
 function buildMemoryPrompt(
   messages: ConversationMessage[],
   sessionTitle: string,
@@ -107,15 +122,7 @@ function buildMemoryPrompt(
       : serializedMessages;
 
   const transcript = visibleMessages.join("\n\n");
-  const memoryStateSection = [
-    "## Current Memory State",
-    "",
-    "### MEMORY.md",
-    memoryContent?.trim() || "(empty — not created yet)",
-    "",
-    "### USER.md",
-    userContent?.trim() || "(empty — not created yet)",
-  ].join("\n");
+  const memoryStateSection = buildMemoryStateSection(memoryContent, userContent);
 
   return {
     prompt: [
@@ -145,7 +152,9 @@ type BatchConversationEntry = {
 };
 
 function buildBatchMemoryPrompt(
-  entries: BatchConversationEntry[]
+  entries: BatchConversationEntry[],
+  memoryContent: string | null,
+  userContent: string | null
 ): MemoryPromptBuildResult {
   const sections: string[] = [];
   let totalMessages = 0;
@@ -191,6 +200,8 @@ function buildBatchMemoryPrompt(
   }
 
   const prompt = [
+    buildMemoryStateSection(memoryContent, userContent),
+    "",
     "## Batch: Multiple Conversations to Process",
     "",
     `You have **${entries.length}** conversations to analyze in this batch.`,
@@ -469,7 +480,7 @@ export class MemoryAgent {
 
     for (const [sessionId, context] of this.pendingContexts) {
       if (this.processing.has(sessionId)) continue;
-      if (sessionId === "__awakening__" || sessionId.startsWith("__memory_")) continue;
+      if (sessionId.startsWith("__memory_")) continue;
       pending.push({ sessionId, context });
     }
 
@@ -558,12 +569,18 @@ export class MemoryAgent {
         continue;
       }
 
+      const memoryContent = await loadFile("MEMORY.md", zoraId);
+      const userContent = await loadFile("USER.md", zoraId);
+      logMemoryAgent(
+        `Batch: loaded memory state for zoraId=${zoraId}: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
+      );
+
       const {
         prompt,
         totalTranscriptMessages,
         keptTranscriptMessages,
         omittedTranscriptMessages,
-      } = buildBatchMemoryPrompt(entries.map((item) => item.entry));
+      } = buildBatchMemoryPrompt(entries.map((item) => item.entry), memoryContent, userContent);
 
       logMemoryAgent(
         `Batch prompt built: sessions=${entries.length}, transcript=${keptTranscriptMessages}/${totalTranscriptMessages}, omitted=${omittedTranscriptMessages}, chars=${prompt.length}.`
@@ -576,7 +593,7 @@ export class MemoryAgent {
 
       try {
         const memorySessionId = `__memory_batch_${Date.now()}__`;
-        const targetZoraDir = getZoraDirPath(zoraId);
+        const targetZoraDir = getZoraMemoryDirPath(zoraId);
 
         logMemoryAgent(
           `Starting batch memory run ${memorySessionId} for ${batchSessionIds.length} sessions in ${targetZoraDir}.`
@@ -650,11 +667,6 @@ export class MemoryAgent {
       return Promise.resolve(false);
     }
 
-    if (sessionId === "__awakening__") {
-      logMemoryAgent("Skip awakening session for memory extraction.");
-      return Promise.resolve(false);
-    }
-
     if (sessionId.startsWith("__memory_")) {
       logMemoryAgent(`Skip nested memory session ${sessionId}.`);
       return Promise.resolve(false);
@@ -711,7 +723,7 @@ export class MemoryAgent {
         logMemoryAgent(
           `Built memory prompt for session ${sessionId}: transcript=${keptTranscriptMessages}/${totalTranscriptMessages}, omitted=${omittedTranscriptMessages}, chars=${prompt.length}, title="${sessionTitle}".`
         );
-        const targetZoraDir = getZoraDirPath(zoraId);
+        const targetZoraDir = getZoraMemoryDirPath(zoraId);
         const memorySessionId = `__memory_${sessionId}__`;
 
         logMemoryAgent(

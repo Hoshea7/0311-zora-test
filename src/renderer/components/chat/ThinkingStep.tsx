@@ -10,6 +10,8 @@ interface ThinkingStepProps {
 
 const EXPAND_SCROLL_PADDING_PX = 24;
 const EXPAND_SCROLL_SETTLE_MS = 220;
+const THINKING_PREVIEW_CHARS = 120;
+const THINKING_SCROLL_FOLLOW_THRESHOLD_PX = 24;
 
 function getScrollBehavior(): ScrollBehavior {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
@@ -51,6 +53,8 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
   const [userOverride, setUserOverride] = useState<boolean | null>(null);
   const prevStreamingRef = useRef(isStreaming);
   const stepRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const shouldFollowStreamingRef = useRef(true);
   const autoExpanded = isStreaming;
   const isOpen = userOverride !== null ? userOverride : autoExpanded;
   const normalizedContent = normalizeThinkingContent(thinking.content || "");
@@ -65,6 +69,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
 
   useEffect(() => {
     if (!isOpen) {
+      shouldFollowStreamingRef.current = true;
       return;
     }
 
@@ -89,6 +94,19 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
     };
   }, [isOpen, thinking.id]);
 
+  useEffect(() => {
+    shouldFollowStreamingRef.current = true;
+  }, [thinking.id]);
+
+  useEffect(() => {
+    const scrollNode = contentScrollRef.current;
+    if (!isOpen || !isStreaming || !scrollNode || !shouldFollowStreamingRef.current) {
+      return;
+    }
+
+    scrollNode.scrollTop = scrollNode.scrollHeight;
+  }, [isOpen, isStreaming, normalizedContent]);
+
   const duration =
     thinking.startedAt && thinking.completedAt
       ? formatDuration(thinking.completedAt - thinking.startedAt)
@@ -96,7 +114,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
 
   const hasContent = normalizedContent.trim().length > 0;
   const previewText = hasContent
-    ? normalizedContent.slice(0, 80).replace(/\n/g, " ")
+    ? normalizedContent.slice(0, THINKING_PREVIEW_CHARS).replace(/\s+/g, " ")
     : "thinking...";
 
   const handleToggle = () => {
@@ -109,13 +127,25 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
     });
   };
 
+  const handleContentScroll = () => {
+    const scrollNode = contentScrollRef.current;
+    if (!scrollNode || !isStreaming) {
+      return;
+    }
+
+    const distanceFromBottom =
+      scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight;
+    shouldFollowStreamingRef.current =
+      distanceFromBottom <= THINKING_SCROLL_FOLLOW_THRESHOLD_PX;
+  };
+
   return (
-    <div ref={stepRef} className="group">
+    <div ref={stepRef} className="group min-w-0">
       <button
         type="button"
         aria-expanded={isOpen}
         onClick={handleToggle}
-        className="mx-[-6px] flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-xs text-stone-400 transition-colors duration-200 hover:text-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="mx-[-6px] flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-xs text-stone-400 transition-colors duration-200 hover:text-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         {isStreaming ? (
           <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-orange-400 animate-pulse motion-reduce:animate-none" />
@@ -126,7 +156,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
         <span className="font-medium">Thinking</span>
 
         {!isOpen ? (
-          <span className="ml-1 min-w-0 max-w-[460px] truncate text-stone-300" title={previewText}>
+          <span className="ml-1 min-w-0 flex-1 truncate text-stone-300" title={previewText}>
             {previewText}
           </span>
         ) : null}
@@ -138,16 +168,22 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
 
       <div
         aria-hidden={!isOpen}
-        className={`overflow-hidden transition-all duration-200 ease-out motion-reduce:transition-none ${
-          isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+        className={`transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+          isOpen ? "opacity-100" : "max-h-0 overflow-hidden opacity-0"
         }`}
       >
-        <pre className="ml-[18px] mt-1 whitespace-pre-wrap font-sans text-xs leading-relaxed text-stone-400 select-text">
-          {normalizedContent}
-          {isStreaming ? (
-            <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse align-text-bottom bg-stone-400 motion-reduce:animate-none" />
-          ) : null}
-        </pre>
+        <div
+          ref={contentScrollRef}
+          onScroll={handleContentScroll}
+          className="ml-[18px] mt-1 max-h-[min(52vh,460px)] overflow-y-auto overscroll-contain pr-2 custom-scrollbar"
+        >
+          <pre className="m-0 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-stone-400 [overflow-wrap:anywhere] select-text">
+            {normalizedContent}
+            {isStreaming ? (
+              <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse align-text-bottom bg-stone-400 motion-reduce:animate-none" />
+            ) : null}
+          </pre>
+        </div>
       </div>
     </div>
   );

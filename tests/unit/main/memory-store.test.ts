@@ -2,8 +2,10 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,93 +44,108 @@ afterEach(() => {
 });
 
 describe("main memory-store", () => {
-  it("resolves the default zora paths and token estimate", async () => {
+  it("resolves the Zora memory root without zoras/default", async () => {
     const homeDir = createTempHome();
     const {
       DEFAULT_ZORA_ID,
       estimateTokens,
+      getZoraDailyDirPath,
       getZoraDirPath,
       getZoraMemoryDirPath,
     } = await loadMemoryStore(homeDir);
 
     expect(DEFAULT_ZORA_ID).toBe("default");
-    expect(getZoraDirPath()).toBe(path.join(homeDir, ".zora", "zoras", "default"));
-    expect(getZoraMemoryDirPath("custom")).toBe(
-      path.join(homeDir, ".zora", "zoras", "custom", "memory")
-    );
+    expect(getZoraMemoryDirPath()).toBe(path.join(homeDir, ".zora", "memory"));
+    expect(getZoraDirPath()).toBe(path.join(homeDir, ".zora", "memory"));
+    expect(getZoraDailyDirPath()).toBe(path.join(homeDir, ".zora", "memory", "daily"));
+    expect(getZoraMemoryDirPath()).not.toContain(path.join("zoras", "default"));
     expect(estimateTokens("abcdef")).toBe(2);
   });
 
-  it("creates the bootstrap scaffold and memory directory", async () => {
+  it("creates only the memory root and daily directory", async () => {
     const homeDir = createTempHome();
     const {
-      ensureBootstrapScaffold,
-      getZoraDirPath,
+      ensureZoraDir,
+      getZoraDailyDirPath,
       getZoraMemoryDirPath,
-      loadFile,
     } = await loadMemoryStore(homeDir);
 
-    const createdFiles = await ensureBootstrapScaffold();
+    await ensureZoraDir();
 
-    expect(createdFiles).toEqual(["SOUL.md", "IDENTITY.md", "USER.md"]);
-    expect(existsSync(getZoraDirPath())).toBe(true);
     expect(existsSync(getZoraMemoryDirPath())).toBe(true);
-    await expect(loadFile("SOUL.md")).resolves.toContain("# SOUL.md");
-    await expect(loadFile("IDENTITY.md")).resolves.toContain("# IDENTITY.md");
-    await expect(loadFile("USER.md")).resolves.toContain("# USER.md");
+    expect(existsSync(getZoraDailyDirPath())).toBe(true);
+    expect(readdirSync(getZoraMemoryDirPath()).sort()).toEqual(["daily"]);
   });
 
-  it("preserves non-empty scaffold files and only fills missing or empty ones", async () => {
+  it("saves and loads USER.md and MEMORY.md from the new memory root", async () => {
     const homeDir = createTempHome();
     const {
-      ensureBootstrapScaffold,
-      loadFile,
-      saveFile,
-    } = await loadMemoryStore(homeDir);
-
-    await saveFile("SOUL.md", "Custom soul");
-    await saveFile("IDENTITY.md", "");
-
-    const createdFiles = await ensureBootstrapScaffold();
-
-    expect(createdFiles).toEqual(["IDENTITY.md", "USER.md"]);
-    await expect(loadFile("SOUL.md")).resolves.toBe("Custom soul");
-    await expect(loadFile("IDENTITY.md")).resolves.toContain("# IDENTITY.md");
-    await expect(loadFile("USER.md")).resolves.toContain("# USER.md");
-  });
-
-  it("supports saving, loading, checking, and listing zora files", async () => {
-    const homeDir = createTempHome();
-    const {
-      getZoraDirPath,
+      getZoraMemoryDirPath,
       hasFile,
       listFiles,
       loadFile,
       saveFile,
     } = await loadMemoryStore(homeDir);
 
-    await saveFile("beta.md", "beta");
-    await saveFile("alpha.md", "alpha");
-    mkdirSync(path.join(getZoraDirPath(), "ignored-dir"), { recursive: true });
+    await saveFile("USER.md", "# USER.md\n\n称呼：天");
+    await saveFile("MEMORY.md", "# MEMORY.md\n\n## Core Facts");
 
-    await expect(loadFile("alpha.md")).resolves.toBe("alpha");
-    await expect(hasFile("alpha.md")).resolves.toBe(true);
+    await expect(loadFile("USER.md")).resolves.toContain("称呼：天");
+    await expect(loadFile("MEMORY.md")).resolves.toContain("Core Facts");
+    await expect(hasFile("USER.md")).resolves.toBe(true);
     await expect(hasFile("missing.md")).resolves.toBe(false);
-    await expect(listFiles()).resolves.toEqual(["alpha.md", "beta.md"]);
-
-    expect(readdirSync(getZoraDirPath()).sort()).toContain("ignored-dir");
+    await expect(listFiles()).resolves.toEqual(["MEMORY.md", "USER.md"]);
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "USER.md"), "utf8")).toContain("称呼：天");
+    expect(existsSync(path.join(homeDir, ".zora", "zoras", "default", "USER.md"))).toBe(false);
   });
 
-  it("appends daily logs and loads recent history", async () => {
+  it("does not allow SOUL.md or IDENTITY.md in the new memory structure", async () => {
+    const homeDir = createTempHome();
+    const {
+      getZoraMemoryDirPath,
+      saveFile,
+    } = await loadMemoryStore(homeDir);
+
+    await expect(saveFile("SOUL.md", "old soul")).rejects.toThrow(
+      "not part of the Zora memory structure"
+    );
+    await expect(saveFile("IDENTITY.md", "old identity")).rejects.toThrow(
+      "not part of the Zora memory structure"
+    );
+    expect(existsSync(path.join(getZoraMemoryDirPath(), "SOUL.md"))).toBe(false);
+    expect(existsSync(path.join(getZoraMemoryDirPath(), "IDENTITY.md"))).toBe(false);
+  });
+
+  it("falls back to old zoras/default files only for reads", async () => {
+    const homeDir = createTempHome();
+    const {
+      getLegacyZoraDirPath,
+      getZoraMemoryDirPath,
+      loadFile,
+      saveFile,
+    } = await loadMemoryStore(homeDir);
+
+    mkdirSync(getLegacyZoraDirPath(), { recursive: true });
+    writeFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "Legacy user", "utf8");
+
+    await expect(loadFile("USER.md")).resolves.toBe("Legacy user");
+
+    await saveFile("USER.md", "New user");
+
+    await expect(loadFile("USER.md")).resolves.toBe("New user");
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "USER.md"), "utf8")).toBe("New user");
+    expect(readFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "utf8")).toBe("Legacy user");
+  });
+
+  it("appends daily logs under daily/ and loads recent history", async () => {
     const homeDir = createTempHome();
     vi.useFakeTimers();
 
     const {
       appendDailyLog,
-      isBootstrapped,
+      getZoraDailyDirPath,
       loadDailyLog,
       loadRecentLogs,
-      saveFile,
     } = await loadMemoryStore(homeDir);
 
     vi.setSystemTime(new Date("2026-04-23T08:15:00+08:00"));
@@ -136,7 +153,6 @@ describe("main memory-store", () => {
 
     vi.setSystemTime(new Date("2026-04-24T09:45:00+08:00"));
     await appendDailyLog("- reviewed feedback");
-    await saveFile("SOUL.md", "");
 
     await expect(loadDailyLog("2026-04-23")).resolves.toContain("### 08:15");
     await expect(loadDailyLog("2026-04-24")).resolves.toContain("### 09:45");
@@ -144,6 +160,9 @@ describe("main memory-store", () => {
       "## 2026-04-23\n### 08:15\n- planned launch\n\n## 2026-04-24\n### 09:45\n- reviewed feedback"
     );
     await expect(loadRecentLogs(0)).resolves.toBeNull();
-    await expect(isBootstrapped()).resolves.toBe(true);
+    expect(readdirSync(getZoraDailyDirPath()).sort()).toEqual([
+      "2026-04-23.md",
+      "2026-04-24.md",
+    ]);
   });
 });

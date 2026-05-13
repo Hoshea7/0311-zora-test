@@ -39,18 +39,13 @@ import {
   resolveDefaultModelTarget,
   saveDefaultModelSettings,
 } from "./default-model-settings";
-import { ensureBootstrapScaffold } from "./memory-store";
 import {
   feishuBridge,
   loadFeishuConfig,
   saveFeishuConfig,
   testFeishuConnection,
 } from "./feishu";
-import { isBootstrapMode } from "./prompt-builder";
 import { runProductivitySession } from "./productivity-runner";
-import {
-  buildAwakeningProfile,
-} from "./query-profiles";
 import { providerManager } from "./provider-manager";
 import { McpManager, setSharedMcpManager } from "./mcp-manager";
 import { listDirectory, startFileWatcher, stopFileWatcher } from "./file-tree";
@@ -68,7 +63,6 @@ import {
   saveAttachments,
   updateSessionMeta,
 } from "./session-store";
-import { clearSessionId, getSessionId } from "./session-manager";
 import {
   createWorkspace,
   deleteWorkspace,
@@ -374,6 +368,21 @@ function compactEventForRenderer(payload: AgentStreamEvent): AgentStreamEvent {
   }
 
   return payload;
+}
+
+function broadcastAgentStreamEvent(sessionId: string, payload: AgentStreamEvent) {
+  const eventPayload = {
+    ...compactEventForRenderer(payload),
+    sessionId,
+  };
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) {
+      continue;
+    }
+
+    window.webContents.send("agent:stream", eventPayload);
+  }
 }
 
 function parseProviderCreateInput(input: unknown): ProviderCreateInput {
@@ -1340,7 +1349,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     "agent:chat",
     async (
-      event,
+      _event,
       text: unknown,
       sessionId: unknown,
       workspaceId: unknown,
@@ -1401,14 +1410,8 @@ app.whenReady().then(async () => {
       );
       memoryAgent.scheduleProcessing(sessionId, targetWorkspaceId);
 
-      const target = event.sender;
       const forwardEvent = (payload: AgentStreamEvent) => {
-        if (!target.isDestroyed()) {
-          target.send("agent:stream", {
-            ...compactEventForRenderer(payload),
-            sessionId,
-          });
-        }
+        broadcastAgentStreamEvent(sessionId, payload);
 
         const message = payload as Record<string, unknown>;
 
@@ -1472,51 +1475,6 @@ app.whenReady().then(async () => {
     }
   );
 
-  ipcMain.handle("agent:awaken", async (event, text: unknown) => {
-    if (typeof text !== "string" || text.trim().length === 0) {
-      throw new Error("A non-empty prompt is required.");
-    }
-    if (isAgentRunningForSession("__awakening__")) {
-      throw new Error("Awakening agent is already running.");
-    }
-
-    console.log("[index] Current mode: awakening");
-
-    const target = event.sender;
-    const forwardEvent = (payload: AgentStreamEvent) => {
-      if (!target.isDestroyed()) {
-        target.send("agent:stream", {
-          ...compactEventForRenderer(payload),
-          sessionId: "__awakening__",
-        });
-      }
-    };
-
-    const existingSessionId = getSessionId("awakening");
-    const profile = await buildAwakeningProfile({
-      userPrompt: text.trim(),
-      cwd: getPackagedSafeWorkingDirectory(),
-      sdkRuntime: getSDKRuntimeOptions(),
-      onEvent: forwardEvent,
-      isFirstTurn: !existingSessionId,
-      sessionId: existingSessionId,
-    });
-
-    await runAgentWithProfile("__awakening__", profile, forwardEvent, undefined, "default", "awakening");
-  });
-
-  ipcMain.handle("agent:awakening-complete", async () => {
-    const createdFiles = await ensureBootstrapScaffold();
-    await stopAgentForSession("__awakening__");
-    clearSessionId("awakening");
-    if (createdFiles.length > 0) {
-      console.log(
-        `[index] Awakening skipped before bootstrap completed. Created default scaffold: ${createdFiles.join(", ")}.`
-      );
-    }
-    console.log("[index] Awakening complete, session cleared.");
-  });
-
   ipcMain.handle("agent:stop", async (_event, sessionId: unknown) => {
     if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
       throw new Error("A valid sessionId is required.");
@@ -1538,11 +1496,6 @@ app.whenReady().then(async () => {
     }
 
     return getAgentRunInfo(sessionId.trim());
-  });
-
-  ipcMain.handle("zora:is-awakened", async () => {
-    const bootstrapMode = await isBootstrapMode();
-    return !bootstrapMode;
   });
 
   ipcMain.handle(

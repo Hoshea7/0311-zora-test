@@ -293,8 +293,6 @@ const zoraApi: ZoraApi = {
       };
     },
   },
-  awaken: (text: string) => ipcRenderer.invoke("agent:awaken", text) as Promise<void>,
-  awakeningComplete: () => ipcRenderer.invoke("agent:awakening-complete") as Promise<void>,
   onStream: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: AgentStreamEvent) => {
       callback(payload);
@@ -308,7 +306,6 @@ const zoraApi: ZoraApi = {
   },
   stopAgent: (sessionId: string) =>
     ipcRenderer.invoke("agent:stop", sessionId) as Promise<void>,
-  isAwakened: () => ipcRenderer.invoke("zora:is-awakened") as Promise<boolean>,
   setPermissionMode: (mode: PermissionMode) =>
     ipcRenderer.invoke("agent:permission-mode:set", mode) as Promise<void>,
   selectFiles: () => ipcRenderer.invoke("dialog:select-files"),

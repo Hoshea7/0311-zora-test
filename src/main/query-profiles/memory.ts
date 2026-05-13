@@ -1,4 +1,4 @@
-import { DEFAULT_ZORA_ID, getZoraDirPath } from "../memory-store";
+import { DEFAULT_ZORA_ID, getZoraMemoryDirPath } from "../memory-store";
 import { resolveSdkEnvForProfile } from "./sdk-env";
 import type { SDKRuntimeOptions } from "../sdk-runtime";
 import type { QueryProfile } from "./types";
@@ -17,13 +17,11 @@ and precise — read what you need, write only what matters, then finish.
 
 ## Working Directory
 
-You are in the Zora data directory. The files here are:
+You are in the Zora memory directory. The files here are:
 
-- SOUL.md — Zora's behavioral rules and personality
-- IDENTITY.md — Zora's identity card (DO NOT modify)
-- USER.md — User profile
-- MEMORY.md — Core structured memory (your main target)
-- memory/ — Directory of daily episodic logs (YYYY-MM-DD.md)
+- USER.md — User identity, preferred name, and durable preferences
+- MEMORY.md — Long-term structured memory
+- daily/ — Daily conversation summaries (YYYY-MM-DD.md)
 
 ## Task
 
@@ -37,15 +35,12 @@ The current contents of MEMORY.md and USER.md are provided in the
 conversation prompt below. Review them to understand what Zora already
 knows. Do NOT re-read these files with tools — the provided content
 is up-to-date and authoritative.
-(Only read SOUL.md if the conversation contained clear behavioral
-lessons — this is rare.)
 
 ### Step 2: Analyze the conversation(s)
 Identify items worth remembering:
 - **Core Facts**: New factual info about the user, their projects, environment
 - **Preferences**: Communication, tool, workflow preferences discovered
 - **Decisions**: Important decisions made during the conversation
-- **Lessons**: Things Zora did well or poorly (rare, only clear cases)
 - **User Profile Updates**: New info about the user's identity/role/context
 
 > **Batch mode**: When you receive multiple conversations under
@@ -97,12 +92,8 @@ If you learned new factual information about the user (timezone, role
 change, new project involvement, etc.), update the relevant fields.
 Do NOT change personality notes or relationship framing.
 
-### Step 5: Update SOUL.md (if needed — rare)
-ONLY append to the "Lessons Learned" section if there's a genuine
-behavioral lesson. This should happen rarely.
-
-### Step 6: Write daily log
-Append to memory/YYYY-MM-DD.md (today's date, create if needed):
+### Step 5: Write daily log
+Append to daily/YYYY-MM-DD.md (today's date, create if needed):
 
 ### HH:MM | Session: {brief 2-5 word topic}
 - Key point 1
@@ -114,7 +105,7 @@ If today's log already contains an entry for this same session topic,
 APPEND only new key points to that existing entry instead of creating
 a duplicate session block.
 
-### Step 7: Budget check
+### Step 6: Budget check
 After writing, if MEMORY.md exceeds ~200 lines:
 - Merge similar/redundant entries
 - Remove clearly outdated entries (completed projects, superseded decisions)
@@ -135,7 +126,7 @@ export async function buildMemoryProfile(
   const env = await resolveSdkEnvForProfile("memory");
 
   const options: QueryProfile["options"] = {
-    cwd: getZoraDirPath(zoraId),
+    cwd: getZoraMemoryDirPath(zoraId),
     pathToClaudeCodeExecutable: ctx.sdkRuntime.pathToClaudeCodeExecutable,
     executable: ctx.sdkRuntime.executable,
     executableArgs: ctx.sdkRuntime.executableArgs,
@@ -145,6 +136,7 @@ export async function buildMemoryProfile(
     env: {
       ...env,
       ...ctx.sdkRuntime.env,
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
     },
     systemPrompt: {
       type: "preset",

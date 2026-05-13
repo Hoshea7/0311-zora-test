@@ -18,6 +18,7 @@ import {
   loadMessages,
 } from "./session-store";
 import { getWorkspacePath } from "./workspace-store";
+import { buildZoraPrompt } from "./prompts/zora-dynamic-context";
 
 const RECOVERY_MAX_MESSAGES = 80;
 const RECOVERY_MAX_TRANSCRIPT_CHARS = 100_000;
@@ -173,6 +174,7 @@ export async function runProductivitySession({
   const initialPrompt = shouldRecoverFromTranscript
     ? buildRecoveredPromptFromMessages(persistedMessages, currentPrompt)
     : currentPrompt;
+  const initialPromptWithContext = await buildZoraPrompt(initialPrompt);
 
   if (shouldRecoverFromTranscript) {
     console.warn(
@@ -181,7 +183,7 @@ export async function runProductivitySession({
   }
 
   const profile = await buildProductivityProfile({
-    userPrompt: initialPrompt,
+    userPrompt: initialPromptWithContext,
     cwd: workspacePath,
     sdkRuntime,
     onEvent: forwardEvent,
@@ -222,8 +224,9 @@ export async function runProductivitySession({
       recoveredMessages,
       currentPrompt
     );
+    const rebuiltPromptWithContext = await buildZoraPrompt(rebuiltPrompt);
     const recoveredProfile = await buildProductivityProfile({
-      userPrompt: rebuiltPrompt,
+      userPrompt: rebuiltPromptWithContext,
       cwd: workspacePath,
       sdkRuntime,
       onEvent: forwardEvent,
@@ -259,6 +262,7 @@ export async function runProductivitySession({
     if (!followUpPrompt.trim()) {
       break;
     }
+    const followUpPromptWithContext = await buildZoraPrompt(followUpPrompt);
 
     const resumeSessionId =
       runResult.sdkSessionId ?? await getSdkSessionId(sessionId, workspaceId);
@@ -267,7 +271,7 @@ export async function runProductivitySession({
     );
 
     const followUpProfile = await buildProductivityProfile({
-      userPrompt: followUpPrompt,
+      userPrompt: followUpPromptWithContext,
       cwd: workspacePath,
       sdkRuntime,
       onEvent: forwardEvent,

@@ -24,6 +24,7 @@ export async function buildProductivityProfile(ctx: ProfileBuildContext): Promis
     env: {
       ...env,
       ...ctx.sdkRuntime.env,
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
     },
     plugins: [
       { type: "local" as const, path: getZoraPluginPath() },

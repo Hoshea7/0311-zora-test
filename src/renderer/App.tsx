@@ -15,17 +15,11 @@ import {
   ensureActiveTurnAtom,
   failTurnAtom,
   isAgentIdleAtom,
-  messagesAtom,
   sessionMessagesAtom,
   setSessionMessagesAtom,
   setSessionRunningAtom,
   startBodySegmentAtom,
 } from "./store/chat";
-import {
-  appPhaseAtom,
-  checkAwakeningAtom,
-  completeAwakeningAtom,
-} from "./store/zora";
 import {
   pushPermissionAtom,
   resolvePermissionAtom,
@@ -54,12 +48,9 @@ import {
   isRecord,
 } from "./utils/message";
 import { AppShell } from "./components/layout/AppShell";
-import { AwakeningDialogue } from "./components/awakening/AwakeningDialogue";
-import { AwakeningCanvas } from "./components/awakening/AwakeningCanvas";
-import { AwakeningComplete } from "./components/awakening/AwakeningComplete";
 
 function normalizeRunSource(value: unknown): AgentRunSource | undefined {
-  return value === "desktop" || value === "feishu" || value === "awakening" || value === "memory"
+  return value === "desktop" || value === "feishu" || value === "memory"
     ? value
     : undefined;
 }
@@ -171,9 +162,7 @@ function mergeConversationMessages(
 }
 
 export default function App() {
-  const appPhase = useAtomValue(appPhaseAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
-  const appPhaseRef = useRef(appPhase);
   const toolInputBufferRef = useRef(new Map<string, string>());
   const toolInputFlushTimerRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const activeBlockTypeRef = useRef<string | null>(null);
@@ -183,11 +172,8 @@ export default function App() {
   const queuedReplayAckRef = useRef(new Map<string, string | undefined>());
   const lastAssistantStopReasonRef = useRef(new Map<string, string | null>());
   const store = useStore();
-  const checkAwakening = useSetAtom(checkAwakeningAtom);
-  const completeAwakening = useSetAtom(completeAwakeningAtom);
   const loadProviders = useSetAtom(loadProvidersAtom);
   const loadMcpConfig = useSetAtom(loadMcpConfigAtom);
-  const setMessages = useSetAtom(messagesAtom);
   const setSessionMessages = useSetAtom(setSessionMessagesAtom);
 
   const ensureActiveTurn = useSetAtom(ensureActiveTurnAtom);
@@ -213,10 +199,6 @@ export default function App() {
   const clearHitlForSession = useSetAtom(clearHitlForSessionAtom);
 
   useEffect(() => {
-    checkAwakening();
-  }, [checkAwakening]);
-
-  useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
 
@@ -227,11 +209,7 @@ export default function App() {
   }, [loadMcpConfig]);
 
   useEffect(() => {
-    appPhaseRef.current = appPhase;
-  }, [appPhase]);
-
-  useEffect(() => {
-    if (appPhase !== "chat" || !currentSessionId) {
+    if (!currentSessionId) {
       return;
     }
 
@@ -256,7 +234,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [appPhase, currentSessionId, setSessionRunning]);
+  }, [currentSessionId, setSessionRunning]);
 
   useEffect(() => {
     const unsubscribe = window.zora.feishu.onAgentStateChanged((payload) => {
@@ -405,10 +383,8 @@ export default function App() {
     const unsubscribe = zora.onStream((streamEvent) => {
       const eventSessionId = streamEvent.sessionId;
       const activeSessionId = store.get(currentSessionIdAtom);
-      const activeMessageSessionId =
-        appPhaseRef.current.startsWith("awakening") ? "__awakening__" : activeSessionId;
-      const isCurrentSessionEvent = eventSessionId === activeMessageSessionId;
-      const targetSessionId = eventSessionId ?? activeMessageSessionId;
+      const isCurrentSessionEvent = eventSessionId === activeSessionId;
+      const targetSessionId = eventSessionId ?? activeSessionId;
 
       if (streamEvent.type === "session_sync") {
         const workspaceId =
@@ -558,19 +534,6 @@ export default function App() {
             setIsAgentIdle(false);
           }
 
-          if (appPhaseRef.current.startsWith("awakening") && isCurrentSessionEvent) {
-            void zora.isAwakened().then((awakened) => {
-              if (awakened) {
-                void zora.awakeningComplete().then(() => {
-                  setMessages([]);
-                  completeAwakening();
-                }).catch(() => {
-                  setMessages([]);
-                  completeAwakening();
-                });
-              }
-            });
-          }
         }
 
         if (streamEvent.status === "stopped") {
@@ -814,8 +777,6 @@ export default function App() {
     failTurn,
     setIsAgentIdle,
     store,
-    completeAwakening,
-    setMessages,
     setSessionMessages,
     setSessionRunning,
     pushPermission,
@@ -824,22 +785,6 @@ export default function App() {
     resolveAskUser,
     clearHitlForSession,
   ]);
-
-  if (appPhase === "splash") {
-    return null;
-  }
-
-  if (appPhase === "awakening-visual") {
-    return <AwakeningCanvas />;
-  }
-
-  if (appPhase === "awakening-dialogue") {
-    return <AwakeningDialogue />;
-  }
-
-  if (appPhase === "awakening-complete") {
-    return <AwakeningComplete />;
-  }
 
   return <AppShell />;
 }

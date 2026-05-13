@@ -46,7 +46,7 @@ function resolveMemoryRequestedModelId(
 }
 
 export async function resolveSdkEnvForProfile(
-  profileName: "awakening" | "productivity" | "memory",
+  profileName: "productivity" | "memory",
   options?: {
     providerId?: string;
     selectedModelId?: string;

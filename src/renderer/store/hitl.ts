@@ -5,7 +5,6 @@ import type {
   PermissionMode,
 } from "../../shared/zora";
 import { currentSessionIdAtom } from "./workspace";
-import { appPhaseAtom } from "./zora";
 
 type SessionId = string;
 type SessionScopedQueues<T> = Record<SessionId, T[]>;
@@ -13,10 +12,6 @@ type SessionScopedPermissionRequest = PermissionRequest & { sessionId: SessionId
 type SessionScopedAskUserRequest = AskUserRequest & { sessionId: SessionId };
 
 function resolveActiveHitlSessionId(get: Getter): SessionId {
-  if (get(appPhaseAtom).startsWith("awakening")) {
-    return "__awakening__";
-  }
-
   return get(currentSessionIdAtom) ?? "__draft__";
 }
 

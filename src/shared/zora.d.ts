@@ -33,7 +33,7 @@ import type {
 export type { SkillMeta };
 
 export type AgentStatus = "started" | "finished" | "stopped";
-export type AgentRunSource = "desktop" | "feishu" | "awakening" | "memory";
+export type AgentRunSource = "desktop" | "feishu" | "memory";
 export interface AgentRunInfo {
   running: boolean;
   source?: AgentRunSource;
@@ -197,8 +197,6 @@ export type AgentStreamEvent = (
   sessionId?: string;
 };
 
-export type AppPhase = "splash" | "awakening-visual" | "awakening-dialogue" | "awakening-complete" | "chat";
-
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
@@ -324,7 +322,6 @@ export interface ZoraApi {
   };
   onStream: (callback: (event: AgentStreamEvent) => void) => () => void;
   stopAgent: (sessionId: string) => Promise<void>;
-  isAwakened: () => Promise<boolean>;
   setPermissionMode: (mode: PermissionMode) => Promise<void>;
   selectFiles: () => Promise<FileAttachment[]>;
   readFileAsAttachment: (filePath: string) => Promise<FileAttachment | null>;
@@ -333,8 +330,6 @@ export interface ZoraApi {
   respondPermission: (response: PermissionResponse) => Promise<void>;
   /** 回复 Agent 向用户的提问 */
   respondAskUser: (response: AskUserResponse) => Promise<void>;
-  awaken: (text: string) => Promise<void>;
-  awakeningComplete: () => Promise<void>;
 }
 
 declare global {
