@@ -90,8 +90,23 @@ import {
   installUpdate,
   isInstallingUpdate,
 } from "./updater";
+import { normalizeExternalUrl } from "./external-url";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+
+async function openExternalUrl(url: unknown) {
+  await shell.openExternal(normalizeExternalUrl(url));
+}
+
+function configureExternalNavigation(window: BrowserWindow) {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalUrl(url).catch((error) => {
+      console.warn(`[index] Failed to open external URL: ${url}`, error);
+    });
+
+    return { action: "deny" };
+  });
+}
 
 function isPermissionMode(value: unknown): value is PermissionMode {
   return value === "ask" || value === "smart" || value === "yolo";
@@ -669,6 +684,8 @@ function createWindow() {
     }
   });
 
+  configureExternalNavigation(window);
+
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     window.loadURL(process.env.VITE_DEV_SERVER_URL);
     initAutoUpdater();
@@ -691,7 +708,7 @@ app.whenReady().then(async () => {
       throw new Error("A valid url is required.");
     }
 
-    await shell.openExternal(url.trim());
+    await openExternalUrl(url);
   });
 
   ipcMain.handle("updater:get-status", () => {

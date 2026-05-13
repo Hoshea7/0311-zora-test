@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect, useRef, createContext, useContext, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
+import { memo, useMemo, useState, useEffect, useRef, createContext, useContext, type ComponentPropsWithoutRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { marked } from "marked";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -37,6 +37,7 @@ const MERMAID_CONFIG = {
   securityLevel: "strict",
   fontFamily: "inherit"
 } as const;
+const EXTERNAL_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 let syntaxHighlighterAssetsPromise: Promise<SyntaxHighlighterAssets> | null = null;
 let mermaidPromise: Promise<typeof import("mermaid")["default"]> | null = null;
@@ -94,6 +95,29 @@ function loadMermaid() {
   }
 
   return mermaidPromise;
+}
+
+function isExternalHref(href: string | undefined): href is string {
+  if (!href) {
+    return false;
+  }
+
+  try {
+    return EXTERNAL_LINK_PROTOCOLS.has(new URL(href).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function openMarkdownLink(event: ReactMouseEvent<HTMLAnchorElement>, href: string | undefined) {
+  if (!isExternalHref(href)) {
+    return;
+  }
+
+  event.preventDefault();
+  window.zora.openExternal(href).catch((error) => {
+    console.error("Failed to open external link:", error);
+  });
 }
 
 function sanitizeMermaidSvg(svg: string) {
@@ -603,17 +627,22 @@ const markdownComponents: Components = {
       {children}
     </li>
   ),
-  a: ({ href, children, ...props }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="font-medium text-orange-700 underline decoration-orange-200 underline-offset-[0.22em] transition-colors hover:text-orange-800 hover:decoration-orange-400"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
+  a: ({ href, children, ...props }) => {
+    const isExternal = isExternalHref(href);
+
+    return (
+      <a
+        href={href}
+        target={isExternal ? "_blank" : undefined}
+        rel={isExternal ? "noreferrer" : undefined}
+        onClick={(event) => openMarkdownLink(event, href)}
+        className="font-medium text-orange-700 underline decoration-orange-200 underline-offset-[0.22em] transition-colors hover:text-orange-800 hover:decoration-orange-400"
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  },
   blockquote: ({ children, ...props }) => (
     <blockquote
       className="rounded-r-[18px] border-l-[3px] border-orange-300/80 bg-[#fbf5ee] px-4 py-3 text-stone-600"
