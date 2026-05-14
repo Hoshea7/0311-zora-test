@@ -67,6 +67,20 @@ export interface SessionMeta {
   providerId?: string;
   providerLocked?: boolean;
   selectedModelId?: string;
+  branch?: SessionBranchMeta;
+}
+
+export interface SessionBranchMeta {
+  sourceSessionId: string;
+  sourceSdkSessionId: string;
+  forkedAt: string;
+  forkMode: "full";
+  inheritedMessageCount: number;
+}
+
+export interface SessionForkResult {
+  session: SessionMeta;
+  messages: ConversationMessage[];
 }
 
 export interface WorkspaceMeta {
@@ -297,6 +311,11 @@ export interface ZoraApi {
   listSessions: (workspaceId?: string) => Promise<SessionMeta[]>;
   loadMessages: (sessionId: string, workspaceId?: string) => Promise<ConversationMessage[]>;
   createSession: (title: string, workspaceId?: string) => Promise<SessionMeta>;
+  forkSession: (
+    sourceSessionId: string,
+    workspaceId?: string,
+    title?: string
+  ) => Promise<SessionForkResult>;
   deleteSession: (sessionId: string, workspaceId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string, workspaceId?: string) => Promise<void>;
   lockSessionModel: (

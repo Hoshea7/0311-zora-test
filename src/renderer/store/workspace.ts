@@ -325,6 +325,34 @@ export const createSessionAtom = atom(
 );
 
 /**
+ * 操作：Fork 当前完整会话
+ */
+export const forkSessionAtom = atom(
+  null,
+  async (get, set, sourceSessionId: string) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    const result = await window.zora.forkSession(sourceSessionId, workspaceId);
+
+    if (get(currentWorkspaceIdAtom) !== workspaceId) {
+      return result.session.id;
+    }
+
+    set(sessionsAtom, (current) => [
+      result.session,
+      ...current.filter((session) => session.id !== result.session.id),
+    ]);
+    set(setSessionMessagesAtom, result.session.id, result.messages);
+    set(currentSessionIdAtom, result.session.id);
+    set(draftSelectedProviderIdAtom, undefined);
+    set(draftSelectedModelIdAtom, undefined);
+    set(clearDraftStateForSessionAtom, result.session.id);
+    set(clearDraftStateForSessionAtom, "__draft__");
+
+    return result.session.id;
+  }
+);
+
+/**
  * 操作：切换会话
  */
 export const switchSessionAtom = atom(

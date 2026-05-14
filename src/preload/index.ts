@@ -8,6 +8,7 @@ import type {
   FileTreeEntry,
   PermissionMode,
   PermissionResponse,
+  SessionForkResult,
   SessionMeta,
   SkillMeta,
   WorkspaceMeta,
@@ -243,6 +244,13 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ConversationMessage[]>,
   createSession: (title: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:create", title, workspaceId) as Promise<SessionMeta>,
+  forkSession: (sourceSessionId: string, workspaceId?: string, title?: string) =>
+    ipcRenderer.invoke(
+      "session:fork",
+      sourceSessionId,
+      workspaceId,
+      title
+    ) as Promise<SessionForkResult>,
   deleteSession: (sessionId: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:delete", sessionId, workspaceId) as Promise<void>,
   renameSession: (sessionId: string, title: string, workspaceId?: string) =>

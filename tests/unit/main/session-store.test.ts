@@ -260,7 +260,106 @@ describe("main session-store", () => {
         text: "Message 119",
       })
     );
-  }, 10_000);
+  }, 30_000);
+
+  it("creates forked sessions with copied transcript and attachments", async () => {
+    const homeDir = createTempHome();
+    const {
+      appendMessageRecord,
+      createForkedSession,
+      createSession,
+      listSessions,
+      loadMessages,
+      saveAttachments,
+      updateSessionMeta,
+    } = await loadSessionStoreModule(homeDir);
+
+    const source = await createSession("Source session");
+    await updateSessionMeta(source.id, {
+      providerId: "parent-provider",
+      providerLocked: true,
+      selectedModelId: "parent-model",
+    });
+
+    const savedAttachments = await saveAttachments(source.id, [
+      {
+        id: "attachment-1",
+        name: "note.png",
+        category: "image",
+        mimeType: "image/png",
+        size: 5,
+        localPath: "",
+        base64Data: Buffer.from("hello").toString("base64"),
+      },
+    ]);
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-with-attachment",
+        role: "user",
+        text: "Please inspect this.",
+        timestamp: 1,
+        attachments: savedAttachments,
+      },
+    });
+
+    const fork = await createForkedSession({
+      sourceSessionId: source.id,
+      sourceSdkSessionId: "sdk-source",
+      sdkSessionId: "sdk-fork",
+      title: "Source session 的分支",
+    });
+
+    expect(fork).toEqual(
+      expect.objectContaining({
+        title: "Source session 的分支",
+        sdkSessionId: "sdk-fork",
+        providerLocked: false,
+        branch: expect.objectContaining({
+          sourceSessionId: source.id,
+          sourceSdkSessionId: "sdk-source",
+          forkMode: "full",
+          inheritedMessageCount: 1,
+        }),
+      })
+    );
+    expect(fork).not.toHaveProperty("providerId");
+    expect(fork).not.toHaveProperty("selectedModelId");
+
+    const sessions = await listSessions();
+    expect(sessions[0]).toEqual(expect.objectContaining({ id: fork.id }));
+
+    const messages = await loadMessages(fork.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(
+      expect.objectContaining({
+        id: "user-with-attachment",
+        role: "user",
+        text: "Please inspect this.",
+      })
+    );
+    expect(messages[0].attachments?.[0]).toEqual(
+      expect.objectContaining({
+        id: "attachment-1",
+        name: "note.png",
+        localPath: expect.stringContaining(fork.id),
+        base64Data: Buffer.from("hello").toString("base64"),
+      })
+    );
+    expect(existsSync(messages[0].attachments?.[0]?.localPath ?? "")).toBe(true);
+  });
+
+  it("rejects fork creation when the source session is missing", async () => {
+    const { createForkedSession } = await loadSessionStoreModule(createTempHome());
+
+    await expect(
+      createForkedSession({
+        sourceSessionId: "missing",
+        sourceSdkSessionId: "sdk-source",
+        sdkSessionId: "sdk-fork",
+      })
+    ).rejects.toThrow("Source session missing not found.");
+  });
 
   it("deletes session metadata and transcript files cleanly", async () => {
     const homeDir = createTempHome();

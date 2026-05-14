@@ -350,6 +350,63 @@ describe("integration session lifecycle", () => {
     ]);
   });
 
+  it("resumes forked sessions with the forked SDK session id", async () => {
+    const homeDir = createTempHome();
+    const { productivityRunnerModule, sessionStoreModule, mocks } =
+      await loadSessionLifecycleRuntime(
+        homeDir,
+        stripSdkSessionIds(MOCK_EVENTS.simpleTextReply)
+      );
+
+    const source = await sessionStoreModule.createSession("Source session");
+    await sessionStoreModule.setSdkSessionId(source.id, "sdk-source");
+    await sessionStoreModule.appendMessageRecord(
+      source.id,
+      createUserRecord("user-source", "我们之前在讨论路线 A。", 1)
+    );
+
+    const fork = await sessionStoreModule.createForkedSession({
+      sourceSessionId: source.id,
+      sourceSdkSessionId: "sdk-source",
+      sdkSessionId: "sdk-fork",
+      title: "Source session 的分支",
+    });
+
+    await sessionStoreModule.appendMessageRecord(
+      fork.id,
+      createUserRecord("user-fork", "继续这个分支。", 2)
+    );
+
+    const events: AgentStreamEvent[] = [];
+    await productivityRunnerModule.runProductivitySession({
+      sessionId: fork.id,
+      text: "继续这个分支。",
+      forwardEvent: createForwardEvent(events),
+      workspaceId: "default",
+    });
+
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+    expect(mocks.query.mock.calls[0]?.[0]?.options?.resume).toBe("sdk-fork");
+    expect(mocks.query.mock.calls[0]?.[0]?.options?.resume).not.toBe(
+      "sdk-source"
+    );
+    await expect(sessionStoreModule.getSessionMeta(source.id)).resolves.toEqual(
+      expect.objectContaining({
+        id: source.id,
+        sdkSessionId: "sdk-source",
+      })
+    );
+    await expect(sessionStoreModule.getSessionMeta(fork.id)).resolves.toEqual(
+      expect.objectContaining({
+        id: fork.id,
+        branch: expect.objectContaining({
+          sourceSessionId: source.id,
+          sourceSdkSessionId: "sdk-source",
+        }),
+      })
+    );
+  });
+
   it("returns an empty transcript for a session without messages", async () => {
     const homeDir = createTempHome();
     const { sessionStoreModule } = await loadSessionLifecycleRuntime(homeDir);

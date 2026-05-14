@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   access,
   appendFile,
+  cp,
   copyFile,
   mkdir,
   readFile,
@@ -17,6 +18,7 @@ import type {
   ConversationMessage,
   FileAttachment,
   ProcessStep,
+  SessionBranchMeta,
 } from "../shared/zora";
 
 export interface SessionMeta {
@@ -28,6 +30,7 @@ export interface SessionMeta {
   providerId?: string;
   providerLocked?: boolean;
   selectedModelId?: string;
+  branch?: SessionBranchMeta;
 }
 
 export interface SavedAttachmentMeta {
@@ -37,6 +40,13 @@ export interface SavedAttachmentMeta {
   mimeType: string;
   size: number;
   savedFileName: string;
+}
+
+export interface CreateForkedSessionInput {
+  sourceSessionId: string;
+  sourceSdkSessionId: string;
+  sdkSessionId: string;
+  title?: string;
 }
 
 const ZORA_DIR = path.join(homedir(), ".zora");
@@ -125,6 +135,15 @@ async function replaceFileAtomically(
   }
 }
 
+function isEnoentError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "ENOENT"
+  );
+}
+
 async function readIndex(workspaceId = "default"): Promise<SessionMeta[]> {
   await migrateSessionsIfNeeded();
 
@@ -169,6 +188,102 @@ export async function createSession(
   const sessions = await readIndex(workspaceId);
   sessions.unshift(meta);
   await writeIndex(sessions, workspaceId);
+  return meta;
+}
+
+async function copySessionTranscript(
+  sourceSessionId: string,
+  targetSessionId: string,
+  workspaceId = "default"
+): Promise<void> {
+  try {
+    await copyFile(
+      getJsonlPath(sourceSessionId, workspaceId),
+      getJsonlPath(targetSessionId, workspaceId)
+    );
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function copySessionAttachments(
+  sourceSessionId: string,
+  targetSessionId: string,
+  workspaceId = "default"
+): Promise<void> {
+  try {
+    await cp(
+      getAttachmentsDir(sourceSessionId, workspaceId),
+      getAttachmentsDir(targetSessionId, workspaceId),
+      { recursive: true }
+    );
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function removeSessionArtifacts(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<void> {
+  await Promise.allSettled([
+    unlink(getJsonlPath(sessionId, workspaceId)),
+    rm(getAttachmentsDir(sessionId, workspaceId), {
+      recursive: true,
+      force: true,
+    }),
+  ]);
+}
+
+export async function createForkedSession(
+  input: CreateForkedSessionInput,
+  workspaceId = "default"
+): Promise<SessionMeta> {
+  await ensureSessionsDir(workspaceId);
+
+  const sessions = await readIndex(workspaceId);
+  const source = sessions.find((session) => session.id === input.sourceSessionId);
+
+  if (!source) {
+    throw new Error(`Source session ${input.sourceSessionId} not found.`);
+  }
+
+  const sourceMessages = await loadMessages(input.sourceSessionId, workspaceId);
+  const now = new Date().toISOString();
+  const title = input.title?.trim() || `${source.title} 的分支`;
+  const meta: SessionMeta = {
+    id: randomUUID(),
+    title,
+    createdAt: now,
+    updatedAt: now,
+    sdkSessionId: input.sdkSessionId,
+    providerLocked: false,
+    branch: {
+      sourceSessionId: source.id,
+      sourceSdkSessionId: input.sourceSdkSessionId,
+      forkedAt: now,
+      forkMode: "full",
+      inheritedMessageCount: sourceMessages.length,
+    },
+  };
+
+  try {
+    await copySessionTranscript(source.id, meta.id, workspaceId);
+    await copySessionAttachments(source.id, meta.id, workspaceId);
+    await writeIndex([meta, ...sessions], workspaceId);
+  } catch (error) {
+    await removeSessionArtifacts(meta.id, workspaceId);
+    throw error;
+  }
+
   return meta;
 }
 

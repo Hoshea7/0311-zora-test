@@ -47,6 +47,7 @@ import {
   testFeishuConnection,
 } from "./feishu";
 import { runProductivitySession } from "./productivity-runner";
+import { forkSessionFromSource } from "./session-fork";
 import { providerManager } from "./provider-manager";
 import { McpManager, setSharedMcpManager } from "./mcp-manager";
 import { listDirectory, startFileWatcher, stopFileWatcher } from "./file-tree";
@@ -1226,6 +1227,38 @@ app.whenReady().then(async () => {
 
     return createSession(title.trim(), resolveWorkspaceId(workspaceId));
   });
+
+  ipcMain.handle(
+    "session:fork",
+    async (
+      _event,
+      sourceSessionId: unknown,
+      workspaceId: unknown,
+      title: unknown
+    ) => {
+      if (typeof sourceSessionId !== "string" || sourceSessionId.trim().length === 0) {
+        throw new Error("A valid sourceSessionId is required.");
+      }
+
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+      const trimmedSessionId = sourceSessionId.trim();
+
+      if (isAgentRunningForSession(trimmedSessionId)) {
+        throw new Error("当前会话正在运行，结束后再 Fork。");
+      }
+
+      const result = await forkSessionFromSource({
+        sourceSessionId: trimmedSessionId,
+        workspaceId: targetWorkspaceId,
+        title: typeof title === "string" ? title : undefined,
+      });
+
+      console.log(
+        `[index] Session forked: ${trimmedSessionId} -> ${result.session.id}`
+      );
+      return result;
+    }
+  );
 
   ipcMain.handle("session:delete", async (_event, sessionId: unknown, workspaceId: unknown) => {
     if (typeof sessionId !== "string" || sessionId.trim().length === 0) {

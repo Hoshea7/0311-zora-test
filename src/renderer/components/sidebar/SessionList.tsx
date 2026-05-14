@@ -6,6 +6,7 @@ import {
   groupedSessionsAtom,
   currentSessionIdAtom,
   deleteSessionAtom,
+  forkSessionAtom,
   renameSessionAtom,
   switchSessionAtom
 } from "../../store/workspace";
@@ -23,12 +24,14 @@ export function SessionList() {
   const [runningSessions] = useAtom(runningSessionsAtom);
   const switchSession = useSetAtom(switchSessionAtom);
   const deleteSession = useSetAtom(deleteSessionAtom);
+  const forkSession = useSetAtom(forkSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [forkingId, setForkingId] = useState<string | null>(null);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
 
   const handleSwitchSession = (sessionId: string) => {
@@ -57,6 +60,21 @@ export function SessionList() {
 
     if (window.confirm(`确定删除会话「${title}」？此操作不可撤销。`)) {
       deleteSession(sessionId);
+    }
+  };
+
+  const handleFork = async (session: Session) => {
+    setMenuOpenId(null);
+    setForkingId(session.id);
+
+    try {
+      await forkSession(session.id);
+      setSettingsOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      window.alert(message || "Fork 会话失败，请稍后再试。");
+    } finally {
+      setForkingId((current) => (current === session.id ? null : current));
     }
   };
 
@@ -226,8 +244,22 @@ export function SessionList() {
                 >
                   <div className="px-1.5 py-1.5">
                     <DropdownMenu.Item
+                      disabled={runningSessions.has(session.id) || forkingId === session.id}
                       className={cn(
                         "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition-colors cursor-pointer",
+                        "hover:bg-stone-900/[0.04]",
+                        "focus:outline-none focus:bg-stone-900/[0.04] data-[highlighted]:bg-stone-900/[0.04]",
+                        "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45 data-[disabled]:hover:bg-transparent"
+                      )}
+                      onSelect={() => {
+                        void handleFork(session);
+                      }}
+                    >
+                      {forkingId === session.id ? "Fork 中..." : "Fork 会话"}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      className={cn(
+                        "mt-1 w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition-colors cursor-pointer",
                         "hover:bg-stone-900/[0.04]",
                         "focus:outline-none focus:bg-stone-900/[0.04] data-[highlighted]:bg-stone-900/[0.04]"
                       )}
