@@ -16,11 +16,27 @@ export const DEFAULT_ZORA_ID = "default";
 const ZORA_DIR_NAME = ".zora";
 const MEMORY_DIR_NAME = "memory";
 const DAILY_DIR_NAME = "daily";
+const MIGRATIONS_DIR_NAME = ".migrations";
 const LEGACY_ZORAS_DIR_NAME = "zoras";
 const LEGACY_DAILY_DIR_NAME = "memory";
+const LEGACY_MEMORY_MIGRATION_MARKER_FILE = "legacy-default-memory.json";
 const SOUL_FILE_NAME = "SOUL.md";
 const IDENTITY_FILE_NAME = "IDENTITY.md";
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATE_FILE_PATTERN = /^(\d{4}-\d{2}-\d{2})\.md$/;
+const MIGRATABLE_LEGACY_ROOT_FILES = ["USER.md", "MEMORY.md"] as const;
+const IGNORED_LEGACY_ROOT_FILES = [SOUL_FILE_NAME, IDENTITY_FILE_NAME] as const;
+
+export interface LegacyMemoryMigrationResult {
+  sourceDir: string;
+  targetDir: string;
+  markerPath: string | null;
+  migrated: string[];
+  skipped: string[];
+  ignored: string[];
+}
+
+let defaultLegacyMemoryMigrationPromise: Promise<LegacyMemoryMigrationResult> | null = null;
 
 function hasErrorCode(error: unknown, code: string) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
@@ -117,6 +133,41 @@ async function pathExistsAsFile(filePath: string) {
   }
 }
 
+async function copyFileIfMissing(
+  sourcePath: string,
+  targetPath: string,
+  label: string,
+  result: LegacyMemoryMigrationResult
+) {
+  if (!(await pathExistsAsFile(sourcePath))) {
+    return;
+  }
+
+  if (await pathExistsAsFile(targetPath)) {
+    result.skipped.push(label);
+    return;
+  }
+
+  const content = await readUtf8File(sourcePath);
+  if (content === null) {
+    return;
+  }
+
+  await mkdir(path.dirname(targetPath), { recursive: true });
+
+  try {
+    await writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
+    result.migrated.push(label);
+  } catch (error) {
+    if (hasErrorCode(error, "EEXIST")) {
+      result.skipped.push(label);
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function replaceFileAtomically(filePath: string, content: string) {
   const tempPath = `${filePath}.tmp`;
 
@@ -162,6 +213,14 @@ export function getZoraDailyDirPath(_zoraId = DEFAULT_ZORA_ID) {
   return path.join(getZoraMemoryDirPath(), DAILY_DIR_NAME);
 }
 
+export function getZoraMemoryMigrationsDirPath() {
+  return path.join(getZoraMemoryDirPath(), MIGRATIONS_DIR_NAME);
+}
+
+export function getLegacyMemoryMigrationMarkerPath() {
+  return path.join(getZoraMemoryMigrationsDirPath(), LEGACY_MEMORY_MIGRATION_MARKER_FILE);
+}
+
 export function getZoraDirPath(zoraId = DEFAULT_ZORA_ID) {
   return getZoraMemoryDirPath(zoraId);
 }
@@ -181,6 +240,99 @@ export function estimateTokens(text: string): number {
 export async function ensureZoraDir(_zoraId = DEFAULT_ZORA_ID) {
   await mkdir(getZoraMemoryDirPath(), { recursive: true });
   await mkdir(getZoraDailyDirPath(), { recursive: true });
+}
+
+async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
+  await ensureZoraDir();
+
+  const result: LegacyMemoryMigrationResult = {
+    sourceDir: getLegacyZoraDirPath(zoraId),
+    targetDir: getZoraMemoryDirPath(),
+    markerPath: null,
+    migrated: [],
+    skipped: [],
+    ignored: [],
+  };
+
+  for (const fileName of MIGRATABLE_LEGACY_ROOT_FILES) {
+    await copyFileIfMissing(
+      resolveLegacyZoraFilePath(fileName, zoraId),
+      resolveZoraFilePath(fileName),
+      fileName,
+      result
+    );
+  }
+
+  for (const fileName of IGNORED_LEGACY_ROOT_FILES) {
+    if (await pathExistsAsFile(resolveLegacyZoraFilePath(fileName, zoraId))) {
+      result.ignored.push(fileName);
+    }
+  }
+
+  try {
+    const entries = await readdir(getLegacyZoraMemoryDirPath(zoraId), { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const match = entry.name.match(ISO_DATE_FILE_PATTERN);
+      if (!match) {
+        continue;
+      }
+
+      const date = match[1];
+      await copyFileIfMissing(
+        path.join(getLegacyZoraMemoryDirPath(zoraId), entry.name),
+        resolveDailyLogPath(date),
+        `${DAILY_DIR_NAME}/${entry.name}`,
+        result
+      );
+    }
+  } catch (error) {
+    if (!isEnoentError(error)) {
+      throw error;
+    }
+  }
+
+  if (result.migrated.length > 0 || result.skipped.length > 0 || result.ignored.length > 0) {
+    result.markerPath = getLegacyMemoryMigrationMarkerPath();
+    await mkdir(getZoraMemoryMigrationsDirPath(), { recursive: true });
+    await replaceFileAtomically(
+      result.markerPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          migratedAt: new Date().toISOString(),
+          sourceDir: result.sourceDir,
+          targetDir: result.targetDir,
+          migrated: result.migrated,
+          skipped: result.skipped,
+          ignored: result.ignored,
+        },
+        null,
+        2
+      )}\n`
+    );
+  }
+
+  return result;
+}
+
+export async function migrateLegacyMemoryIfNeeded(zoraId = DEFAULT_ZORA_ID) {
+  if (zoraId !== DEFAULT_ZORA_ID) {
+    return performLegacyMemoryMigration(zoraId);
+  }
+
+  if (!defaultLegacyMemoryMigrationPromise) {
+    defaultLegacyMemoryMigrationPromise = performLegacyMemoryMigration().catch((error) => {
+      defaultLegacyMemoryMigrationPromise = null;
+      throw error;
+    });
+  }
+
+  return defaultLegacyMemoryMigrationPromise;
 }
 
 export async function loadFile(fileName: string, zoraId = DEFAULT_ZORA_ID) {
@@ -281,10 +433,13 @@ export const memoryStore = {
   getZoraDirPath,
   getZoraMemoryDirPath,
   getZoraDailyDirPath,
+  getZoraMemoryMigrationsDirPath,
+  getLegacyMemoryMigrationMarkerPath,
   getLegacyZoraDirPath,
   getLegacyZoraMemoryDirPath,
   estimateTokens,
   ensureZoraDir,
+  migrateLegacyMemoryIfNeeded,
   loadFile,
   saveFile,
   hasFile,

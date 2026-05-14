@@ -1,4 +1,8 @@
-import { loadFile, loadRecentLogs } from "../memory-store";
+import {
+  loadFile,
+  loadRecentLogs,
+  migrateLegacyMemoryIfNeeded,
+} from "../memory-store";
 
 function padNumber(value: number) {
   return value.toString().padStart(2, "0");
@@ -56,6 +60,12 @@ function buildMemorySection(
 }
 
 export async function buildZoraDynamicContext(): Promise<string> {
+  try {
+    await migrateLegacyMemoryIfNeeded();
+  } catch (error) {
+    console.error("[zora-dynamic-context] Legacy memory migration failed:", error);
+  }
+
   const [userContent, memoryContent, recentLogs] = await Promise.all([
     loadFile("USER.md"),
     loadFile("MEMORY.md"),

@@ -137,6 +137,89 @@ describe("main memory-store", () => {
     expect(readFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "utf8")).toBe("Legacy user");
   });
 
+  it("migrates legacy USER.md, MEMORY.md, and daily logs without moving old files", async () => {
+    const homeDir = createTempHome();
+    const {
+      getLegacyMemoryMigrationMarkerPath,
+      getLegacyZoraDirPath,
+      getLegacyZoraMemoryDirPath,
+      getZoraDailyDirPath,
+      getZoraMemoryDirPath,
+      migrateLegacyMemoryIfNeeded,
+    } = await loadMemoryStore(homeDir);
+
+    mkdirSync(getLegacyZoraMemoryDirPath(), { recursive: true });
+    writeFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "Legacy user", "utf8");
+    writeFileSync(path.join(getLegacyZoraDirPath(), "MEMORY.md"), "Legacy memory", "utf8");
+    writeFileSync(path.join(getLegacyZoraDirPath(), "SOUL.md"), "Old soul", "utf8");
+    writeFileSync(path.join(getLegacyZoraDirPath(), "IDENTITY.md"), "Old identity", "utf8");
+    writeFileSync(path.join(getLegacyZoraMemoryDirPath(), "2026-05-12.md"), "Daily log", "utf8");
+    writeFileSync(path.join(getLegacyZoraMemoryDirPath(), "notes.md"), "Ignore me", "utf8");
+
+    const result = await migrateLegacyMemoryIfNeeded();
+
+    expect([...result.migrated].sort()).toEqual([
+      "MEMORY.md",
+      "USER.md",
+      "daily/2026-05-12.md",
+    ]);
+    expect([...result.ignored].sort()).toEqual(["IDENTITY.md", "SOUL.md"]);
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "USER.md"), "utf8")).toBe(
+      "Legacy user"
+    );
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "MEMORY.md"), "utf8")).toBe(
+      "Legacy memory"
+    );
+    expect(readFileSync(path.join(getZoraDailyDirPath(), "2026-05-12.md"), "utf8")).toBe(
+      "Daily log"
+    );
+    expect(existsSync(path.join(getZoraMemoryDirPath(), "SOUL.md"))).toBe(false);
+    expect(existsSync(path.join(getZoraMemoryDirPath(), "IDENTITY.md"))).toBe(false);
+    expect(readFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "utf8")).toBe(
+      "Legacy user"
+    );
+
+    const marker = JSON.parse(readFileSync(getLegacyMemoryMigrationMarkerPath(), "utf8"));
+    expect(marker.version).toBe(1);
+    expect(marker.migrated).toEqual(result.migrated);
+    expect(marker.ignored).toEqual(result.ignored);
+  });
+
+  it("does not overwrite existing new memory during legacy migration", async () => {
+    const homeDir = createTempHome();
+    const {
+      getLegacyZoraDirPath,
+      getLegacyZoraMemoryDirPath,
+      getZoraDailyDirPath,
+      getZoraMemoryDirPath,
+      migrateLegacyMemoryIfNeeded,
+      saveFile,
+    } = await loadMemoryStore(homeDir);
+
+    await saveFile("USER.md", "Current user");
+    mkdirSync(getZoraDailyDirPath(), { recursive: true });
+    writeFileSync(path.join(getZoraDailyDirPath(), "2026-05-12.md"), "Current daily", "utf8");
+
+    mkdirSync(getLegacyZoraMemoryDirPath(), { recursive: true });
+    writeFileSync(path.join(getLegacyZoraDirPath(), "USER.md"), "Legacy user", "utf8");
+    writeFileSync(path.join(getLegacyZoraDirPath(), "MEMORY.md"), "Legacy memory", "utf8");
+    writeFileSync(path.join(getLegacyZoraMemoryDirPath(), "2026-05-12.md"), "Legacy daily", "utf8");
+
+    const result = await migrateLegacyMemoryIfNeeded();
+
+    expect(result.migrated).toEqual(["MEMORY.md"]);
+    expect(result.skipped.sort()).toEqual(["USER.md", "daily/2026-05-12.md"]);
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "USER.md"), "utf8")).toBe(
+      "Current user"
+    );
+    expect(readFileSync(path.join(getZoraMemoryDirPath(), "MEMORY.md"), "utf8")).toBe(
+      "Legacy memory"
+    );
+    expect(readFileSync(path.join(getZoraDailyDirPath(), "2026-05-12.md"), "utf8")).toBe(
+      "Current daily"
+    );
+  });
+
   it("appends daily logs under daily/ and loads recent history", async () => {
     const homeDir = createTempHome();
     vi.useFakeTimers();

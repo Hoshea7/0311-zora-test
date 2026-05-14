@@ -34,6 +34,7 @@ import {
 } from "./hitl";
 import { memoryAgent } from "./memory-agent";
 import { loadMemorySettings, saveMemorySettings } from "./memory-settings";
+import { migrateLegacyMemoryIfNeeded } from "./memory-store";
 import {
   loadDefaultModelSettings,
   resolveDefaultModelTarget,
@@ -698,6 +699,16 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await migrateSessionsIfNeeded();
+  try {
+    const migrationResult = await migrateLegacyMemoryIfNeeded();
+    if (migrationResult.migrated.length > 0) {
+      console.info(
+        `[main] Migrated legacy memory files: ${migrationResult.migrated.join(", ")}`
+      );
+    }
+  } catch (error) {
+    console.error("[main] Legacy memory migration failed:", error);
+  }
   await seedBundledSkills();
   const mcpManager = setSharedMcpManager(new McpManager());
 

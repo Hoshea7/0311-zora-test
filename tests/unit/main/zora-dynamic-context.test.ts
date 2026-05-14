@@ -1,6 +1,10 @@
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -77,6 +81,25 @@ describe("zora dynamic context", () => {
     expect(context).toContain("<recent_daily_logs>");
     expect(context).toContain("## 2026-04-23");
     expect(context).toContain("## 2026-04-24");
+  });
+
+  it("migrates legacy memory before building dynamic context", async () => {
+    const { dynamicContext, memoryStore } = await loadModules(createTempHome());
+
+    mkdirSync(memoryStore.getLegacyZoraDirPath(), { recursive: true });
+    writeFileSync(
+      path.join(memoryStore.getLegacyZoraDirPath(), "USER.md"),
+      "# USER.md\n\n称呼：旧用户",
+      "utf8"
+    );
+
+    const context = await dynamicContext.buildZoraDynamicContext();
+
+    expect(context).toContain("称呼：旧用户");
+    expect(existsSync(path.join(memoryStore.getZoraMemoryDirPath(), "USER.md"))).toBe(true);
+    expect(readFileSync(path.join(memoryStore.getZoraMemoryDirPath(), "USER.md"), "utf8")).toContain(
+      "称呼：旧用户"
+    );
   });
 
   it("uses an empty-memory message when no memory files exist", async () => {
