@@ -37,6 +37,21 @@ export interface RunProductivitySessionParams {
   selectedModelId?: string;
 }
 
+type ProductivityProfile = Awaited<ReturnType<typeof buildProductivityProfile>>;
+
+type BuildRunProfileParams = {
+  prompt: string;
+  workspacePath: string;
+  sdkRuntime: ReturnType<typeof getSDKRuntimeOptions>;
+  forwardEvent: (payload: AgentStreamEvent) => void;
+  isFirstTurn: boolean;
+  sdkSessionId?: string;
+  localSessionId: string;
+  permissionMode: "default" | "bypassPermissions";
+  providerId?: string;
+  selectedModelId?: string;
+};
+
 function truncateForRecovery(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
     return value;
@@ -131,7 +146,7 @@ function buildRecoveredPromptFromMessages(
 }
 
 function applyPermissionMode(
-  profile: Awaited<ReturnType<typeof buildProductivityProfile>>,
+  profile: ProductivityProfile,
   permissionMode: "default" | "bypassPermissions"
 ): void {
   profile.options.permissionMode = permissionMode;
@@ -149,6 +164,33 @@ function buildLateQueuedPrompt(messages: QueuedAgentMessage[]): string {
   return messages
     .map((message, index) => `Queued message ${index + 1}:\n${message.text}`)
     .join("\n\n");
+}
+
+async function buildRunProfile({
+  prompt,
+  workspacePath,
+  sdkRuntime,
+  forwardEvent,
+  isFirstTurn,
+  sdkSessionId,
+  localSessionId,
+  permissionMode,
+  providerId,
+  selectedModelId,
+}: BuildRunProfileParams): Promise<ProductivityProfile> {
+  const profile = await buildProductivityProfile({
+    userPrompt: await buildZoraPrompt(prompt),
+    cwd: workspacePath,
+    sdkRuntime,
+    onEvent: forwardEvent,
+    isFirstTurn,
+    sessionId: sdkSessionId,
+    localSessionId,
+    providerId,
+    selectedModelId,
+  });
+  applyPermissionMode(profile, permissionMode);
+  return profile;
 }
 
 export async function runProductivitySession({
@@ -174,7 +216,6 @@ export async function runProductivitySession({
   const initialPrompt = shouldRecoverFromTranscript
     ? buildRecoveredPromptFromMessages(persistedMessages, currentPrompt)
     : currentPrompt;
-  const initialPromptWithContext = await buildZoraPrompt(initialPrompt);
 
   if (shouldRecoverFromTranscript) {
     console.warn(
@@ -182,18 +223,18 @@ export async function runProductivitySession({
     );
   }
 
-  const profile = await buildProductivityProfile({
-    userPrompt: initialPromptWithContext,
-    cwd: workspacePath,
+  const profile = await buildRunProfile({
+    prompt: initialPrompt,
+    workspacePath,
     sdkRuntime,
-    onEvent: forwardEvent,
+    forwardEvent,
     isFirstTurn: !existingSDKSessionId && !shouldRecoverFromTranscript,
-    sessionId: existingSDKSessionId,
     localSessionId: sessionId,
+    sdkSessionId: existingSDKSessionId,
+    permissionMode,
     providerId,
     selectedModelId,
   });
-  applyPermissionMode(profile, permissionMode);
 
   let runResult: AgentRunResult;
 
@@ -224,19 +265,17 @@ export async function runProductivitySession({
       recoveredMessages,
       currentPrompt
     );
-    const rebuiltPromptWithContext = await buildZoraPrompt(rebuiltPrompt);
-    const recoveredProfile = await buildProductivityProfile({
-      userPrompt: rebuiltPromptWithContext,
-      cwd: workspacePath,
+    const recoveredProfile = await buildRunProfile({
+      prompt: rebuiltPrompt,
+      workspacePath,
       sdkRuntime,
-      onEvent: forwardEvent,
+      forwardEvent,
       isFirstTurn: false,
-      sessionId: undefined,
       localSessionId: sessionId,
+      permissionMode,
       providerId,
       selectedModelId,
     });
-    applyPermissionMode(recoveredProfile, permissionMode);
 
     runResult = await runAgentWithProfile(
       sessionId,
@@ -262,7 +301,6 @@ export async function runProductivitySession({
     if (!followUpPrompt.trim()) {
       break;
     }
-    const followUpPromptWithContext = await buildZoraPrompt(followUpPrompt);
 
     const resumeSessionId =
       runResult.sdkSessionId ?? await getSdkSessionId(sessionId, workspaceId);
@@ -270,18 +308,18 @@ export async function runProductivitySession({
       `[productivity-runner] Starting late queue follow-up run for session ${sessionId} with ${runResult.lateQueuedMessages.length} message(s).`
     );
 
-    const followUpProfile = await buildProductivityProfile({
-      userPrompt: followUpPromptWithContext,
-      cwd: workspacePath,
+    const followUpProfile = await buildRunProfile({
+      prompt: followUpPrompt,
+      workspacePath,
       sdkRuntime,
-      onEvent: forwardEvent,
+      forwardEvent,
       isFirstTurn: false,
-      sessionId: resumeSessionId,
       localSessionId: sessionId,
+      sdkSessionId: resumeSessionId,
+      permissionMode,
       providerId,
       selectedModelId,
     });
-    applyPermissionMode(followUpProfile, permissionMode);
 
     runResult = await runAgentWithProfile(
       sessionId,

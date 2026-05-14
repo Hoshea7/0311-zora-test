@@ -11,14 +11,13 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 
-export const DEFAULT_ZORA_ID = "default";
-
 const ZORA_DIR_NAME = ".zora";
 const MEMORY_DIR_NAME = "memory";
 const DAILY_DIR_NAME = "daily";
 const MIGRATIONS_DIR_NAME = ".migrations";
 const LEGACY_ZORAS_DIR_NAME = "zoras";
 const LEGACY_DAILY_DIR_NAME = "memory";
+const LEGACY_DEFAULT_ID = "default";
 const LEGACY_MEMORY_MIGRATION_MARKER_FILE = "legacy-default-memory.json";
 const SOUL_FILE_NAME = "SOUL.md";
 const IDENTITY_FILE_NAME = "IDENTITY.md";
@@ -93,9 +92,9 @@ function resolveZoraFilePath(fileName: string) {
   return path.join(getZoraMemoryDirPath(), fileName);
 }
 
-function resolveLegacyZoraFilePath(fileName: string, zoraId = DEFAULT_ZORA_ID) {
+function resolveLegacyZoraFilePath(fileName: string, legacyId = LEGACY_DEFAULT_ID) {
   assertSafeFileName(fileName);
-  return path.join(getLegacyZoraDirPath(zoraId), fileName);
+  return path.join(getLegacyZoraDirPath(legacyId), fileName);
 }
 
 function resolveDailyLogPath(date: string) {
@@ -103,9 +102,9 @@ function resolveDailyLogPath(date: string) {
   return path.join(getZoraDailyDirPath(), `${date}.md`);
 }
 
-function resolveLegacyDailyLogPath(date: string, zoraId = DEFAULT_ZORA_ID) {
+function resolveLegacyDailyLogPath(date: string, legacyId = LEGACY_DEFAULT_ID) {
   assertIsoDate(date);
-  return path.join(getLegacyZoraMemoryDirPath(zoraId), `${date}.md`);
+  return path.join(getLegacyZoraMemoryDirPath(legacyId), `${date}.md`);
 }
 
 async function readUtf8File(filePath: string) {
@@ -205,11 +204,11 @@ export function getZoraBaseDirPath() {
   return path.join(homedir(), ZORA_DIR_NAME);
 }
 
-export function getZoraMemoryDirPath(_zoraId = DEFAULT_ZORA_ID) {
+export function getZoraMemoryDirPath() {
   return path.join(getZoraBaseDirPath(), MEMORY_DIR_NAME);
 }
 
-export function getZoraDailyDirPath(_zoraId = DEFAULT_ZORA_ID) {
+export function getZoraDailyDirPath() {
   return path.join(getZoraMemoryDirPath(), DAILY_DIR_NAME);
 }
 
@@ -221,32 +220,28 @@ export function getLegacyMemoryMigrationMarkerPath() {
   return path.join(getZoraMemoryMigrationsDirPath(), LEGACY_MEMORY_MIGRATION_MARKER_FILE);
 }
 
-export function getZoraDirPath(zoraId = DEFAULT_ZORA_ID) {
-  return getZoraMemoryDirPath(zoraId);
+export function getLegacyZoraDirPath(legacyId = LEGACY_DEFAULT_ID) {
+  return path.join(getZoraBaseDirPath(), LEGACY_ZORAS_DIR_NAME, legacyId);
 }
 
-export function getLegacyZoraDirPath(zoraId = DEFAULT_ZORA_ID) {
-  return path.join(getZoraBaseDirPath(), LEGACY_ZORAS_DIR_NAME, zoraId);
-}
-
-export function getLegacyZoraMemoryDirPath(zoraId = DEFAULT_ZORA_ID) {
-  return path.join(getLegacyZoraDirPath(zoraId), LEGACY_DAILY_DIR_NAME);
+export function getLegacyZoraMemoryDirPath(legacyId = LEGACY_DEFAULT_ID) {
+  return path.join(getLegacyZoraDirPath(legacyId), LEGACY_DAILY_DIR_NAME);
 }
 
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3);
 }
 
-export async function ensureZoraDir(_zoraId = DEFAULT_ZORA_ID) {
+export async function ensureZoraDir() {
   await mkdir(getZoraMemoryDirPath(), { recursive: true });
   await mkdir(getZoraDailyDirPath(), { recursive: true });
 }
 
-async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
+async function performLegacyMemoryMigration() {
   await ensureZoraDir();
 
   const result: LegacyMemoryMigrationResult = {
-    sourceDir: getLegacyZoraDirPath(zoraId),
+    sourceDir: getLegacyZoraDirPath(),
     targetDir: getZoraMemoryDirPath(),
     markerPath: null,
     migrated: [],
@@ -256,7 +251,7 @@ async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
 
   for (const fileName of MIGRATABLE_LEGACY_ROOT_FILES) {
     await copyFileIfMissing(
-      resolveLegacyZoraFilePath(fileName, zoraId),
+      resolveLegacyZoraFilePath(fileName),
       resolveZoraFilePath(fileName),
       fileName,
       result
@@ -264,13 +259,13 @@ async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
   }
 
   for (const fileName of IGNORED_LEGACY_ROOT_FILES) {
-    if (await pathExistsAsFile(resolveLegacyZoraFilePath(fileName, zoraId))) {
+    if (await pathExistsAsFile(resolveLegacyZoraFilePath(fileName))) {
       result.ignored.push(fileName);
     }
   }
 
   try {
-    const entries = await readdir(getLegacyZoraMemoryDirPath(zoraId), { withFileTypes: true });
+    const entries = await readdir(getLegacyZoraMemoryDirPath(), { withFileTypes: true });
 
     for (const entry of entries) {
       if (!entry.isFile()) {
@@ -284,7 +279,7 @@ async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
 
       const date = match[1];
       await copyFileIfMissing(
-        path.join(getLegacyZoraMemoryDirPath(zoraId), entry.name),
+        path.join(getLegacyZoraMemoryDirPath(), entry.name),
         resolveDailyLogPath(date),
         `${DAILY_DIR_NAME}/${entry.name}`,
         result
@@ -320,11 +315,7 @@ async function performLegacyMemoryMigration(zoraId = DEFAULT_ZORA_ID) {
   return result;
 }
 
-export async function migrateLegacyMemoryIfNeeded(zoraId = DEFAULT_ZORA_ID) {
-  if (zoraId !== DEFAULT_ZORA_ID) {
-    return performLegacyMemoryMigration(zoraId);
-  }
-
+export async function migrateLegacyMemoryIfNeeded() {
   if (!defaultLegacyMemoryMigrationPromise) {
     defaultLegacyMemoryMigrationPromise = performLegacyMemoryMigration().catch((error) => {
       defaultLegacyMemoryMigrationPromise = null;
@@ -335,7 +326,7 @@ export async function migrateLegacyMemoryIfNeeded(zoraId = DEFAULT_ZORA_ID) {
   return defaultLegacyMemoryMigrationPromise;
 }
 
-export async function loadFile(fileName: string, zoraId = DEFAULT_ZORA_ID) {
+export async function loadFile(fileName: string) {
   const currentPath = isLegacyOnlyFile(fileName)
     ? null
     : resolveZoraFilePath(fileName);
@@ -345,14 +336,10 @@ export async function loadFile(fileName: string, zoraId = DEFAULT_ZORA_ID) {
     return currentContent;
   }
 
-  return readUtf8File(resolveLegacyZoraFilePath(fileName, zoraId));
+  return readUtf8File(resolveLegacyZoraFilePath(fileName));
 }
 
-export async function saveFile(
-  fileName: string,
-  content: string,
-  _zoraId = DEFAULT_ZORA_ID
-) {
+export async function saveFile(fileName: string, content: string) {
   if (isLegacyOnlyFile(fileName)) {
     throw new Error(`${fileName} is not part of the Zora memory structure.`);
   }
@@ -361,15 +348,15 @@ export async function saveFile(
   await replaceFileAtomically(resolveZoraFilePath(fileName), content);
 }
 
-export async function hasFile(fileName: string, zoraId = DEFAULT_ZORA_ID) {
+export async function hasFile(fileName: string) {
   if (!isLegacyOnlyFile(fileName) && (await pathExistsAsFile(resolveZoraFilePath(fileName)))) {
     return true;
   }
 
-  return pathExistsAsFile(resolveLegacyZoraFilePath(fileName, zoraId));
+  return pathExistsAsFile(resolveLegacyZoraFilePath(fileName));
 }
 
-export async function listFiles(_zoraId = DEFAULT_ZORA_ID) {
+export async function listFiles() {
   try {
     const entries = await readdir(getZoraMemoryDirPath(), { withFileTypes: true });
 
@@ -386,7 +373,7 @@ export async function listFiles(_zoraId = DEFAULT_ZORA_ID) {
   }
 }
 
-export async function appendDailyLog(text: string, _zoraId = DEFAULT_ZORA_ID) {
+export async function appendDailyLog(text: string) {
   const now = new Date();
   const today = getIsoDate(now);
   const entry = `### ${getTimeLabel(now)}\n${text}\n\n`;
@@ -395,16 +382,16 @@ export async function appendDailyLog(text: string, _zoraId = DEFAULT_ZORA_ID) {
   await appendFile(resolveDailyLogPath(today), entry, "utf8");
 }
 
-export async function loadDailyLog(date: string, zoraId = DEFAULT_ZORA_ID) {
+export async function loadDailyLog(date: string) {
   const currentContent = await readUtf8File(resolveDailyLogPath(date));
   if (currentContent !== null) {
     return currentContent;
   }
 
-  return readUtf8File(resolveLegacyDailyLogPath(date, zoraId));
+  return readUtf8File(resolveLegacyDailyLogPath(date));
 }
 
-export async function loadRecentLogs(days: number, zoraId = DEFAULT_ZORA_ID) {
+export async function loadRecentLogs(days: number) {
   const totalDays = Math.max(0, Math.floor(days));
 
   if (totalDays === 0) {
@@ -417,7 +404,7 @@ export async function loadRecentLogs(days: number, zoraId = DEFAULT_ZORA_ID) {
   const logs = await Promise.all(
     dates.map(async (date) => ({
       date,
-      content: await loadDailyLog(date, zoraId),
+      content: await loadDailyLog(date),
     }))
   );
   const sections = logs
@@ -428,9 +415,7 @@ export async function loadRecentLogs(days: number, zoraId = DEFAULT_ZORA_ID) {
 }
 
 export const memoryStore = {
-  DEFAULT_ZORA_ID,
   getZoraBaseDirPath,
-  getZoraDirPath,
   getZoraMemoryDirPath,
   getZoraDailyDirPath,
   getZoraMemoryMigrationsDirPath,

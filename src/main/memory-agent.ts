@@ -28,8 +28,12 @@ const MEMORY_AGENT_PREFIX = "[memory-agent]";
 
 type PendingSessionContext = {
   workspaceId: string;
-  zoraId: string;
   enqueuedAt: number;
+};
+
+type PendingSessionItem = {
+  sessionId: string;
+  context: PendingSessionContext;
 };
 
 type MemoryPromptBuildResult = {
@@ -37,6 +41,37 @@ type MemoryPromptBuildResult = {
   totalTranscriptMessages: number;
   keptTranscriptMessages: number;
   omittedTranscriptMessages: number;
+};
+
+type TranscriptLimits = {
+  userMaxChars: number;
+  assistantMaxChars: number;
+  messageLimit: number;
+  head: number;
+  tail: number;
+};
+
+type SerializedTranscript = {
+  visibleMessages: string[];
+  totalMessages: number;
+  keptMessages: number;
+  omittedMessages: number;
+};
+
+const SINGLE_TRANSCRIPT_LIMITS: TranscriptLimits = {
+  userMaxChars: USER_MESSAGE_MAX_CHARS,
+  assistantMaxChars: ASSISTANT_MESSAGE_MAX_CHARS,
+  messageLimit: MEMORY_MESSAGE_LIMIT,
+  head: MEMORY_MESSAGE_HEAD,
+  tail: MEMORY_MESSAGE_TAIL,
+};
+
+const BATCH_TRANSCRIPT_LIMITS: TranscriptLimits = {
+  userMaxChars: BATCH_USER_MESSAGE_MAX_CHARS,
+  assistantMaxChars: BATCH_ASSISTANT_MESSAGE_MAX_CHARS,
+  messageLimit: BATCH_MESSAGE_LIMIT,
+  head: BATCH_MESSAGE_HEAD,
+  tail: BATCH_MESSAGE_TAIL,
 };
 
 function padNumber(value: number) {
@@ -85,6 +120,37 @@ function serializeMemoryMessage(
   return null;
 }
 
+function serializeTranscript(
+  messages: ConversationMessage[],
+  limits: TranscriptLimits
+): SerializedTranscript {
+  const serializedMessages = messages
+    .map((message) =>
+      serializeMemoryMessage(
+        message,
+        limits.userMaxChars,
+        limits.assistantMaxChars
+      )
+    )
+    .filter((message): message is string => Boolean(message));
+
+  const visibleMessages =
+    serializedMessages.length > limits.messageLimit
+      ? [
+          ...serializedMessages.slice(0, limits.head),
+          "... (earlier exchanges omitted) ...",
+          ...serializedMessages.slice(-limits.tail),
+        ]
+      : serializedMessages;
+
+  return {
+    visibleMessages,
+    totalMessages: serializedMessages.length,
+    keptMessages: visibleMessages.length,
+    omittedMessages: Math.max(0, serializedMessages.length - visibleMessages.length),
+  };
+}
+
 function buildMemoryStateSection(
   memoryContent: string | null,
   userContent: string | null
@@ -109,19 +175,8 @@ function buildMemoryPrompt(
 ): MemoryPromptBuildResult {
   const now = new Date();
   const effectiveTime = conversationTime ?? now;
-  const serializedMessages = messages
-    .map((message) => serializeMemoryMessage(message))
-    .filter((message): message is string => Boolean(message));
-  const visibleMessages =
-    serializedMessages.length > MEMORY_MESSAGE_LIMIT
-      ? [
-          ...serializedMessages.slice(0, MEMORY_MESSAGE_HEAD),
-          "... (earlier exchanges omitted) ...",
-          ...serializedMessages.slice(-MEMORY_MESSAGE_TAIL),
-        ]
-      : serializedMessages;
+  const transcript = serializeTranscript(messages, SINGLE_TRANSCRIPT_LIMITS);
 
-  const transcript = visibleMessages.join("\n\n");
   const memoryStateSection = buildMemoryStateSection(memoryContent, userContent);
 
   return {
@@ -134,14 +189,14 @@ function buildMemoryPrompt(
       `**Date**: ${formatLocalDate(effectiveTime)}`,
       `**Time**: ${formatLocalTime(effectiveTime)}`,
       "",
-      transcript,
+      transcript.visibleMessages.join("\n\n"),
       "",
       "Please analyze this conversation and update memory files as needed.",
       "If nothing worth remembering happened, just write a brief daily log and finish.",
     ].join("\n"),
-    totalTranscriptMessages: serializedMessages.length,
-    keptTranscriptMessages: visibleMessages.length,
-    omittedTranscriptMessages: Math.max(0, serializedMessages.length - visibleMessages.length),
+    totalTranscriptMessages: transcript.totalMessages,
+    keptTranscriptMessages: transcript.keptMessages,
+    omittedTranscriptMessages: transcript.omittedMessages,
   };
 }
 
@@ -163,28 +218,11 @@ function buildBatchMemoryPrompt(
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    const serialized = entry.messages
-      .map((msg) =>
-        serializeMemoryMessage(
-          msg,
-          BATCH_USER_MESSAGE_MAX_CHARS,
-          BATCH_ASSISTANT_MESSAGE_MAX_CHARS
-        )
-      )
-      .filter((msg): msg is string => Boolean(msg));
+    const transcript = serializeTranscript(entry.messages, BATCH_TRANSCRIPT_LIMITS);
 
-    const visible =
-      serialized.length > BATCH_MESSAGE_LIMIT
-        ? [
-            ...serialized.slice(0, BATCH_MESSAGE_HEAD),
-            "... (earlier exchanges omitted) ...",
-            ...serialized.slice(-BATCH_MESSAGE_TAIL),
-          ]
-        : serialized;
-
-    totalMessages += serialized.length;
-    keptMessages += visible.length;
-    omittedMessages += Math.max(0, serialized.length - visible.length);
+    totalMessages += transcript.totalMessages;
+    keptMessages += transcript.keptMessages;
+    omittedMessages += transcript.omittedMessages;
 
     sections.push(
       [
@@ -194,7 +232,7 @@ function buildBatchMemoryPrompt(
         `**Date**: ${formatLocalDate(entry.conversationTime)}`,
         `**Time**: ${formatLocalTime(entry.conversationTime)}`,
         "",
-        visible.join("\n\n"),
+        transcript.visibleMessages.join("\n\n"),
       ].join("\n")
     );
   }
@@ -236,8 +274,7 @@ export class MemoryAgent {
 
   async onConversationEnd(
     sessionId: string,
-    workspaceId = "default",
-    zoraId = "default"
+    workspaceId = "default"
   ): Promise<void> {
     const messages = await loadMessages(sessionId, workspaceId);
     if (messages.length < 4) {
@@ -253,11 +290,7 @@ export class MemoryAgent {
 
     switch (settings.mode) {
       case "manual":
-        this.setPendingContext(sessionId, {
-          workspaceId,
-          zoraId,
-          enqueuedAt: Date.now(),
-        });
+        this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
         logMemoryAgent(
           `Conversation ended for session ${sessionId} (manual mode: stored, waiting for explicit trigger; pending: ${this.pendingContexts.size}).`
@@ -265,11 +298,7 @@ export class MemoryAgent {
         return;
 
       case "batch":
-        this.setPendingContext(sessionId, {
-          workspaceId,
-          zoraId,
-          enqueuedAt: Date.now(),
-        });
+        this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
         logMemoryAgent(
           `Batch: queued session ${sessionId} (pending: ${this.pendingContexts.size}).`
@@ -285,26 +314,21 @@ export class MemoryAgent {
 
       case "immediate":
       default:
-        this.setPendingContext(sessionId, {
-          workspaceId,
-          zoraId,
-          enqueuedAt: Date.now(),
-        });
+        this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
         logMemoryAgent(
           this.processing.has(sessionId)
             ? `Conversation ended for session ${sessionId}; queued a follow-up memory recheck after the current run.`
             : `Conversation ended for session ${sessionId}; queued memory processing.`
         );
-        this.enqueueProcess(sessionId, workspaceId, zoraId);
+        this.enqueueProcess(sessionId, workspaceId);
         return;
     }
   }
 
   scheduleProcessing(
     sessionId: string,
-    workspaceId = "default",
-    zoraId = "default"
+    workspaceId = "default"
   ): void {
     const settings = getMemorySettingsSync();
 
@@ -312,11 +336,7 @@ export class MemoryAgent {
       return;
     }
 
-    this.setPendingContext(sessionId, {
-      workspaceId,
-      zoraId,
-      enqueuedAt: Date.now(),
-    });
+    this.trackPendingSession(sessionId, workspaceId);
     const hadExistingTimer = this.debounceTimers.has(sessionId);
     this.clearDebounceTimer(sessionId);
     logMemoryAgent(
@@ -330,14 +350,14 @@ export class MemoryAgent {
         logMemoryAgent(
           `Session ${sessionId} is still running when debounce fired; delaying memory processing.`
         );
-        this.scheduleProcessing(sessionId, workspaceId, zoraId);
+        this.scheduleProcessing(sessionId, workspaceId);
         return;
       }
 
       logMemoryAgent(
         `Debounce window elapsed for session ${sessionId}; queued memory processing.`
       );
-      this.enqueueProcess(sessionId, workspaceId, zoraId);
+      this.enqueueProcess(sessionId, workspaceId);
     }, MEMORY_PROCESS_DEBOUNCE_MS);
 
     this.debounceTimers.set(sessionId, timer);
@@ -352,10 +372,7 @@ export class MemoryAgent {
     }
 
     this.clearBatchIdleTimer();
-    for (const [, timer] of this.debounceTimers) {
-      clearTimeout(timer);
-    }
-    this.debounceTimers.clear();
+    this.clearAllDebounceTimers();
 
     const pendingCount = this.pendingContexts.size;
     if (pendingCount === 0) {
@@ -377,7 +394,7 @@ export class MemoryAgent {
         logMemoryAgent(`Flush: session ${sessionId} already processing; skipping.`);
         continue;
       }
-      this.enqueueProcess(sessionId, context.workspaceId, context.zoraId);
+      this.enqueueProcess(sessionId, context.workspaceId);
     }
 
     await this.queue;
@@ -389,10 +406,7 @@ export class MemoryAgent {
 
     this.clearBatchIdleTimer();
 
-    for (const [, timer] of this.debounceTimers) {
-      clearTimeout(timer);
-    }
-    this.debounceTimers.clear();
+    this.clearAllDebounceTimers();
 
     const total = this.pendingContexts.size;
     if (total === 0) {
@@ -434,6 +448,23 @@ export class MemoryAgent {
     this.debounceTimers.delete(sessionId);
   }
 
+  private clearAllDebounceTimers(): void {
+    for (const [, timer] of this.debounceTimers) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
+  }
+
+  private trackPendingSession(
+    sessionId: string,
+    workspaceId: string
+  ): void {
+    this.setPendingContext(sessionId, {
+      workspaceId,
+      enqueuedAt: Date.now(),
+    });
+  }
+
   private setPendingContext(sessionId: string, context: PendingSessionContext): void {
     const previousCount = this.pendingContexts.size;
     this.pendingContexts.set(sessionId, context);
@@ -472,17 +503,24 @@ export class MemoryAgent {
     }
   }
 
-  private async processPendingBatch(): Promise<number> {
-    const pending: Array<{
-      sessionId: string;
-      context: PendingSessionContext;
-    }> = [];
+  private getEligiblePendingSessions(): PendingSessionItem[] {
+    const pending: PendingSessionItem[] = [];
 
     for (const [sessionId, context] of this.pendingContexts) {
-      if (this.processing.has(sessionId)) continue;
-      if (sessionId.startsWith("__memory_")) continue;
+      if (this.processing.has(sessionId)) {
+        continue;
+      }
+      if (sessionId.startsWith("__memory_")) {
+        continue;
+      }
       pending.push({ sessionId, context });
     }
+
+    return pending;
+  }
+
+  private async processPendingBatch(): Promise<number> {
+    const pending = this.getEligiblePendingSessions();
 
     if (pending.length === 0) {
       logMemoryAgent("Batch: no eligible pending sessions.");
@@ -492,23 +530,28 @@ export class MemoryAgent {
     if (pending.length === 1) {
       const { sessionId, context } = pending[0];
       logMemoryAgent(`Batch: only 1 session (${sessionId}); using single-session processing.`);
-      return (await this.process(sessionId, context.workspaceId, context.zoraId)) ? 1 : 0;
+      return (await this.process(sessionId, context.workspaceId)) ? 1 : 0;
     }
 
-    const byZora = new Map<string, typeof pending>();
+    const byWorkspace = new Map<string, PendingSessionItem[]>();
     for (const item of pending) {
-      const key = item.context.zoraId;
-      if (!byZora.has(key)) byZora.set(key, []);
-      byZora.get(key)?.push(item);
+      const group = byWorkspace.get(item.context.workspaceId);
+      if (group) {
+        group.push(item);
+      } else {
+        byWorkspace.set(item.context.workspaceId, [item]);
+      }
     }
 
     let totalProcessed = 0;
 
-    for (const [zoraId, group] of byZora) {
+    for (const group of byWorkspace.values()) {
       const startedAt = Date.now();
       const workspaceId = group[0].context.workspaceId;
 
-      logMemoryAgent(`Batch: processing ${group.length} sessions for zoraId=${zoraId}.`);
+      logMemoryAgent(
+        `Batch: processing ${group.length} sessions for workspace=${workspaceId}.`
+      );
 
       const entries: Array<{
         sessionId: string;
@@ -563,16 +606,16 @@ export class MemoryAgent {
           continue;
         }
         logMemoryAgent(`Batch: 1 session survived filtering (${sessionId}); using single-session.`);
-        if (await this.process(sessionId, ctx.workspaceId, ctx.zoraId)) {
+        if (await this.process(sessionId, ctx.workspaceId)) {
           totalProcessed += 1;
         }
         continue;
       }
 
-      const memoryContent = await loadFile("MEMORY.md", zoraId);
-      const userContent = await loadFile("USER.md", zoraId);
+      const memoryContent = await loadFile("MEMORY.md");
+      const userContent = await loadFile("USER.md");
       logMemoryAgent(
-        `Batch: loaded memory state for zoraId=${zoraId}: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
+        `Batch: loaded memory state: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
       );
 
       const {
@@ -593,7 +636,7 @@ export class MemoryAgent {
 
       try {
         const memorySessionId = `__memory_batch_${Date.now()}__`;
-        const targetZoraDir = getZoraMemoryDirPath(zoraId);
+        const targetZoraDir = getZoraMemoryDirPath();
 
         logMemoryAgent(
           `Starting batch memory run ${memorySessionId} for ${batchSessionIds.length} sessions in ${targetZoraDir}.`
@@ -601,7 +644,6 @@ export class MemoryAgent {
 
         const profile = await buildMemoryProfile({
           sdkRuntime: getSDKRuntimeOptions(),
-          zoraId,
           prompt,
         });
 
@@ -637,17 +679,12 @@ export class MemoryAgent {
 
   private enqueueProcess(
     sessionId: string,
-    workspaceId = "default",
-    zoraId = "default"
+    workspaceId = "default"
   ) {
-    this.setPendingContext(sessionId, {
-      workspaceId,
-      zoraId,
-      enqueuedAt: Date.now(),
-    });
+    this.trackPendingSession(sessionId, workspaceId);
     this.queue = this.queue
       .then(async () => {
-        await this.process(sessionId, workspaceId, zoraId);
+        await this.process(sessionId, workspaceId);
       })
       .catch((error) => {
         console.error(
@@ -659,8 +696,7 @@ export class MemoryAgent {
 
   private process(
     sessionId: string,
-    workspaceId = "default",
-    zoraId = "default"
+    workspaceId = "default"
   ): Promise<boolean> {
     if (this.processing.has(sessionId)) {
       logMemoryAgent(`Skip session ${sessionId}: processing already in progress.`);
@@ -676,7 +712,7 @@ export class MemoryAgent {
       const startedAt = Date.now();
       this.processing.add(sessionId);
       logMemoryAgent(
-        `Begin processing session ${sessionId} (workspace=${workspaceId}, zoraId=${zoraId}).`
+        `Begin processing session ${sessionId} (workspace=${workspaceId}).`
       );
 
       try {
@@ -702,8 +738,8 @@ export class MemoryAgent {
         const sessions = await listSessions(workspaceId);
         const sessionTitle =
           sessions.find((session) => session.id === sessionId)?.title ?? "Untitled Session";
-        const memoryContent = await loadFile("MEMORY.md", zoraId);
-        const userContent = await loadFile("USER.md", zoraId);
+        const memoryContent = await loadFile("MEMORY.md");
+        const userContent = await loadFile("USER.md");
         logMemoryAgent(
           `Loaded memory state for session ${sessionId}: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
         );
@@ -723,7 +759,7 @@ export class MemoryAgent {
         logMemoryAgent(
           `Built memory prompt for session ${sessionId}: transcript=${keptTranscriptMessages}/${totalTranscriptMessages}, omitted=${omittedTranscriptMessages}, chars=${prompt.length}, title="${sessionTitle}".`
         );
-        const targetZoraDir = getZoraMemoryDirPath(zoraId);
+        const targetZoraDir = getZoraMemoryDirPath();
         const memorySessionId = `__memory_${sessionId}__`;
 
         logMemoryAgent(
@@ -732,7 +768,6 @@ export class MemoryAgent {
 
         const profile = await buildMemoryProfile({
           sdkRuntime: getSDKRuntimeOptions(),
-          zoraId,
           prompt,
         });
         logMemoryAgent(

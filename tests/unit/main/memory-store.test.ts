@@ -47,16 +47,12 @@ describe("main memory-store", () => {
   it("resolves the Zora memory root without zoras/default", async () => {
     const homeDir = createTempHome();
     const {
-      DEFAULT_ZORA_ID,
       estimateTokens,
       getZoraDailyDirPath,
-      getZoraDirPath,
       getZoraMemoryDirPath,
     } = await loadMemoryStore(homeDir);
 
-    expect(DEFAULT_ZORA_ID).toBe("default");
     expect(getZoraMemoryDirPath()).toBe(path.join(homeDir, ".zora", "memory"));
-    expect(getZoraDirPath()).toBe(path.join(homeDir, ".zora", "memory"));
     expect(getZoraDailyDirPath()).toBe(path.join(homeDir, ".zora", "memory", "daily"));
     expect(getZoraMemoryDirPath()).not.toContain(path.join("zoras", "default"));
     expect(estimateTokens("abcdef")).toBe(2);

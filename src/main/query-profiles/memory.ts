@@ -1,11 +1,10 @@
-import { DEFAULT_ZORA_ID, getZoraMemoryDirPath } from "../memory-store";
+import { getZoraMemoryDirPath } from "../memory-store";
 import { resolveSdkEnvForProfile } from "./sdk-env";
 import type { SDKRuntimeOptions } from "../sdk-runtime";
 import type { QueryProfile } from "./types";
 
 export interface MemoryProfileContext {
   sdkRuntime: SDKRuntimeOptions;
-  zoraId?: string;
   prompt: string;
 }
 
@@ -122,11 +121,10 @@ After writing, if MEMORY.md exceeds ~200 lines:
 export async function buildMemoryProfile(
   ctx: MemoryProfileContext
 ): Promise<QueryProfile> {
-  const zoraId = ctx.zoraId ?? DEFAULT_ZORA_ID;
   const env = await resolveSdkEnvForProfile("memory");
 
   const options: QueryProfile["options"] = {
-    cwd: getZoraMemoryDirPath(zoraId),
+    cwd: getZoraMemoryDirPath(),
     pathToClaudeCodeExecutable: ctx.sdkRuntime.pathToClaudeCodeExecutable,
     executable: ctx.sdkRuntime.executable,
     executableArgs: ctx.sdkRuntime.executableArgs,
