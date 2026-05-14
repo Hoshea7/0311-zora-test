@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  copyFile,
   mkdir,
   readFile,
+  readdir,
   rename as fsRename,
   rm,
   unlink,
@@ -15,6 +17,13 @@ const DEFAULT_WORKSPACE_ID = "default";
 const ZORA_DIR = path.join(homedir(), ".zora");
 const WORKSPACES_FILE = path.join(ZORA_DIR, "workspaces.json");
 const WORKSPACE_DATA_ROOT = path.join(ZORA_DIR, "workspaces");
+const WORKSPACE_SIDECAR_FILE = "workspace.json";
+const SESSIONS_INDEX_FILE = path.join("sessions", "index.json");
+
+type WorkspaceFileReadResult = {
+  workspaces: WorkspaceMeta[];
+  shouldRewrite: boolean;
+};
 
 function createDefaultWorkspace(
   existing?: Partial<WorkspaceMeta>
@@ -40,6 +49,23 @@ function isWorkspaceMeta(value: unknown): value is WorkspaceMeta {
     typeof (value as WorkspaceMeta).createdAt === "string" &&
     typeof (value as WorkspaceMeta).updatedAt === "string"
   );
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === code
+  );
+}
+
+function isEnoentError(error: unknown): boolean {
+  return hasErrorCode(error, "ENOENT");
+}
+
+function timestampForFileName(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 function normalizeWorkspaces(workspaces: WorkspaceMeta[]): WorkspaceMeta[] {
@@ -108,18 +134,58 @@ async function replaceFileAtomically(
   }
 }
 
-async function readWorkspaceFile(): Promise<WorkspaceMeta[]> {
+async function backupWorkspaceFile(reason: string): Promise<void> {
+  const backupPath = `${WORKSPACES_FILE}.${reason}-${timestampForFileName()}.bak`;
+
+  try {
+    await copyFile(WORKSPACES_FILE, backupPath);
+    console.warn(`[workspace-store] Backed up workspaces.json to ${backupPath}.`);
+  } catch (error) {
+    if (!isEnoentError(error)) {
+      console.warn("[workspace-store] Failed to back up workspaces.json.", error);
+    }
+  }
+}
+
+async function readWorkspaceFile(): Promise<WorkspaceFileReadResult> {
   try {
     const raw = await readFile(WORKSPACES_FILE, "utf8");
     const parsed = JSON.parse(raw) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return [];
+      await backupWorkspaceFile("invalid");
+      console.warn(
+        "[workspace-store] workspaces.json is not an array; recovering from workspace data dirs."
+      );
+      return { workspaces: [], shouldRewrite: true };
     }
 
-    return parsed.filter(isWorkspaceMeta);
-  } catch {
-    return [];
+    const validWorkspaces = parsed.filter(isWorkspaceMeta);
+    const shouldRewrite = validWorkspaces.length !== parsed.length;
+
+    if (shouldRewrite) {
+      await backupWorkspaceFile("invalid-entries");
+      console.warn(
+        `[workspace-store] Dropped ${parsed.length - validWorkspaces.length} invalid workspace record(s).`
+      );
+    }
+
+    return { workspaces: validWorkspaces, shouldRewrite };
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return { workspaces: [], shouldRewrite: true };
+    }
+
+    if (error instanceof SyntaxError) {
+      await backupWorkspaceFile("corrupt");
+      console.warn(
+        "[workspace-store] workspaces.json is invalid JSON; recovering from workspace data dirs.",
+        error
+      );
+      return { workspaces: [], shouldRewrite: true };
+    }
+
+    throw error;
   }
 }
 
@@ -129,20 +195,150 @@ async function writeWorkspaceFile(workspaces: WorkspaceMeta[]): Promise<void> {
     WORKSPACES_FILE,
     JSON.stringify(workspaces, null, 2)
   );
+  await persistWorkspaceSidecars(workspaces);
 }
 
 function getWorkspaceDataDir(workspaceId: string): string {
   return path.join(WORKSPACE_DATA_ROOT, workspaceId);
 }
 
+function getWorkspaceSidecarPath(workspaceId: string): string {
+  return path.join(getWorkspaceDataDir(workspaceId), WORKSPACE_SIDECAR_FILE);
+}
+
+async function persistWorkspaceSidecar(workspace: WorkspaceMeta): Promise<void> {
+  await mkdir(getWorkspaceDataDir(workspace.id), { recursive: true });
+  await replaceFileAtomically(
+    getWorkspaceSidecarPath(workspace.id),
+    `${JSON.stringify(workspace, null, 2)}\n`
+  );
+}
+
+async function persistWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<void> {
+  const results = await Promise.allSettled(
+    workspaces.map((workspace) => persistWorkspaceSidecar(workspace))
+  );
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("[workspace-store] Failed to persist workspace sidecar.", result.reason);
+    }
+  }
+}
+
+async function readWorkspaceSidecar(workspaceId: string): Promise<WorkspaceMeta | null> {
+  try {
+    const raw = await readFile(getWorkspaceSidecarPath(workspaceId), "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    return isWorkspaceMeta(parsed) && parsed.id === workspaceId ? parsed : null;
+  } catch (error) {
+    if (isEnoentError(error) || error instanceof SyntaxError) {
+      return null;
+    }
+
+    console.warn(
+      `[workspace-store] Failed to read workspace sidecar for ${workspaceId}.`,
+      error
+    );
+    return null;
+  }
+}
+
+async function recoverWorkspaceFromSessionIndex(
+  workspaceId: string
+): Promise<WorkspaceMeta | null> {
+  try {
+    const raw = await readFile(
+      path.join(getWorkspaceDataDir(workspaceId), SESSIONS_INDEX_FILE),
+      "utf8"
+    );
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    if (parsed.length === 0) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+
+    return {
+      id: workspaceId,
+      name: `恢复的工作区 ${workspaceId.slice(0, 8)}`,
+      path: homedir(),
+      createdAt: now,
+      updatedAt: now,
+    };
+  } catch (error) {
+    if (isEnoentError(error) || error instanceof SyntaxError) {
+      return null;
+    }
+
+    console.warn(
+      `[workspace-store] Failed to recover workspace ${workspaceId} from session index.`,
+      error
+    );
+    return null;
+  }
+}
+
+async function recoverWorkspacesFromDataDirs(
+  existingWorkspaces: WorkspaceMeta[]
+): Promise<WorkspaceMeta[]> {
+  const existingIds = new Set(existingWorkspaces.map((workspace) => workspace.id));
+
+  let entries;
+  try {
+    entries = await readdir(WORKSPACE_DATA_ROOT, { withFileTypes: true });
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const recovered: WorkspaceMeta[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.trim().length === 0 || existingIds.has(entry.name)) {
+      continue;
+    }
+
+    const sidecar = await readWorkspaceSidecar(entry.name);
+    const workspace = sidecar ?? (await recoverWorkspaceFromSessionIndex(entry.name));
+    if (!workspace) {
+      continue;
+    }
+
+    console.warn(
+      `[workspace-store] Recovered workspace ${workspace.id} (${workspace.name}) from data dir.`
+    );
+    recovered.push(workspace);
+    existingIds.add(workspace.id);
+  }
+
+  return recovered;
+}
+
 export async function listWorkspaces(): Promise<WorkspaceMeta[]> {
   await ensureZoraDir();
 
-  const rawWorkspaces = await readWorkspaceFile();
+  const workspaceFile = await readWorkspaceFile();
+  const recoveredWorkspaces = await recoverWorkspacesFromDataDirs(workspaceFile.workspaces);
+  const rawWorkspaces = [...workspaceFile.workspaces, ...recoveredWorkspaces];
   const normalized = normalizeWorkspaces(rawWorkspaces);
 
-  if (JSON.stringify(rawWorkspaces) !== JSON.stringify(normalized)) {
+  if (
+    workspaceFile.shouldRewrite ||
+    recoveredWorkspaces.length > 0 ||
+    JSON.stringify(rawWorkspaces) !== JSON.stringify(normalized)
+  ) {
     await writeWorkspaceFile(normalized);
+  } else {
+    await persistWorkspaceSidecars(normalized);
   }
 
   return normalized;
