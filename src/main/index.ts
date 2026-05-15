@@ -7,7 +7,7 @@ import {
   type OpenDialogOptions,
 } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type {
   AgentStreamEvent,
@@ -103,6 +103,19 @@ import {
 import { normalizeExternalUrl } from "./external-url";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const DEV_ELECTRON_PROFILE_DIR_NAME = "zora-dev";
+
+function configureDevElectronProfilePath() {
+  if (!isDev) {
+    return;
+  }
+
+  const devProfilePath = path.join(app.getPath("appData"), DEV_ELECTRON_PROFILE_DIR_NAME);
+  mkdirSync(devProfilePath, { recursive: true });
+  app.setPath("userData", devProfilePath);
+}
+
+configureDevElectronProfilePath();
 
 async function openExternalUrl(url: unknown) {
   await shell.openExternal(normalizeExternalUrl(url));
