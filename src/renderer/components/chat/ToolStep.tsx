@@ -19,7 +19,7 @@ function formatDisplayToolName(toolName: string): string {
     return formatToolName(toolName);
   }
 
-  return `🔌 ${match[1]} / ${match[2]}`;
+  return `${match[1]} / ${match[2]}`;
 }
 
 export function ToolStep({ tool }: { tool: ToolAction }) {

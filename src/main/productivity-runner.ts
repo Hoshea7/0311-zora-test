@@ -174,7 +174,7 @@ export async function runProductivitySession({
   const initialPrompt = shouldRecoverFromTranscript
     ? buildRecoveredPromptFromMessages(persistedMessages, currentPrompt)
     : currentPrompt;
-  const initialPromptWithContext = await buildZoraPrompt(initialPrompt);
+  const initialPromptWithContext = await buildZoraPrompt(initialPrompt, workspaceId);
 
   if (shouldRecoverFromTranscript) {
     console.warn(
@@ -224,7 +224,7 @@ export async function runProductivitySession({
       recoveredMessages,
       currentPrompt
     );
-    const rebuiltPromptWithContext = await buildZoraPrompt(rebuiltPrompt);
+    const rebuiltPromptWithContext = await buildZoraPrompt(rebuiltPrompt, workspaceId);
     const recoveredProfile = await buildProductivityProfile({
       userPrompt: rebuiltPromptWithContext,
       cwd: workspacePath,
@@ -262,7 +262,7 @@ export async function runProductivitySession({
     if (!followUpPrompt.trim()) {
       break;
     }
-    const followUpPromptWithContext = await buildZoraPrompt(followUpPrompt);
+    const followUpPromptWithContext = await buildZoraPrompt(followUpPrompt, workspaceId);
 
     const resumeSessionId =
       runResult.sdkSessionId ?? await getSdkSessionId(sessionId, workspaceId);

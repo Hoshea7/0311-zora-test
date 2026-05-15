@@ -10,7 +10,7 @@ import {
   switchSessionAtom
 } from "../../store/workspace";
 import { cn } from "../../utils/cn";
-import { isSettingsOpenAtom } from "../../store/ui";
+import { activeMainViewAtom, isSettingsOpenAtom } from "../../store/ui";
 import type { Session } from "../../types";
 
 /**
@@ -29,7 +29,8 @@ export function SessionList() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
+  const activeMainView = useAtomValue(activeMainViewAtom);
+  const isChatView = activeMainView === "chat";
 
   const handleSwitchSession = (sessionId: string) => {
     switchSession(sessionId);
@@ -68,7 +69,7 @@ export function SessionList() {
       className={cn(
         "group relative flex cursor-pointer items-center gap-2.5 rounded-[16px] border px-3 py-2.5 transition-all duration-200",
         "outline-none focus:outline-none focus:ring-0 focus-visible:outline-none",
-        currentSessionId === session.id && !isSettingsOpen
+        currentSessionId === session.id && isChatView
           ? cn(
               "border-stone-200/80 bg-white shadow-[0_2px_10px_rgba(28,25,23,0.05)]"
             )
@@ -113,7 +114,7 @@ export function SessionList() {
             <div
               className={cn(
                 "h-2 w-2 rounded-full border",
-                currentSessionId === session.id && !isSettingsOpen
+                currentSessionId === session.id && isChatView
                   ? "border-orange-500 bg-orange-500"
                   : "border-stone-300/90 group-hover:border-stone-400/80"
               )}
@@ -152,7 +153,7 @@ export function SessionList() {
               <div
                 className={cn(
                   "truncate text-[14px] leading-[1.3]",
-                  currentSessionId === session.id && !isSettingsOpen
+                  currentSessionId === session.id && isChatView
                     ? "font-medium text-stone-900"
                     : "font-normal text-stone-700 group-hover:text-stone-900"
                 )}

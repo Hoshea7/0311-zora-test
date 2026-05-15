@@ -695,7 +695,7 @@ export default function App() {
             const initialThinking = chunks.blockStart.thinking ?? "";
             pendingThinkingSeedRef.current = initialThinking;
             activeThinkingHasDeltaRef.current = false;
-            addThinkingStep(targetSessionId, initialThinking);
+            addThinkingStep(targetSessionId, initialThinking, chunks.blockStart.thinkingId);
             activeBlockTypeRef.current = "thinking";
           }
           if (isCurrentSessionEvent) {
