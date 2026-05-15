@@ -95,7 +95,7 @@ describe("getToolSummaryText", () => {
 });
 
 describe("buildProcessSummary", () => {
-  it("shows the running tool and completed count while streaming", () => {
+  it("shows the running tool while streaming", () => {
     const steps: ProcessStep[] = [
       {
         type: "tool",
@@ -117,7 +117,7 @@ describe("buildProcessSummary", () => {
       },
     ];
 
-    expect(buildProcessSummary(steps, true)).toBe("Bash · bun run test:unit · 1 done");
+    expect(buildProcessSummary(steps, true)).toBe("正在使用 Bash");
   });
 
   it("summarizes completed thinking and tool calls", () => {
@@ -140,10 +140,10 @@ describe("buildProcessSummary", () => {
       },
     ];
 
-    expect(buildProcessSummary(steps, false)).toBe("analyzed, 2 tool calls");
+    expect(buildProcessSummary(steps, false)).toBe("已完成分析 · 2 次工具调用");
   });
 
-  it("shows analyzing when only thinking is present during streaming", () => {
+  it("shows thinking when only thinking is present during streaming", () => {
     const steps: ProcessStep[] = [
       {
         type: "thinking",
@@ -155,7 +155,7 @@ describe("buildProcessSummary", () => {
       },
     ];
 
-    expect(buildProcessSummary(steps, true)).toBe("analyzing...");
+    expect(buildProcessSummary(steps, true)).toBe("正在思考");
   });
 
   it("returns an empty summary when there is nothing to report", () => {

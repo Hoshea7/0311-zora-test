@@ -24,6 +24,7 @@ import {
   workspaceSessionGroupsAtom,
 } from "../../store/workspace";
 import { cn } from "../../utils/cn";
+import { getErrorMessage } from "../../utils/message";
 import type { Session, Workspace } from "../../types";
 
 type SessionStatus = "needs-input" | "running" | "current" | "idle";
@@ -39,7 +40,21 @@ interface WorkspaceGroupView {
   status: SessionStatus;
 }
 
-const PATH_PREVIEW_DELAY_MS = 520;
+const PATH_PREVIEW_DELAY_MS = 720;
+
+function areSetsEqual<T>(left: Set<T>, right: Set<T>): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 function FolderIcon({ expanded }: { expanded: boolean }) {
   return (
@@ -189,6 +204,44 @@ function TrashIcon({ className }: { className?: string }) {
   );
 }
 
+function EllipsisIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5 12h.01M12 12h.01M19 12h.01"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 4v16m8-8H4"
+      />
+    </svg>
+  );
+}
+
 function formatSessionTime(value: string): string {
   const timestamp = new Date(value).getTime();
 
@@ -307,23 +360,23 @@ function SessionRow({
   workspaceId,
   status,
   isActive,
+  isPinned,
   onSwitch,
 }: {
   session: Session;
   workspaceId: string;
   status: SessionStatus;
   isActive: boolean;
+  isPinned: boolean;
   onSwitch: (workspaceId: string, sessionId: string) => void;
 }) {
   const deleteSession = useSetAtom(deleteSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
   const togglePinSession = useSetAtom(togglePinSessionAtom);
-  const pinnedSessionIds = useAtomValue(pinnedSessionIdsAtom);
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const isPinned = pinnedSessionIds.has(session.id);
 
   const handleRenameSubmit = () => {
     const trimmed = renameValue.trim();
@@ -456,20 +509,7 @@ function SessionRow({
                 )}
                 aria-label={`打开${session.title}的操作菜单`}
               >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 12h.01M12 12h.01M19 12h.01"
-                  />
-                </svg>
+                <EllipsisIcon className="h-3.5 w-3.5" />
               </button>
             </DropdownMenu.Trigger>
 
@@ -528,6 +568,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   const pendingAskUsersBySession = useAtomValue(pendingAskUsersBySessionAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const pinnedWorkspaceIds = useAtomValue(pinnedWorkspaceIdsAtom);
+  const pinnedSessionIds = useAtomValue(pinnedSessionIdsAtom);
   const switchWorkspaceSession = useSetAtom(switchWorkspaceSessionAtom);
   const startNewChatInWorkspace = useSetAtom(startNewChatInWorkspaceAtom);
   const deleteWorkspace = useSetAtom(deleteWorkspaceAtom);
@@ -537,6 +578,9 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<Set<string>>(
     new Set()
   );
+  const [userCollapsedWorkspaceIds, setUserCollapsedWorkspaceIds] = useState<
+    Set<string>
+  >(new Set());
   const [showAllWorkspaceIds, setShowAllWorkspaceIds] = useState<Set<string>>(
     new Set()
   );
@@ -600,27 +644,38 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
     setExpandedWorkspaceIds((current) => {
       const next = new Set(current);
 
-      if (currentWorkspaceId) {
-        next.add(currentWorkspaceId);
+      const activeSessionWorkspaceId = currentSessionId
+        ? groupViews.find((group) =>
+            group.sessions.some((session) => session.id === currentSessionId)
+          )?.workspace.id
+        : undefined;
+
+      if (
+        activeSessionWorkspaceId &&
+        !userCollapsedWorkspaceIds.has(activeSessionWorkspaceId)
+      ) {
+        next.add(activeSessionWorkspaceId);
       }
 
-      if (groups.length === 1) {
+      if (
+        groups.length === 1 &&
+        !userCollapsedWorkspaceIds.has(groups[0].workspace.id)
+      ) {
         next.add(groups[0].workspace.id);
       }
 
       for (const group of groupViews) {
-        if (group.status === "running" || group.status === "needs-input") {
+        if (
+          (group.status === "running" || group.status === "needs-input") &&
+          !userCollapsedWorkspaceIds.has(group.workspace.id)
+        ) {
           next.add(group.workspace.id);
         }
       }
 
-      if (next.size === current.size) {
-        return current;
-      }
-
-      return next;
+      return areSetsEqual(next, current) ? current : next;
     });
-  }, [currentWorkspaceId, groups, groupViews]);
+  }, [currentSessionId, groups, groupViews, userCollapsedWorkspaceIds]);
 
   useEffect(() => {
     return () => {
@@ -634,7 +689,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   }, []);
 
   const showWorkspaceActionError = (error: unknown, fallback: string) => {
-    const rawMessage = error instanceof Error ? error.message : String(error);
+    const rawMessage = getErrorMessage(error);
     const message = rawMessage.includes("workspace:rename")
       ? "重命名接口已更新，重启 Zora 后即可生效。"
       : rawMessage || fallback;
@@ -678,12 +733,23 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
 
   const handleToggleWorkspace = (workspaceId: string) => {
     setPathPreviewWorkspaceId(null);
+    const shouldCollapse = expandedWorkspaceIds.has(workspaceId);
+
     setExpandedWorkspaceIds((current) => {
       const next = new Set(current);
       if (next.has(workspaceId)) {
         next.delete(workspaceId);
       } else {
         next.add(workspaceId);
+      }
+      return next;
+    });
+    setUserCollapsedWorkspaceIds((current) => {
+      const next = new Set(current);
+      if (shouldCollapse) {
+        next.add(workspaceId);
+      } else {
+        next.delete(workspaceId);
       }
       return next;
     });
@@ -704,6 +770,15 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   const handleNewChatInWorkspace = (workspaceId: string) => {
     void startNewChatInWorkspace(workspaceId);
     setExpandedWorkspaceIds((current) => new Set(current).add(workspaceId));
+    setUserCollapsedWorkspaceIds((current) => {
+      if (!current.has(workspaceId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(workspaceId);
+      return next;
+    });
     setSettingsOpen(false);
   };
 
@@ -891,20 +966,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                         )}
                         aria-label={`打开${workspace.name}的操作菜单`}
                       >
-                        <svg
-                          className="h-3.5 w-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 12h.01M12 12h.01M19 12h.01"
-                          />
-                        </svg>
+                        <EllipsisIcon className="h-3.5 w-3.5" />
                       </button>
                     </DropdownMenu.Trigger>
 
@@ -967,20 +1029,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                     onClick={() => handleNewChatInWorkspace(workspace.id)}
                     aria-label={`在${workspace.name}中新建会话`}
                   >
-                    <svg
-                      className="h-3.5 w-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 4v16m8-8H4"
-                      />
-                    </svg>
+                    <PlusIcon className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
@@ -1025,6 +1074,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                         workspaceId={workspace.id}
                         status={status}
                         isActive={isActive}
+                        isPinned={pinnedSessionIds.has(session.id)}
                         onSwitch={handleSwitchSession}
                       />
                     );

@@ -1159,14 +1159,10 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     "workspace:create",
     async (_event, name: unknown, workspacePath: unknown) => {
-      if (typeof name !== "string" || name.trim().length === 0) {
-        throw new Error("Workspace name is required.");
-      }
-      if (typeof workspacePath !== "string" || workspacePath.trim().length === 0) {
-        throw new Error("Workspace path is required.");
-      }
-
-      const workspace = await createWorkspace(name.trim(), workspacePath.trim());
+      const workspace = await createWorkspace(
+        assertRequiredString(name, "workspace.name").trim(),
+        assertRequiredString(workspacePath, "workspace.path").trim()
+      );
       console.log(`[index] Workspace created: ${workspace.id} (${workspace.path})`);
       return workspace;
     }
@@ -1187,11 +1183,10 @@ app.whenReady().then(async () => {
     "workspace:rename",
     async (_event, workspaceId: unknown, name: unknown) => {
       const targetWorkspaceId = resolveWorkspaceId(workspaceId);
-      if (typeof name !== "string" || name.trim().length === 0) {
-        throw new Error("Workspace name is required.");
-      }
-
-      const workspace = await renameWorkspace(targetWorkspaceId, name.trim());
+      const workspace = await renameWorkspace(
+        targetWorkspaceId,
+        assertRequiredString(name, "workspace.name").trim()
+      );
       console.log(`[index] Workspace renamed: ${targetWorkspaceId}`);
       return workspace;
     }

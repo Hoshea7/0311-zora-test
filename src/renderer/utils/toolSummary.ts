@@ -103,7 +103,7 @@ export function buildProcessSummary(steps: ProcessStep[], isStreaming: boolean):
 
   const parts: string[] = [];
   if (hasThinking) {
-    parts.push("已分析");
+    parts.push("已完成分析");
   }
   if (tools.length > 0) {
     parts.push(`${tools.length} 次工具调用`);

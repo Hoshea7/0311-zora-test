@@ -145,7 +145,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
         type="button"
         aria-expanded={isOpen}
         onClick={handleToggle}
-        className="mx-[-6px] flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[12px] leading-5 text-[#9d958d] transition-colors duration-200 hover:text-[#756d65] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="mx-[-6px] flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[11.5px] leading-[18px] text-[#9d958d] transition-colors duration-200 hover:text-[#756d65] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         {isStreaming ? (
           <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-orange-400 animate-pulse motion-reduce:animate-none" />
@@ -153,7 +153,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
           <span className="pt-[1px] text-[9px] text-[#cbc5bf]">●</span>
         )}
 
-        <span className="font-[450]">思考</span>
+        <span className="font-[430]">思考</span>
 
         {!isOpen ? (
           <span className="ml-1 min-w-0 flex-1 truncate text-[#b6aea6]" title={previewText}>
@@ -162,7 +162,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
         ) : null}
 
         {duration ? (
-          <span className="flex-shrink-0 pl-2 text-[11.5px] text-[#c7c0ba]">{duration}</span>
+          <span className="flex-shrink-0 pl-2 text-[11px] text-[#c7c0ba]">{duration}</span>
         ) : null}
       </button>
 

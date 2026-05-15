@@ -7,7 +7,7 @@ export const SIDEBAR_MIN_WIDTH = 292;
 export const SIDEBAR_MAX_WIDTH = 520;
 export const SIDEBAR_DEFAULT_WIDTH = 344;
 
-function clampSidebarWidth(width: number): number {
+export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
 }
 

@@ -35,7 +35,7 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
         title={summaryText !== displayToolName ? summaryText : undefined}
-        className="mx-[-6px] flex w-full items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[12px] leading-5 transition-colors duration-200 hover:bg-stone-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="mx-[-6px] flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[11.5px] leading-[18px] transition-colors duration-200 hover:bg-stone-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         {tool.status === "running" ? (
           <span className="h-2 w-2 animate-spin rounded-full border border-stone-300 border-t-stone-500 motion-reduce:animate-none" />
@@ -45,16 +45,16 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
           <span className="h-2 w-2 rounded-full bg-emerald-400" />
         )}
 
-        <span className="font-[450] text-[#645c54]">{displayToolName}</span>
+        <span className="font-[430] text-[#645c54]">{displayToolName}</span>
 
         {tool.completedAt ? (
-          <span className="shrink-0 text-[11.5px] text-[#c7c0ba]">
+          <span className="shrink-0 text-[11px] text-[#c7c0ba]">
             {formatDuration(tool.completedAt - tool.startedAt)}
           </span>
         ) : tool.status === "running" ? (
           <ElapsedTimer
             startedAt={tool.startedAt}
-            className="shrink-0 text-[11.5px] text-[#c7c0ba]"
+            className="shrink-0 text-[11px] text-[#c7c0ba]"
           />
         ) : null}
       </button>

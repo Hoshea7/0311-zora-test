@@ -3,8 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
-  SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH,
+  clampSidebarWidth,
   isSettingsOpenAtom,
   sidebarCollapsedAtom,
   sidebarWidthAtom,
@@ -107,9 +106,14 @@ export function LeftSidebar() {
     useState(false);
   const [isSubmittingWorkspace, setIsSubmittingWorkspace] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [resizePreviewWidth, setResizePreviewWidth] = useState<number | null>(
+    null
+  );
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const resizeStartXRef = useRef(0);
   const resizeStartWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
+  const resizePreviewWidthRef = useRef<number | null>(null);
+  const displayedSidebarWidth = resizePreviewWidth ?? sidebarWidth;
 
   useEffect(() => {
     void loadWorkspaces().catch((error) => {
@@ -137,16 +141,23 @@ export function LeftSidebar() {
     const previousUserSelect = document.body.style.userSelect;
 
     const handleMouseMove = (event: MouseEvent) => {
-      const nextWidth =
-        resizeStartWidthRef.current + (event.clientX - resizeStartXRef.current);
-
-      setSidebarWidth(
-        Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, nextWidth))
+      const nextWidth = clampSidebarWidth(
+        resizeStartWidthRef.current + (event.clientX - resizeStartXRef.current)
       );
+
+      resizePreviewWidthRef.current = nextWidth;
+      setResizePreviewWidth(nextWidth);
     };
 
     const handleMouseUp = () => {
+      const nextWidth = resizePreviewWidthRef.current;
       setIsResizing(false);
+      setResizePreviewWidth(null);
+      resizePreviewWidthRef.current = null;
+
+      if (nextWidth !== null) {
+        setSidebarWidth(nextWidth);
+      }
     };
 
     document.body.style.cursor = "col-resize";
@@ -171,6 +182,8 @@ export function LeftSidebar() {
     event.stopPropagation();
     resizeStartXRef.current = event.clientX;
     resizeStartWidthRef.current = sidebarWidth;
+    resizePreviewWidthRef.current = sidebarWidth;
+    setResizePreviewWidth(sidebarWidth);
     setIsResizing(true);
   };
 
@@ -230,7 +243,9 @@ export function LeftSidebar() {
           "group/sidebar relative z-40 h-full shrink-0",
           !isResizing && "transition-[width] duration-200 ease-out"
         )}
-        style={{ width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth }}
+        style={{
+          width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : displayedSidebarWidth,
+        }}
       >
         <aside className="relative flex h-full w-full flex-col overflow-hidden border-r border-stone-200/70 bg-[#f7f6f2] text-stone-900 shadow-sm">
           <div

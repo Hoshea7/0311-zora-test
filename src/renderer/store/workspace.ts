@@ -1,5 +1,5 @@
 import { atom, type Setter } from "jotai";
-import type { Workspace, Session, GroupedSessions } from "../types";
+import type { Workspace, Session } from "../types";
 import {
   clearDraftStateForSessionAtom,
   clearSessionMessagesAtom,
@@ -12,6 +12,8 @@ const CURRENT_WORKSPACE_STORAGE_KEY = "zora:currentWorkspaceId";
 const PINNED_WORKSPACES_STORAGE_KEY = "zora:pinnedWorkspaceIds";
 const PINNED_SESSIONS_STORAGE_KEY = "zora:pinnedSessionIds";
 export const DEFAULT_WORKSPACE_ID = "default";
+const DRAFT_SESSION_ID = "__draft__";
+const sessionLoadRequestIds = new Map<string, number>();
 
 function readStoredWorkspaceId(): string {
   if (typeof window === "undefined") {
@@ -30,13 +32,16 @@ function persistCurrentWorkspaceId(workspaceId: string): void {
   window.localStorage.setItem(CURRENT_WORKSPACE_STORAGE_KEY, workspaceId);
 }
 
-function readPinnedWorkspaceIds(): Set<string> {
+function readStoredStringSet(
+  key: string,
+  isValidValue: (value: string) => boolean = (value) => value.trim().length > 0
+): Set<string> {
   if (typeof window === "undefined") {
     return new Set();
   }
 
   try {
-    const stored = window.localStorage.getItem(PINNED_WORKSPACES_STORAGE_KEY);
+    const stored = window.localStorage.getItem(key);
     const parsed = stored ? (JSON.parse(stored) as unknown) : [];
 
     if (!Array.isArray(parsed)) {
@@ -46,60 +51,39 @@ function readPinnedWorkspaceIds(): Set<string> {
     return new Set(
       parsed.filter(
         (value): value is string =>
-          typeof value === "string" &&
-          value.trim().length > 0 &&
-          value !== DEFAULT_WORKSPACE_ID
+          typeof value === "string" && isValidValue(value)
       )
     );
   } catch {
     return new Set();
   }
+}
+
+function persistStoredStringSet(key: string, values: Set<string>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(key, JSON.stringify([...values]));
+}
+
+function readPinnedWorkspaceIds(): Set<string> {
+  return readStoredStringSet(
+    PINNED_WORKSPACES_STORAGE_KEY,
+    (value) => value.trim().length > 0 && value !== DEFAULT_WORKSPACE_ID
+  );
 }
 
 function persistPinnedWorkspaceIds(workspaceIds: Set<string>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(
-    PINNED_WORKSPACES_STORAGE_KEY,
-    JSON.stringify([...workspaceIds])
-  );
+  persistStoredStringSet(PINNED_WORKSPACES_STORAGE_KEY, workspaceIds);
 }
 
 function readPinnedSessionIds(): Set<string> {
-  if (typeof window === "undefined") {
-    return new Set();
-  }
-
-  try {
-    const stored = window.localStorage.getItem(PINNED_SESSIONS_STORAGE_KEY);
-    const parsed = stored ? (JSON.parse(stored) as unknown) : [];
-
-    if (!Array.isArray(parsed)) {
-      return new Set();
-    }
-
-    return new Set(
-      parsed.filter(
-        (value): value is string =>
-          typeof value === "string" && value.trim().length > 0
-      )
-    );
-  } catch {
-    return new Set();
-  }
+  return readStoredStringSet(PINNED_SESSIONS_STORAGE_KEY);
 }
 
 function persistPinnedSessionIds(sessionIds: Set<string>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(
-    PINNED_SESSIONS_STORAGE_KEY,
-    JSON.stringify([...sessionIds])
-  );
+  persistStoredStringSet(PINNED_SESSIONS_STORAGE_KEY, sessionIds);
 }
 
 function sortSessionsByUpdatedAtDesc(a: Session, b: Session) {
@@ -122,11 +106,15 @@ function sortSessions(
   });
 }
 
-function upsertSession(sessions: Session[], session: Session): Session[] {
+function upsertSession(
+  sessions: Session[],
+  session: Session,
+  pinnedSessionIds: Set<string>
+): Session[] {
   const existingIndex = sessions.findIndex((item) => item.id === session.id);
 
   if (existingIndex === -1) {
-    return sortSessions([session, ...sessions]);
+    return sortSessions([session, ...sessions], pinnedSessionIds);
   }
 
   const next = [...sessions];
@@ -134,13 +122,14 @@ function upsertSession(sessions: Session[], session: Session): Session[] {
     ...next[existingIndex],
     ...session,
   };
-  return sortSessions(next);
+  return sortSessions(next, pinnedSessionIds);
 }
 
 function updateSession(
   sessions: Session[],
   sessionId: string,
-  updates: Partial<Session>
+  updates: Partial<Session>,
+  pinnedSessionIds: Set<string>
 ): Session[] {
   return sortSessions(
     sessions.map((session) =>
@@ -150,7 +139,8 @@ function updateSession(
             ...updates,
           }
         : session
-    )
+    ),
+    pinnedSessionIds
   );
 }
 
@@ -172,6 +162,12 @@ function setWorkspaceSessions(
   }));
 
   return sortedSessions;
+}
+
+function getNextSessionLoadRequestId(workspaceId: string): number {
+  const requestId = (sessionLoadRequestIds.get(workspaceId) ?? 0) + 1;
+  sessionLoadRequestIds.set(workspaceId, requestId);
+  return requestId;
 }
 
 function sortWorkspaces(
@@ -226,12 +222,11 @@ function prunePinnedSessionIds(
 }
 
 function resetWorkspaceSurface(set: Setter): void {
-  set(sessionsAtom, []);
   set(currentSessionIdAtom, null);
   set(messagesAtom, []);
   set(draftSelectedProviderIdAtom, undefined);
   set(draftSelectedModelIdAtom, undefined);
-  set(clearDraftStateForSessionAtom, "__draft__");
+  set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
 }
 
 /**
@@ -250,14 +245,17 @@ export const pinnedWorkspaceIdsAtom = atom<Set<string>>(readPinnedWorkspaceIds()
 export const currentWorkspaceIdAtom = atom<string>(readStoredWorkspaceId());
 
 /**
- * 会话列表
- */
-export const sessionsAtom = atom<Session[]>([]);
-
-/**
  * 按工作区缓存的会话列表，用于侧边栏直接展示所有工作区下的会话。
  */
 export const workspaceSessionsAtom = atom<Record<string, Session[]>>({});
+
+/**
+ * 派生：当前工作区会话列表
+ */
+export const sessionsAtom = atom((get) => {
+  const currentWorkspaceId = get(currentWorkspaceIdAtom);
+  return get(workspaceSessionsAtom)[currentWorkspaceId] ?? [];
+});
 
 /**
  * 当前会话 ID
@@ -303,11 +301,10 @@ export const currentSessionAtom = atom((get) => {
 export const workspaceSessionGroupsAtom = atom((get) => {
   const workspaces = get(workspacesAtom);
   const workspaceSessions = get(workspaceSessionsAtom);
-  const pinnedSessionIds = get(pinnedSessionIdsAtom);
 
   return workspaces.map((workspace) => ({
     workspace,
-    sessions: sortSessions(workspaceSessions[workspace.id] ?? [], pinnedSessionIds),
+    sessions: workspaceSessions[workspace.id] ?? [],
     loaded: workspace.id in workspaceSessions,
   }));
 });
@@ -344,17 +341,10 @@ export const updateSessionMetaInStateAtom = atom(
       [targetWorkspaceId]: updateSession(
         current[targetWorkspaceId] ?? [],
         params.sessionId,
-        params.updates
+        params.updates,
+        get(pinnedSessionIdsAtom)
       ),
     }));
-
-    if (get(currentWorkspaceIdAtom) !== targetWorkspaceId) {
-      return;
-    }
-
-    set(sessionsAtom, (current) =>
-      updateSession(current, params.sessionId, params.updates)
-    );
   }
 );
 
@@ -367,47 +357,12 @@ export const upsertSessionMetaInStateAtom = atom(
       ...current,
       [targetWorkspaceId]: upsertSession(
         current[targetWorkspaceId] ?? [],
-        params.session
+        params.session,
+        get(pinnedSessionIdsAtom)
       ),
     }));
-
-    if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
-      set(sessionsAtom, (current) => upsertSession(current, params.session));
-    }
   }
 );
-
-/**
- * 派生：按时间分组的会话
- */
-export const groupedSessionsAtom = atom((get) => {
-  const sessions = get(sessionsAtom);
-  const pinnedIds = get(pinnedSessionIdsAtom);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  const grouped: GroupedSessions = {
-    pinned: [],
-    today: [],
-    earlier: [],
-  };
-
-  for (const session of sessions) {
-    if (pinnedIds.has(session.id)) {
-      grouped.pinned.push(session);
-    } else if (new Date(session.updatedAt) >= today) {
-      grouped.today.push(session);
-    } else {
-      grouped.earlier.push(session);
-    }
-  }
-
-  grouped.pinned.sort(sortSessionsByUpdatedAtDesc);
-  grouped.today.sort(sortSessionsByUpdatedAtDesc);
-  grouped.earlier.sort(sortSessionsByUpdatedAtDesc);
-
-  return grouped;
-});
 
 /**
  * 加载指定工作区的会话列表
@@ -416,17 +371,23 @@ export const loadSessionsAtom = atom(
   null,
   async (get, set, workspaceId?: string) => {
     const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
+    const requestId = getNextSessionLoadRequestId(targetWorkspaceId);
+    const cachedBeforeLoad = get(workspaceSessionsAtom)[targetWorkspaceId];
     const sessions = await window.zora.listSessions(targetWorkspaceId);
+
+    if (
+      sessionLoadRequestIds.get(targetWorkspaceId) !== requestId ||
+      get(workspaceSessionsAtom)[targetWorkspaceId] !== cachedBeforeLoad
+    ) {
+      return get(workspaceSessionsAtom)[targetWorkspaceId] ?? [];
+    }
+
     const sortedSessions = setWorkspaceSessions(
       set,
       targetWorkspaceId,
       sessions,
       get(pinnedSessionIdsAtom)
     );
-
-    if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
-      set(sessionsAtom, sortedSessions);
-    }
 
     return sortedSessions;
   }
@@ -460,33 +421,52 @@ export const loadWorkspacesAtom = atom(null, async (get, set) => {
   const sessionEntries = await Promise.all(
     workspaces.map(async (workspace) => {
       try {
-        return [workspace.id, await window.zora.listSessions(workspace.id)] as const;
+        return {
+          workspaceId: workspace.id,
+          sessions: await window.zora.listSessions(workspace.id),
+          loaded: true,
+        } as const;
       } catch (error) {
         console.error(
           `[workspace] Failed to load sessions for workspace ${workspace.id}:`,
           error
         );
-        return [workspace.id, [] as Session[]] as const;
+        return {
+          workspaceId: workspace.id,
+          sessions: get(workspaceSessionsAtom)[workspace.id] ?? [],
+          loaded: false,
+        } as const;
       }
     })
   );
-  const rawWorkspaceSessions = Object.fromEntries(sessionEntries);
-  const pinnedSessionIds = prunePinnedSessionIds(
-    get(pinnedSessionIdsAtom),
-    rawWorkspaceSessions
+  const allSessionLoadsSucceeded = sessionEntries.every((entry) => entry.loaded);
+  const loadedWorkspaceSessions = Object.fromEntries(
+    sessionEntries
+      .filter((entry) => entry.loaded)
+      .map((entry) => [entry.workspaceId, entry.sessions])
   );
-  persistPinnedSessionIds(pinnedSessionIds);
-  set(pinnedSessionIdsAtom, pinnedSessionIds);
+  const pinnedSessionIds = allSessionLoadsSucceeded
+    ? prunePinnedSessionIds(get(pinnedSessionIdsAtom), loadedWorkspaceSessions)
+    : get(pinnedSessionIdsAtom);
 
-  const nextWorkspaceSessions = Object.fromEntries(
-    sessionEntries.map(([workspaceId, sessions]) => [
-      workspaceId,
-      sortSessions(sessions, pinnedSessionIds),
-    ])
-  );
+  if (allSessionLoadsSucceeded) {
+    persistPinnedSessionIds(pinnedSessionIds);
+    set(pinnedSessionIdsAtom, pinnedSessionIds);
+  }
+
+  const nextWorkspaceSessions = { ...get(workspaceSessionsAtom) };
+  for (const entry of sessionEntries) {
+    if (!entry.loaded) {
+      continue;
+    }
+
+    nextWorkspaceSessions[entry.workspaceId] = sortSessions(
+      entry.sessions,
+      pinnedSessionIds
+    );
+  }
 
   set(workspaceSessionsAtom, nextWorkspaceSessions);
-  set(sessionsAtom, nextWorkspaceSessions[nextWorkspaceId] ?? []);
 });
 
 /**
@@ -503,11 +483,6 @@ export const switchWorkspaceAtom = atom(
     set(currentWorkspaceIdAtom, workspaceId);
     persistCurrentWorkspaceId(workspaceId);
     resetWorkspaceSurface(set);
-
-    const cachedSessions = get(workspaceSessionsAtom)[workspaceId];
-    if (cachedSessions) {
-      set(sessionsAtom, cachedSessions);
-    }
 
     await set(loadSessionsAtom, workspaceId);
   }
@@ -541,7 +516,6 @@ export const createWorkspaceAtom = atom(
       ...current,
       [workspace.id]: [],
     }));
-    set(sessionsAtom, []);
 
     return workspace;
   }
@@ -632,7 +606,9 @@ export const renameWorkspaceAtom = atom(
       return;
     }
 
-    const previousWorkspaces = get(workspacesAtom);
+    const previousWorkspace = get(workspacesAtom).find(
+      (workspace) => workspace.id === params.workspaceId
+    );
     const pinnedWorkspaceIds = get(pinnedWorkspaceIdsAtom);
     const now = new Date().toISOString();
 
@@ -661,7 +637,16 @@ export const renameWorkspaceAtom = atom(
         )
       );
     } catch (error) {
-      set(workspacesAtom, previousWorkspaces);
+      if (previousWorkspace) {
+        set(workspacesAtom, (current) =>
+          sortWorkspaces(
+            current.map((workspace) =>
+              workspace.id === previousWorkspace.id ? previousWorkspace : workspace
+            ),
+            get(pinnedWorkspaceIdsAtom)
+          )
+        );
+      }
       throw error;
     }
   }
@@ -676,7 +661,7 @@ export const startNewChatAtom = atom(null, (_get, set) => {
   set(messagesAtom, []);
   set(draftSelectedProviderIdAtom, undefined);
   set(draftSelectedModelIdAtom, undefined);
-  set(clearDraftStateForSessionAtom, "__draft__");
+  set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
 });
 
 export const startNewChatInWorkspaceAtom = atom(
@@ -703,18 +688,25 @@ export const createSessionAtom = atom(
     if (get(currentWorkspaceIdAtom) !== workspaceId) {
       set(workspaceSessionsAtom, (current) => ({
         ...current,
-        [workspaceId]: upsertSession(current[workspaceId] ?? [], meta),
+        [workspaceId]: upsertSession(
+          current[workspaceId] ?? [],
+          meta,
+          get(pinnedSessionIdsAtom)
+        ),
       }));
       return meta.id;
     }
 
-    set(sessionsAtom, (current) => upsertSession(current, meta));
     set(workspaceSessionsAtom, (current) => ({
       ...current,
-      [workspaceId]: upsertSession(current[workspaceId] ?? [], meta),
+      [workspaceId]: upsertSession(
+        current[workspaceId] ?? [],
+        meta,
+        get(pinnedSessionIdsAtom)
+      ),
     }));
     if (previousSessionId === null) {
-      set(clearDraftStateForSessionAtom, "__draft__");
+      set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
     }
     set(currentSessionIdAtom, meta.id);
     return meta.id;
@@ -732,7 +724,11 @@ export const forkSessionAtom = atom(
 
     const currentWorkspaceSessions =
       get(workspaceSessionsAtom)[targetWorkspaceId] ?? [];
-    const nextSessions = upsertSession(currentWorkspaceSessions, result.session);
+    const nextSessions = upsertSession(
+      currentWorkspaceSessions,
+      result.session,
+      get(pinnedSessionIdsAtom)
+    );
     set(workspaceSessionsAtom, (current) => ({
       ...current,
       [targetWorkspaceId]: nextSessions,
@@ -744,13 +740,12 @@ export const forkSessionAtom = atom(
       resetWorkspaceSurface(set);
     }
 
-    set(sessionsAtom, nextSessions);
     set(setSessionMessagesAtom, result.session.id, result.messages);
     set(currentSessionIdAtom, result.session.id);
     set(draftSelectedProviderIdAtom, undefined);
     set(draftSelectedModelIdAtom, undefined);
     set(clearDraftStateForSessionAtom, result.session.id);
-    set(clearDraftStateForSessionAtom, "__draft__");
+    set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
 
     return result.session.id;
   }
@@ -778,7 +773,12 @@ export const switchWorkspaceSessionAtom = atom(
 
       const cachedSessions = get(workspaceSessionsAtom)[targetWorkspaceId];
       if (cachedSessions) {
-        set(sessionsAtom, cachedSessions);
+        void set(loadSessionsAtom, targetWorkspaceId).catch((error) => {
+          console.error(
+            `[workspace] Failed to refresh sessions for workspace ${targetWorkspaceId}:`,
+            error
+          );
+        });
       } else {
         await set(loadSessionsAtom, targetWorkspaceId);
       }
@@ -827,9 +827,6 @@ export const deleteSessionAtom = atom(
         sessionId
       ),
     }));
-    if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
-      set(sessionsAtom, (current) => removeSession(current, sessionId));
-    }
     set(pinnedSessionIdsAtom, (current) => {
       if (!current.has(sessionId)) {
         return current;
@@ -849,7 +846,7 @@ export const deleteSessionAtom = atom(
     ) {
       set(currentSessionIdAtom, null);
       set(messagesAtom, []);
-      set(clearDraftStateForSessionAtom, "__draft__");
+      set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
     }
 
     window.zora.deleteSession(sessionId, targetWorkspaceId).catch((error) => {
@@ -870,15 +867,10 @@ export const touchSessionAtom = atom(null, (get, set, sessionId: string, workspa
     [targetWorkspaceId]: updateSession(
       current[targetWorkspaceId] ?? [],
       sessionId,
-      { updatedAt: now }
+      { updatedAt: now },
+      get(pinnedSessionIdsAtom)
     ),
   }));
-
-  if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
-    set(sessionsAtom, (current) =>
-      updateSession(current, sessionId, { updatedAt: now })
-    );
-  }
 });
 
 /**
@@ -904,15 +896,10 @@ export const renameSessionAtom = atom(
       [targetWorkspaceId]: updateSession(
         current[targetWorkspaceId] ?? [],
         params.sessionId,
-        updates
+        updates,
+        get(pinnedSessionIdsAtom)
       ),
     }));
-
-    if (get(currentWorkspaceIdAtom) === targetWorkspaceId) {
-      set(sessionsAtom, (current) =>
-        updateSession(current, params.sessionId, updates)
-      );
-    }
 
     window.zora
       .renameSession(params.sessionId, nextTitle, targetWorkspaceId)
@@ -939,14 +926,19 @@ export const togglePinSessionAtom = atom(
 
     persistPinnedSessionIds(nextPinnedIds);
     set(pinnedSessionIdsAtom, nextPinnedIds);
-    set(workspaceSessionsAtom, (current) =>
-      Object.fromEntries(
-        Object.entries(current).map(([workspaceId, sessions]) => [
-          workspaceId,
-          sortSessions(sessions, nextPinnedIds),
-        ])
-      )
-    );
-    set(sessionsAtom, (current) => sortSessions(current, nextPinnedIds));
+    set(workspaceSessionsAtom, (current) => {
+      for (const [workspaceId, sessions] of Object.entries(current)) {
+        if (!sessions.some((session) => session.id === sessionId)) {
+          continue;
+        }
+
+        return {
+          ...current,
+          [workspaceId]: sortSessions(sessions, nextPinnedIds),
+        };
+      }
+
+      return current;
+    });
   }
 );
