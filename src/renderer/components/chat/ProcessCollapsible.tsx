@@ -35,14 +35,14 @@ export function ProcessCollapsible({
     : undefined;
 
   return (
-    <div className="mb-3 min-w-0">
+    <div className="ai-process-content mb-3 min-w-0">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() =>
           setUserExpanded((current) => (current === null ? !expanded : !current))
         }
-        className="flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left text-stone-500 transition-colors duration-200 hover:bg-stone-50/80 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left text-[#7a7168] transition-colors duration-200 hover:bg-stone-50/80 hover:text-[#5f574f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -53,7 +53,7 @@ export function ProcessCollapsible({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
 
-        <span className="min-w-0 max-w-[560px] truncate text-[13px] text-stone-500">
+        <span className="min-w-0 max-w-[560px] truncate text-[13px]">
           {summaryText}
         </span>
 
@@ -65,13 +65,13 @@ export function ProcessCollapsible({
         ) : null}
 
         {turnCompletedAt ? (
-          <span className="shrink-0 pl-2 text-[11px] text-stone-300">
+          <span className="shrink-0 pl-2 text-[12px] text-[#b6aea6]">
             {formatDuration(turnCompletedAt - turnStartedAt)}
           </span>
         ) : isStreaming ? (
           <ElapsedTimer
             startedAt={turnStartedAt}
-            className="shrink-0 pl-2 text-[11px] text-stone-300"
+            className="shrink-0 pl-2 text-[12px] text-[#b6aea6]"
           />
         ) : null}
       </button>

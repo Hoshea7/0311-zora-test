@@ -19,7 +19,7 @@ function formatDisplayToolName(toolName: string): string {
     return formatToolName(toolName);
   }
 
-  return `🔌 ${match[1]} / ${match[2]}`;
+  return `MCP · ${match[1]} / ${match[2]}`;
 }
 
 export function ToolStep({ tool }: { tool: ToolAction }) {
@@ -27,10 +27,6 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
   const summaryText = getToolSummaryText(tool);
   const displayToolName = formatDisplayToolName(tool.name);
   const displayInput = formatToolInput(tool.input);
-  const showSummary =
-    summaryText.trim().length > 0 &&
-    summaryText !== displayToolName &&
-    summaryText !== tool.name;
 
   return (
     <div>
@@ -38,32 +34,27 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
         type="button"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
-        className="mx-[-6px] flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-200 hover:bg-stone-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        title={summaryText !== displayToolName ? summaryText : undefined}
+        className="mx-[-6px] flex w-full items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[12px] leading-5 transition-colors duration-200 hover:bg-stone-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         {tool.status === "running" ? (
-          <span className="h-2.5 w-2.5 animate-spin rounded-full border border-stone-300 border-t-stone-500 motion-reduce:animate-none" />
+          <span className="h-2 w-2 animate-spin rounded-full border border-stone-300 border-t-stone-500 motion-reduce:animate-none" />
         ) : tool.status === "error" ? (
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+          <span className="h-2 w-2 rounded-full bg-rose-400" />
         ) : (
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
         )}
 
-        <span className="text-[12px] font-medium text-stone-600">{displayToolName}</span>
-
-        {showSummary ? (
-          <span className="max-w-[360px] truncate text-[12px] text-stone-400">
-            · {summaryText}
-          </span>
-        ) : null}
+        <span className="font-[450] text-[#645c54]">{displayToolName}</span>
 
         {tool.completedAt ? (
-          <span className="shrink-0 pl-2 text-[11px] text-stone-300">
+          <span className="shrink-0 text-[11.5px] text-[#c7c0ba]">
             {formatDuration(tool.completedAt - tool.startedAt)}
           </span>
         ) : tool.status === "running" ? (
           <ElapsedTimer
             startedAt={tool.startedAt}
-            className="shrink-0 pl-2 text-[11px] text-stone-300"
+            className="shrink-0 text-[11.5px] text-[#c7c0ba]"
           />
         ) : null}
       </button>
@@ -71,10 +62,10 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
       {isOpen ? (
         <div className="ml-4 mt-1 rounded-lg border border-stone-100 bg-stone-50 p-2.5">
           <div className="flex flex-col gap-1.5">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-stone-400">
-              input
+            <div className="text-[10px] font-medium text-stone-400">
+              输入
             </div>
-            <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] text-stone-600">
+            <pre className="ai-process-mono m-0 whitespace-pre-wrap break-words text-[11px] text-stone-600">
               {displayInput || "等待中…"}
               {tool.status === "running" ? (
                 <span className="ml-0.5 inline-block animate-pulse text-stone-400 motion-reduce:animate-none">
@@ -86,12 +77,12 @@ export function ToolStep({ tool }: { tool: ToolAction }) {
 
           {tool.result ? (
             <div className="mt-3 flex flex-col gap-1.5">
-              <div className="text-[10px] font-medium uppercase tracking-wider text-stone-400">
-                output
+              <div className="text-[10px] font-medium text-stone-400">
+                输出
               </div>
               <pre
                 className={cn(
-                  "m-0 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] custom-scrollbar",
+                  "ai-process-mono m-0 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] custom-scrollbar",
                   tool.status === "error" ? "text-rose-600" : "text-stone-600"
                 )}
               >

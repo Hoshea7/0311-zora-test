@@ -1,4 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type OpenDialogOptions,
+} from "electron";
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -69,6 +76,7 @@ import {
   createWorkspace,
   deleteWorkspace,
   listWorkspaces,
+  renameWorkspace,
 } from "./workspace-store";
 import {
   GLOBAL_SKILLS_DIR,
@@ -1162,15 +1170,29 @@ app.whenReady().then(async () => {
     console.log(`[index] Workspace deleted: ${targetWorkspaceId}`);
   });
 
+  ipcMain.handle(
+    "workspace:rename",
+    async (_event, workspaceId: unknown, name: unknown) => {
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+      if (typeof name !== "string" || name.trim().length === 0) {
+        throw new Error("Workspace name is required.");
+      }
+
+      const workspace = await renameWorkspace(targetWorkspaceId, name.trim());
+      console.log(`[index] Workspace renamed: ${targetWorkspaceId}`);
+      return workspace;
+    }
+  );
+
   ipcMain.handle("workspace:pick-directory", async (event) => {
     const browserWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: OpenDialogOptions = {
+      properties: ["openDirectory", "createDirectory"],
+      defaultPath: app.getPath("home"),
+    };
     const result = browserWindow
-      ? await dialog.showOpenDialog(browserWindow, {
-          properties: ["openDirectory", "createDirectory"],
-        })
-      : await dialog.showOpenDialog({
-          properties: ["openDirectory", "createDirectory"],
-        });
+      ? await dialog.showOpenDialog(browserWindow, options)
+      : await dialog.showOpenDialog(options);
 
     if (result.canceled) {
       return null;

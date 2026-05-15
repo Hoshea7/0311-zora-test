@@ -128,8 +128,8 @@ export const UserMessage = memo(function UserMessage({
       ) : null}
 
       {message.text ? (
-        <div className="max-w-[min(100%,640px)] rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 text-stone-900 shadow-sm transition-all">
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[14.5px] leading-[1.62] font-normal">
+        <div className="max-w-[min(100%,640px)] rounded-[24px] rounded-tr-[8px] bg-[#f0e8dc] px-4 py-3 shadow-sm transition-all">
+          <div className="chat-message-content whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
             {message.text}
           </div>
         </div>

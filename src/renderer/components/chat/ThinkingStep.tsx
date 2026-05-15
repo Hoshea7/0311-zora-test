@@ -115,7 +115,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
   const hasContent = normalizedContent.trim().length > 0;
   const previewText = hasContent
     ? normalizedContent.slice(0, THINKING_PREVIEW_CHARS).replace(/\s+/g, " ")
-    : "thinking...";
+    : "正在思考...";
 
   const handleToggle = () => {
     setUserOverride((current) => {
@@ -145,24 +145,24 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
         type="button"
         aria-expanded={isOpen}
         onClick={handleToggle}
-        className="mx-[-6px] flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-xs text-stone-400 transition-colors duration-200 hover:text-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+        className="mx-[-6px] flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[12px] leading-5 text-[#9d958d] transition-colors duration-200 hover:text-[#756d65] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
       >
         {isStreaming ? (
           <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-orange-400 animate-pulse motion-reduce:animate-none" />
         ) : (
-          <span className="pt-[1px] text-[9px] text-stone-300">●</span>
+          <span className="pt-[1px] text-[9px] text-[#cbc5bf]">●</span>
         )}
 
-        <span className="font-medium">Thinking</span>
+        <span className="font-[450]">思考</span>
 
         {!isOpen ? (
-          <span className="ml-1 min-w-0 flex-1 truncate text-stone-300" title={previewText}>
+          <span className="ml-1 min-w-0 flex-1 truncate text-[#b6aea6]" title={previewText}>
             {previewText}
           </span>
         ) : null}
 
         {duration ? (
-          <span className="flex-shrink-0 pl-2 text-stone-300">{duration}</span>
+          <span className="flex-shrink-0 pl-2 text-[11.5px] text-[#c7c0ba]">{duration}</span>
         ) : null}
       </button>
 
@@ -177,7 +177,7 @@ export function ThinkingStep({ thinking, isStreaming }: ThinkingStepProps) {
           onScroll={handleContentScroll}
           className="ml-[18px] mt-1 max-h-[min(52vh,460px)] overflow-y-auto overscroll-contain pr-2 custom-scrollbar"
         >
-          <pre className="m-0 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-stone-400 [overflow-wrap:anywhere] select-text">
+          <pre className="m-0 whitespace-pre-wrap break-words text-[12.5px] leading-[1.56] text-[#7f766e] [overflow-wrap:anywhere] select-text">
             {normalizedContent}
             {isStreaming ? (
               <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse align-text-bottom bg-stone-400 motion-reduce:animate-none" />

@@ -567,7 +567,7 @@ function MermaidBlock({ code }: { code: string }) {
 const markdownComponents: Components = {
   h1: ({ children, ...props }) => (
     <h1
-      className="text-[24px] font-semibold tracking-[-0.03em] leading-[1.18] text-stone-900"
+      className="text-[24px] font-semibold leading-[1.25] text-[#211d19]"
       {...props}
     >
       {children}
@@ -575,7 +575,7 @@ const markdownComponents: Components = {
   ),
   h2: ({ children, ...props }) => (
     <h2
-      className="text-[20px] font-semibold tracking-[-0.02em] leading-[1.24] text-stone-900"
+      className="text-[20px] font-semibold leading-[1.32] text-[#211d19]"
       {...props}
     >
       {children}
@@ -583,14 +583,14 @@ const markdownComponents: Components = {
   ),
   h3: ({ children, ...props }) => (
     <h3
-      className="text-[17px] font-semibold leading-[1.3] text-stone-900"
+      className="text-[17px] font-semibold leading-[1.36] text-[#211d19]"
       {...props}
     >
       {children}
     </h3>
   ),
   p: ({ children, ...props }) => (
-    <p className="leading-[1.78] text-stone-700" {...props}>
+    <p className="leading-[1.72] text-[#332f2a]" {...props}>
       {children}
     </p>
   ),
@@ -619,7 +619,7 @@ const markdownComponents: Components = {
   li: ({ children, className, ...props }) => (
     <li
       className={cn(
-        "pl-1 leading-[1.72] text-stone-700 [&>p]:mb-0",
+        "pl-1 leading-[1.72] text-[#332f2a] [&>p]:mb-0",
         className?.includes("task-list-item") ? "list-none pl-0" : ""
       )}
       {...props}
@@ -645,7 +645,7 @@ const markdownComponents: Components = {
   },
   blockquote: ({ children, ...props }) => (
     <blockquote
-      className="rounded-r-[18px] border-l-[3px] border-orange-300/80 bg-[#fbf5ee] px-4 py-3 text-stone-600"
+      className="rounded-r-[18px] border-l-[3px] border-orange-300/80 bg-[#fbf5ee] px-4 py-3 text-[#5c554d]"
       {...props}
     >
       {children}
@@ -653,19 +653,22 @@ const markdownComponents: Components = {
   ),
   hr: (props) => <hr className="border-0 border-t border-stone-200/80" {...props} />,
   strong: ({ children, ...props }) => (
-    <strong className="font-semibold text-stone-900" {...props}>
+    <strong className="font-semibold text-[#211d19]" {...props}>
       {children}
     </strong>
   ),
   em: ({ children, ...props }) => (
-    <em className="text-stone-700/95" {...props}>
+    <em className="text-[#403a33]" {...props}>
       {children}
     </em>
   ),
   table: ({ children, ...props }) => (
     <TableContext.Provider value={true}>
       <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
-        <table className="min-w-full border-collapse text-left text-[14px]" {...props}>
+        <table
+          className="min-w-full border-collapse text-left text-[14px] [font-family:var(--font-family-chat)]"
+          {...props}
+        >
           {children}
         </table>
       </div>
@@ -692,7 +695,7 @@ const markdownComponents: Components = {
     </th>
   ),
   td: ({ children, ...props }) => (
-    <td className="px-4 py-3 align-top text-stone-600" {...props}>
+    <td className="px-4 py-3 align-top text-[#4b443d]" {...props}>
       {children}
     </td>
   ),
@@ -781,7 +784,7 @@ const FullMarkdown = memo(function FullMarkdown({ content }: { content: string }
   const blocks = useMemo(() => splitMarkdownIntoBlocks(content), [content]);
 
   return (
-    <div className="min-w-0 space-y-[18px] text-[14.5px] text-stone-800">
+    <div className="ai-message-content min-w-0 space-y-[18px]">
       {blocks.map((block, index) => (
         <MarkdownBlock key={`${index}-${block.slice(0, 20)}`} block={block} />
       ))}

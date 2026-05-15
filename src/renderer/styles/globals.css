@@ -72,9 +72,13 @@
 :root {
   color-scheme: light;
   font-family: var(--font-family-sans);
-  background: #f8f1e3;
+  background: #f5f3f0;
   --color-ring: rgb(168 162 158 / 0.5);
   --color-background: #ffffff;
+  --zora-text-strong: #1c1917;
+  --zora-text: #292524;
+  --zora-text-muted: #78716c;
+  --zora-text-subtle: #a8a29e;
 }
 
 * {
@@ -85,14 +89,128 @@ html,
 body,
 #root {
   min-height: 100%;
+  background: #f5f3f0;
 }
 
 body {
   margin: 0;
-  color: #1c1917;
-  background:
-    radial-gradient(circle at top, rgba(196, 152, 112, 0.18), transparent 34%),
-    linear-gradient(180deg, #f8f1e3 0%, #eadcc7 100%);
+  color: var(--zora-text);
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  font-feature-settings: "kern";
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background: #f5f3f0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-family-display);
+  letter-spacing: 0;
+}
+
+.chat-message-content,
+.ai-message-content,
+.ai-reading-content {
+  color: #332f2a;
+  font-family: var(--font-family-chat);
+  font-size: 15px;
+  font-weight: 450;
+  line-height: 1.72;
+  letter-spacing: 0;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+.chat-message-content {
+  line-height: 1.66;
+}
+
+.ai-message-content h1,
+.ai-message-content h2,
+.ai-message-content h3,
+.ai-message-content h4,
+.ai-message-content strong,
+.ai-reading-content h1,
+.ai-reading-content h2,
+.ai-reading-content h3,
+.ai-reading-content h4,
+.ai-reading-content strong {
+  font-family: var(--font-family-chat);
+}
+
+.chat-message-content strong,
+.ai-message-content strong,
+.ai-message-content h1,
+.ai-message-content h2,
+.ai-message-content h3,
+.ai-message-content h4,
+.ai-reading-content strong,
+.ai-reading-content h1,
+.ai-reading-content h2,
+.ai-reading-content h3,
+.ai-reading-content h4 {
+  color: #211d19;
+  font-weight: 600;
+}
+
+.ai-message-content table,
+.ai-reading-content table,
+.ai-message-content th,
+.ai-message-content td,
+.ai-reading-content th,
+.ai-reading-content td {
+  font-family: var(--font-family-chat);
+}
+
+.ai-message-content code,
+.ai-message-content pre,
+.ai-message-content pre code,
+.ai-reading-content code,
+.ai-reading-content pre,
+.ai-reading-content pre code {
+  font-family: var(--font-family-mono);
+  font-weight: 400;
+}
+
+.ai-process-content {
+  color: #7a7168;
+  font-family: var(--font-family-chat);
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.45;
+  letter-spacing: 0;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+.ai-process-content pre {
+  font-family: var(--font-family-chat);
+  font-weight: 450;
+}
+
+.ai-process-content code,
+.ai-process-content .ai-process-mono {
+  font-family: var(--font-family-mono);
+  font-weight: 400;
 }
 
 /* 呼吸脉动：循环等待态 */

@@ -280,6 +280,8 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("workspace:create", name, workspacePath) as Promise<WorkspaceMeta>,
   deleteWorkspace: (workspaceId: string) =>
     ipcRenderer.invoke("workspace:delete", workspaceId) as Promise<void>,
+  renameWorkspace: (workspaceId: string, name: string) =>
+    ipcRenderer.invoke("workspace:rename", workspaceId, name) as Promise<WorkspaceMeta>,
   pickWorkspaceDirectory: () =>
     ipcRenderer.invoke("workspace:pick-directory") as Promise<string | null>,
   filetree: {

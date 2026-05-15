@@ -331,6 +331,7 @@ export interface ZoraApi {
   listWorkspaces: () => Promise<WorkspaceMeta[]>;
   createWorkspace: (name: string, workspacePath: string) => Promise<WorkspaceMeta>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;
+  renameWorkspace: (workspaceId: string, name: string) => Promise<WorkspaceMeta>;
   pickWorkspaceDirectory: () => Promise<string | null>;
   filetree: {
     list: (dirPath: string, workspacePath: string) => Promise<FileTreeEntry[]>;

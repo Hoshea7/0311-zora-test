@@ -57,7 +57,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             {bodySegments.map((segment, index) => (
               <div
                 key={segment.id}
-                className="break-words text-[14.5px] leading-[1.72] text-stone-800"
+                className="break-words"
               >
                 {index > 0 ? <SegmentDivider /> : null}
                 <MarkdownMessage content={segment.text} />
@@ -74,7 +74,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         ) : null}
 
         {turn.error ? (
-          <div className="mt-3 rounded-xl bg-rose-50/80 px-4 py-3 text-[14px] leading-relaxed text-rose-800 ring-1 ring-rose-200/50">
+          <div className="chat-message-content mt-3 rounded-xl bg-rose-50/80 px-4 py-3 text-rose-800 ring-1 ring-rose-200/50">
             {turn.error}
           </div>
         ) : null}

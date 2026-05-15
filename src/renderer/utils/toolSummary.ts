@@ -88,34 +88,25 @@ export function buildProcessSummary(steps: ProcessStep[], isStreaming: boolean):
 
   if (isStreaming) {
     const runningTools = tools.filter((step) => step.tool.status === "running");
-    const doneCount = tools.filter((step) => step.tool.status === "done").length;
     const runningTool = runningTools[runningTools.length - 1]?.tool;
 
     if (runningTool) {
-      const toolName = formatToolName(runningTool.name);
-      const toolSummary = getToolSummaryText(runningTool);
-      const parts = [
-        toolSummary !== toolName ? `${toolName} · ${toolSummary}` : toolName,
-      ].filter(Boolean);
-      if (doneCount > 0) {
-        parts.push(`${doneCount} done`);
-      }
-      return parts.length > 0 ? parts.join(" · ") : "working...";
+      return `正在使用 ${formatToolName(runningTool.name)}`;
     }
 
     if (hasThinking && tools.length === 0) {
-      return "analyzing...";
+      return "正在思考";
     }
 
-    return "working...";
+    return "正在处理";
   }
 
   const parts: string[] = [];
   if (hasThinking) {
-    parts.push("analyzed");
+    parts.push("已分析");
   }
   if (tools.length > 0) {
-    parts.push(`${tools.length} tool calls`);
+    parts.push(`${tools.length} 次工具调用`);
   }
-  return parts.join(", ");
+  return parts.join(" · ");
 }

@@ -394,6 +394,38 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   await rm(getWorkspaceDataDir(workspaceId), { recursive: true, force: true });
 }
 
+export async function renameWorkspace(
+  workspaceId: string,
+  name: string
+): Promise<WorkspaceMeta> {
+  const nextName = name.trim();
+
+  if (!nextName) {
+    throw new Error("Workspace name is required.");
+  }
+
+  const workspaces = await listWorkspaces();
+  const target = workspaces.find((workspace) => workspace.id === workspaceId);
+
+  if (!target) {
+    throw new Error(`Workspace ${workspaceId} does not exist.`);
+  }
+
+  const updated: WorkspaceMeta = {
+    ...target,
+    name: nextName,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeWorkspaceFile(
+    workspaces.map((workspace) =>
+      workspace.id === workspaceId ? updated : workspace
+    )
+  );
+
+  return updated;
+}
+
 export async function getWorkspacePath(
   workspaceId = DEFAULT_WORKSPACE_ID
 ): Promise<string> {

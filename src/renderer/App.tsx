@@ -32,7 +32,7 @@ import { loadProvidersAtom } from "./store/provider";
 import {
   currentSessionIdAtom,
   currentWorkspaceIdAtom,
-  sessionsAtom,
+  upsertSessionMetaInStateAtom,
 } from "./store/workspace";
 import type {
   AgentRunSource,
@@ -192,6 +192,7 @@ export default function App() {
   const failTurn = useSetAtom(failTurnAtom);
   const setIsAgentIdle = useSetAtom(isAgentIdleAtom);
   const setSessionRunning = useSetAtom(setSessionRunningAtom);
+  const upsertSessionMetaInState = useSetAtom(upsertSessionMetaInStateAtom);
   const pushPermission = useSetAtom(pushPermissionAtom);
   const resolvePermission = useSetAtom(resolvePermissionAtom);
   const pushAskUser = useSetAtom(pushAskUserAtom);
@@ -389,9 +390,7 @@ export default function App() {
       if (streamEvent.type === "session_sync") {
         const workspaceId =
           typeof streamEvent.workspaceId === "string" ? streamEvent.workspaceId : undefined;
-        if (workspaceId && workspaceId !== store.get(currentWorkspaceIdAtom)) {
-          return;
-        }
+        const targetWorkspaceId = workspaceId ?? store.get(currentWorkspaceIdAtom);
 
         const syncSessionId =
           typeof streamEvent.sessionId === "string" ? streamEvent.sessionId : undefined;
@@ -405,18 +404,9 @@ export default function App() {
           : [];
 
         if (session) {
-          store.set(sessionsAtom, (current) => {
-            const existingIndex = current.findIndex((item) => item.id === session.id);
-            if (existingIndex === -1) {
-              return [session, ...current];
-            }
-
-            const next = [...current];
-            next[existingIndex] = {
-              ...next[existingIndex],
-              ...session,
-            };
-            return next;
+          upsertSessionMetaInState({
+            session,
+            workspaceId: targetWorkspaceId,
           });
         }
 
@@ -779,6 +769,7 @@ export default function App() {
     store,
     setSessionMessages,
     setSessionRunning,
+    upsertSessionMetaInState,
     pushPermission,
     resolvePermission,
     pushAskUser,

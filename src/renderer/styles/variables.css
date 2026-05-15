@@ -6,7 +6,13 @@
    * ============================================ */
 
   /* --- Typography Scale --- */
-  --font-family-sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-family-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Segoe UI",
+    sans-serif;
+  --font-family-display: "SF Pro Display", var(--font-family-sans);
+  --font-family-chat: "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC",
+    "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+  --font-family-reading: var(--font-family-chat);
   --font-family-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
 
   --font-size-2xs: 9px;
