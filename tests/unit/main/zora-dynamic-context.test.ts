@@ -113,9 +113,17 @@ describe("zora dynamic context", () => {
   it("wraps raw prompts without a user_message tag", async () => {
     const { dynamicContext } = await loadModules(createTempHome());
 
-    const prompt = await dynamicContext.buildZoraPrompt("你好");
+    const prompt = await dynamicContext.buildZoraPrompt(
+      "你好",
+      "default",
+      "/tmp/zora-session"
+    );
 
     expect(prompt).toContain("<zora_dynamic_context>");
+    expect(prompt).toContain("<current_workspace_id>default</current_workspace_id>");
+    expect(prompt).toContain(
+      "<current_working_directory>/tmp/zora-session</current_working_directory>"
+    );
     expect(prompt).not.toContain("<user_message>");
     expect(prompt.endsWith("\n\n你好")).toBe(true);
   });

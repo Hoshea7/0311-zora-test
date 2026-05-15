@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { WorkspaceMeta } from "../shared/zora";
 
-const DEFAULT_WORKSPACE_ID = "default";
+export const DEFAULT_WORKSPACE_ID = "default";
 const ZORA_DIR = path.join(homedir(), ".zora");
 const WORKSPACES_FILE = path.join(ZORA_DIR, "workspaces.json");
 const WORKSPACE_DATA_ROOT = path.join(ZORA_DIR, "workspaces");
@@ -33,7 +33,7 @@ function createDefaultWorkspace(
   return {
     id: DEFAULT_WORKSPACE_ID,
     name: "默认工作区",
-    path: homedir(),
+    path: getWorkspaceFilesDir(DEFAULT_WORKSPACE_ID),
     createdAt: existing?.createdAt ?? now,
     updatedAt: existing?.updatedAt ?? existing?.createdAt ?? now,
   };
@@ -96,6 +96,8 @@ function normalizeWorkspaces(workspaces: WorkspaceMeta[]): WorkspaceMeta[] {
 async function ensureZoraDir(): Promise<void> {
   await mkdir(ZORA_DIR, { recursive: true });
   await mkdir(WORKSPACE_DATA_ROOT, { recursive: true });
+  await mkdir(getWorkspaceDataDir(DEFAULT_WORKSPACE_ID), { recursive: true });
+  await mkdir(getWorkspaceFilesDir(DEFAULT_WORKSPACE_ID), { recursive: true });
 }
 
 async function replaceFileAtomically(
@@ -198,8 +200,21 @@ async function writeWorkspaceFile(workspaces: WorkspaceMeta[]): Promise<void> {
   await persistWorkspaceSidecars(workspaces);
 }
 
-function getWorkspaceDataDir(workspaceId: string): string {
+export function getWorkspaceDataDir(workspaceId: string): string {
   return path.join(WORKSPACE_DATA_ROOT, workspaceId);
+}
+
+export function getWorkspaceFilesDir(
+  workspaceId = DEFAULT_WORKSPACE_ID
+): string {
+  return path.join(getWorkspaceDataDir(workspaceId), "files");
+}
+
+export function getWorkspaceSessionFilesDir(
+  workspaceId: string,
+  sessionId: string
+): string {
+  return path.join(getWorkspaceFilesDir(workspaceId), sessionId);
 }
 
 function getWorkspaceSidecarPath(workspaceId: string): string {

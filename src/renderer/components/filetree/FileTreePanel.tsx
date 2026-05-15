@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { FileTreeEntry } from "../../../shared/zora";
-import { currentWorkspaceAtom } from "../../store/workspace";
+import { currentSessionAtom } from "../../store/workspace";
 import { fileTreeVersionAtom, fileTreeVisibleAtom } from "../../store/filetree";
 import { getErrorMessage } from "../../utils/message";
 import { cn } from "../../utils/cn";
@@ -495,11 +495,11 @@ function TreeNode({
 /* ------------------------------------------------------------------ */
 
 export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
-  const workspace = useAtomValue(currentWorkspaceAtom);
+  const currentSession = useAtomValue(currentSessionAtom);
   const version = useAtomValue(fileTreeVersionAtom);
   const setFileTreeVisible = useSetAtom(fileTreeVisibleAtom);
   const setVersion = useSetAtom(fileTreeVersionAtom);
-  const workspacePath = workspace?.path ?? "";
+  const workspacePath = currentSession?.workingDirectory ?? "";
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -537,7 +537,7 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
 
     if (!workspacePath) {
       setEntries([]);
-      setErrorMessage("当前工作区不可用");
+      setErrorMessage("当前对话还没有工作目录");
       setIsLoading(false);
       return () => {
         cancelled = true;

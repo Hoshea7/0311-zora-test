@@ -15,9 +15,9 @@ import { getSDKRuntimeOptions } from "./sdk-runtime";
 import {
   clearSdkSessionId,
   getSdkSessionId,
+  getSessionWorkingDirectory,
   loadMessages,
 } from "./session-store";
-import { getWorkspacePath } from "./workspace-store";
 import { buildZoraPrompt } from "./prompts/zora-dynamic-context";
 
 const RECOVERY_MAX_MESSAGES = 80;
@@ -42,7 +42,7 @@ type ProductivityProfile = Awaited<ReturnType<typeof buildProductivityProfile>>;
 type BuildRunProfileParams = {
   prompt: string;
   workspaceId: string;
-  workspacePath: string;
+  workingDirectory: string;
   sdkRuntime: ReturnType<typeof getSDKRuntimeOptions>;
   forwardEvent: (payload: AgentStreamEvent) => void;
   isFirstTurn: boolean;
@@ -170,7 +170,7 @@ function buildLateQueuedPrompt(messages: QueuedAgentMessage[]): string {
 async function buildRunProfile({
   prompt,
   workspaceId,
-  workspacePath,
+  workingDirectory,
   sdkRuntime,
   forwardEvent,
   isFirstTurn,
@@ -181,8 +181,8 @@ async function buildRunProfile({
   selectedModelId,
 }: BuildRunProfileParams): Promise<ProductivityProfile> {
   const profile = await buildProductivityProfile({
-    userPrompt: await buildZoraPrompt(prompt, workspaceId),
-    cwd: workspacePath,
+    userPrompt: await buildZoraPrompt(prompt, workspaceId, workingDirectory),
+    cwd: workingDirectory,
     sdkRuntime,
     onEvent: forwardEvent,
     isFirstTurn,
@@ -209,7 +209,7 @@ export async function runProductivitySession({
   const sdkRuntime = getSDKRuntimeOptions();
   const currentPrompt = text.trim();
   const existingSDKSessionId = await getSdkSessionId(sessionId, workspaceId);
-  const workspacePath = await getWorkspacePath(workspaceId);
+  const workingDirectory = await getSessionWorkingDirectory(sessionId, workspaceId);
   const persistedMessages = existingSDKSessionId
     ? []
     : await loadMessages(sessionId, workspaceId);
@@ -228,7 +228,7 @@ export async function runProductivitySession({
   const profile = await buildRunProfile({
     prompt: initialPrompt,
     workspaceId,
-    workspacePath,
+    workingDirectory,
     sdkRuntime,
     forwardEvent,
     isFirstTurn: !existingSDKSessionId && !shouldRecoverFromTranscript,
@@ -271,7 +271,7 @@ export async function runProductivitySession({
     const recoveredProfile = await buildRunProfile({
       prompt: rebuiltPrompt,
       workspaceId,
-      workspacePath,
+      workingDirectory,
       sdkRuntime,
       forwardEvent,
       isFirstTurn: false,
@@ -315,7 +315,7 @@ export async function runProductivitySession({
     const followUpProfile = await buildRunProfile({
       prompt: followUpPrompt,
       workspaceId,
-      workspacePath,
+      workingDirectory,
       sdkRuntime,
       forwardEvent,
       isFirstTurn: false,

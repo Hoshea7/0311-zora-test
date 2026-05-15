@@ -59,7 +59,10 @@ function buildMemorySection(
     .join("\n\n");
 }
 
-export async function buildZoraDynamicContext(workspaceId?: string): Promise<string> {
+export async function buildZoraDynamicContext(
+  workspaceId?: string,
+  workingDirectory?: string
+): Promise<string> {
   try {
     await migrateLegacyMemoryIfNeeded();
   } catch (error) {
@@ -80,6 +83,9 @@ export async function buildZoraDynamicContext(workspaceId?: string): Promise<str
     workspaceId
       ? `    <current_workspace_id>${escapeXmlText(workspaceId)}</current_workspace_id>`
       : "",
+    workingDirectory
+      ? `    <current_working_directory>${escapeXmlText(workingDirectory)}</current_working_directory>`
+      : "",
     "  </current_context>",
     "  <memory>",
     buildMemorySection(userContent, memoryContent, recentLogs),
@@ -90,7 +96,8 @@ export async function buildZoraDynamicContext(workspaceId?: string): Promise<str
 
 export async function buildZoraPrompt(
   rawUserPrompt: string,
-  workspaceId?: string
+  workspaceId?: string,
+  workingDirectory?: string
 ): Promise<string> {
-  return `${await buildZoraDynamicContext(workspaceId)}\n\n${rawUserPrompt}`;
+  return `${await buildZoraDynamicContext(workspaceId, workingDirectory)}\n\n${rawUserPrompt}`;
 }

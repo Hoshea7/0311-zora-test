@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { runningSessionsAtom } from "../../store/chat";
 import {
@@ -31,6 +31,7 @@ type SessionStatus = "needs-input" | "running" | "current" | "idle";
 
 interface SessionListProps {
   searchQuery?: string;
+  onCreateProject?: () => void;
 }
 
 interface WorkspaceGroupView {
@@ -41,6 +42,12 @@ interface WorkspaceGroupView {
 }
 
 const PATH_PREVIEW_DELAY_MS = 720;
+const PROJECT_SESSION_PREVIEW_COUNT = 4;
+
+type SessionWithWorkspace = {
+  session: Session;
+  workspaceId: string;
+};
 
 function areSetsEqual<T>(left: Set<T>, right: Set<T>): boolean {
   if (left.size !== right.size) {
@@ -248,6 +255,59 @@ function PlusIcon({ className }: { className?: string }) {
   );
 }
 
+function SectionChevronIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      className={cn(
+        "h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform duration-150",
+        collapsed ? "-rotate-90" : "rotate-0"
+      )}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.2}
+        d="M6 9l6 6 6-6"
+      />
+    </svg>
+  );
+}
+
+function SectionHeader({
+  label,
+  collapsed,
+  onToggle,
+  actions,
+}: {
+  label: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="group/section flex h-7 items-center gap-1 px-1">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-[12.5px] font-semibold leading-5 text-stone-400 transition hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+      >
+        <span className="truncate">{label}</span>
+        <SectionChevronIcon collapsed={collapsed} />
+      </button>
+      {actions ? (
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/section:opacity-100 focus-within:opacity-100">
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function formatSessionTime(value: string): string {
   const timestamp = new Date(value).getTime();
 
@@ -355,8 +415,11 @@ function matchesQuery(workspace: Workspace, session: Session, query: string) {
     return true;
   }
 
+  const workspaceLabel =
+    workspace.id === DEFAULT_WORKSPACE_ID ? "对话" : workspace.name;
+
   return (
-    workspace.name.toLowerCase().includes(query) ||
+    workspaceLabel.toLowerCase().includes(query) ||
     session.title.toLowerCase().includes(query)
   );
 }
@@ -567,7 +630,10 @@ function SessionRow({
   );
 }
 
-export function SessionList({ searchQuery = "" }: SessionListProps) {
+export function SessionList({
+  searchQuery = "",
+  onCreateProject,
+}: SessionListProps) {
   const groups = useAtomValue(workspaceSessionGroupsAtom);
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
@@ -607,15 +673,20 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(
     null
   );
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  const [projectsCollapsed, setProjectsCollapsed] = useState(false);
+  const [conversationsCollapsed, setConversationsCollapsed] = useState(false);
   const pathPreviewTimerRef = useRef<number | null>(null);
   const workspaceActionErrorTimerRef = useRef<number | null>(null);
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   const groupViews = useMemo<WorkspaceGroupView[]>(() => {
     return groups.flatMap((group) => {
+      const workspaceLabel =
+        group.workspace.id === DEFAULT_WORKSPACE_ID ? "对话" : group.workspace.name;
       const workspaceMatches =
         normalizedSearchQuery.length > 0 &&
-        group.workspace.name.toLowerCase().includes(normalizedSearchQuery);
+        workspaceLabel.toLowerCase().includes(normalizedSearchQuery);
       const sessions = normalizedSearchQuery
         ? group.sessions.filter((session) =>
             matchesQuery(group.workspace, session, normalizedSearchQuery)
@@ -799,7 +870,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
 
     if (
       !window.confirm(
-        `确定删除工作区「${workspace.name}」？该工作区下的本地会话数据也会被移除。`
+        `确定删除项目「${workspace.name}」？该项目下的本地会话数据也会被移除。`
       )
     ) {
       return;
@@ -808,7 +879,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
     try {
       await deleteWorkspace(workspace.id);
     } catch (error) {
-      showWorkspaceActionError(error, "删除工作区失败，请稍后再试。");
+      showWorkspaceActionError(error, "删除项目失败，请稍后再试。");
     }
   };
 
@@ -827,299 +898,395 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
         name: nextName,
       });
     } catch (error) {
-      showWorkspaceActionError(error, "重命名工作区失败，请稍后再试。");
+      showWorkspaceActionError(error, "重命名项目失败，请稍后再试。");
     }
   };
 
-  if (groupViews.length === 0) {
+  const defaultGroup = groupViews.find(
+    (group) => group.workspace.id === DEFAULT_WORKSPACE_ID
+  );
+  const projectGroups = groupViews.filter(
+    (group) => group.workspace.id !== DEFAULT_WORKSPACE_ID
+  );
+  const pinnedSessionViews = groupViews
+    .flatMap<SessionWithWorkspace>((group) =>
+      group.sessions
+        .filter((session) => pinnedSessionIds.has(session.id))
+        .map((session) => ({
+          session,
+          workspaceId: group.workspace.id,
+        }))
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.session.updatedAt).getTime() -
+        new Date(left.session.updatedAt).getTime()
+    );
+  const pinnedSessionIdSet = new Set(
+    pinnedSessionViews.map((item) => item.session.id)
+  );
+  const isSearchActive = normalizedSearchQuery.length > 0;
+  const arePinnedCollapsed = !isSearchActive && pinnedCollapsed;
+  const areProjectsCollapsed = !isSearchActive && projectsCollapsed;
+  const areConversationsCollapsed = !isSearchActive && conversationsCollapsed;
+  const defaultSessions =
+    defaultGroup?.sessions.filter((session) => !pinnedSessionIdSet.has(session.id)) ??
+    [];
+
+  const renderSessionRow = (session: Session, workspaceId: string) => {
+    const status = getSessionStatus(
+      session.id,
+      currentSessionIdForStatus,
+      runningSessions,
+      pendingPermissionsBySession,
+      pendingAskUsersBySession
+    );
+    const isActive =
+      isChatView &&
+      currentWorkspaceId === workspaceId &&
+      currentSessionId === session.id;
+
+    return (
+      <SessionRow
+        key={session.id}
+        session={session}
+        workspaceId={workspaceId}
+        status={status}
+        isActive={isActive}
+        isPinned={pinnedSessionIds.has(session.id)}
+        onSwitch={handleSwitchSession}
+      />
+    );
+  };
+
+  const renderProjectGroup = (group: WorkspaceGroupView) => {
+    const workspace = group.workspace;
+    const isExpanded = isSearchActive || expandedWorkspaceIds.has(workspace.id);
+    const isCurrentWorkspace = currentWorkspaceId === workspace.id;
+    const showAll = isSearchActive || showAllWorkspaceIds.has(workspace.id);
+    const unpinnedSessions = group.sessions.filter(
+      (session) => !pinnedSessionIdSet.has(session.id)
+    );
+    const shownSessions = showAll
+      ? unpinnedSessions
+      : unpinnedSessions.slice(0, PROJECT_SESSION_PREVIEW_COUNT);
+    const hiddenCount = unpinnedSessions.length - shownSessions.length;
+    const hasWorkspaceStatus =
+      group.status === "running" || group.status === "needs-input";
+    const isWorkspaceMenuOpen = workspaceMenuOpenId === workspace.id;
+    const isPinnedWorkspace = pinnedWorkspaceIds.has(workspace.id);
+    const isRenamingWorkspace = renamingWorkspaceId === workspace.id;
+
+    const shouldShowPathPreview =
+      pathPreviewWorkspaceId === workspace.id &&
+      Boolean(workspace.path) &&
+      !isRenamingWorkspace &&
+      !isWorkspaceMenuOpen;
+
+    return (
+      <div key={workspace.id} className="space-y-0.5">
+        <div
+          className={cn(
+            "group/workspace relative flex min-h-9 items-center gap-1 rounded-[9px] px-1.5 pr-1 transition-colors",
+            shouldShowPathPreview ? "z-[60]" : "z-0",
+            isCurrentWorkspace
+              ? "bg-white/55 text-stone-900"
+              : "text-stone-700 hover:bg-white/50"
+          )}
+        >
+          {isRenamingWorkspace ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1">
+              <FolderIcon expanded={isExpanded} />
+              <input
+                autoFocus
+                value={workspaceRenameValue}
+                onChange={(event) => setWorkspaceRenameValue(event.target.value)}
+                onFocus={(event) => event.currentTarget.select()}
+                onBlur={() => void handleRenameWorkspaceSubmit(workspace)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleRenameWorkspaceSubmit(workspace);
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setRenamingWorkspaceId(null);
+                    setWorkspaceRenameValue("");
+                  }
+                }}
+                className="h-7 min-w-0 flex-1 rounded-md bg-white px-2 text-[13px] font-medium text-stone-900 outline-none ring-1 ring-inset ring-stone-200 focus:ring-2 focus:ring-stone-900/10"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+              onClick={() => handleToggleWorkspace(workspace.id)}
+              aria-expanded={isExpanded}
+            >
+              <FolderIcon expanded={isExpanded} />
+              <span
+                onMouseEnter={() => handlePathPreviewEnter(workspace.id)}
+                onMouseLeave={handlePathPreviewLeave}
+                className={cn(
+                  "min-w-0 truncate text-[14px] leading-5",
+                  isCurrentWorkspace ? "font-medium" : "font-normal"
+                )}
+              >
+                {workspace.name}
+              </span>
+              {isPinnedWorkspace ? (
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center text-stone-400"
+                  role="img"
+                  aria-label="已置顶"
+                  title="已置顶"
+                >
+                  <PinIcon className="h-[15px] w-[15px]" />
+                </span>
+              ) : null}
+            </button>
+          )}
+
+          <div
+            className="relative h-7 w-[60px] shrink-0"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <div
+              className={cn(
+                "absolute right-0 top-1/2 -translate-y-1/2 transition-opacity",
+                isWorkspaceMenuOpen
+                  ? "opacity-0"
+                  : "opacity-100 group-hover/workspace:opacity-0"
+              )}
+            >
+              {hasWorkspaceStatus ? <WorkspaceBadge status={group.status} /> : null}
+            </div>
+
+            <div
+              className={cn(
+                "absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/workspace:opacity-100",
+                isWorkspaceMenuOpen && "opacity-100"
+              )}
+            >
+              <DropdownMenu.Root
+                open={isWorkspaceMenuOpen}
+                onOpenChange={(open) =>
+                  setWorkspaceMenuOpenId(open ? workspace.id : null)
+                }
+              >
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-stone-400 transition",
+                      "hover:bg-stone-900/[0.05] hover:text-stone-700",
+                      "focus-visible:opacity-100 focus-visible:outline-none",
+                      isWorkspaceMenuOpen &&
+                        "bg-white text-stone-800 ring-1 ring-stone-200/70"
+                    )}
+                    aria-label={`打开${workspace.name}的操作菜单`}
+                  >
+                    <EllipsisIcon className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenu.Trigger>
+
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    align="end"
+                    sideOffset={4}
+                    className={cn(
+                      "z-50 w-[132px] overflow-hidden rounded-[10px]",
+                      "bg-white/95",
+                      "ring-1 ring-stone-200/90 shadow-[0_8px_18px_rgba(41,37,36,0.10)]",
+                      "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+                    )}
+                  >
+                    <div className="px-0.5 py-0.5">
+                      <DropdownMenu.Item
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-700 transition-colors focus:bg-stone-900/[0.04] focus:outline-none data-[highlighted]:bg-stone-900/[0.04]"
+                        onSelect={() => togglePinWorkspace(workspace.id)}
+                      >
+                        <PinIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <span>{isPinnedWorkspace ? "取消置顶" : "置顶"}</span>
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-700 transition-colors focus:bg-stone-900/[0.04] focus:outline-none data-[highlighted]:bg-stone-900/[0.04]"
+                        onSelect={() => {
+                          setWorkspaceRenameValue(workspace.name);
+                          setRenamingWorkspaceId(workspace.id);
+                        }}
+                      >
+                        <RenameIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <span>重命名</span>
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-red-700 transition-colors focus:bg-red-50 focus:outline-none data-[highlighted]:bg-red-50"
+                        onSelect={() => void handleDeleteWorkspace(workspace)}
+                      >
+                        <TrashIcon className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                        <span>删除</span>
+                      </DropdownMenu.Item>
+                    </div>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+
+              <button
+                type="button"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-stone-400 transition hover:bg-stone-900/[0.05] hover:text-stone-700 focus-visible:opacity-100 focus-visible:outline-none"
+                onClick={() => handleNewChatInWorkspace(workspace.id)}
+                aria-label={`在${workspace.name}中新建会话`}
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {shouldShowPathPreview ? (
+            <div className="pointer-events-none absolute left-0 right-0 top-full z-[80] mt-1 rounded-[9px] bg-white/95 px-2.5 py-1.5 text-[12px] leading-4 text-stone-700 shadow-[0_8px_22px_rgba(41,37,36,0.12)] ring-1 ring-stone-200/80">
+              <span className="block break-all">{workspace.path}</span>
+            </div>
+          ) : null}
+        </div>
+
+        {isExpanded ? (
+          <div className="ml-6 space-y-0.5 pl-0.5">
+            {!group.loaded ? (
+              <div className="px-2 py-2 text-[12px] text-stone-400">加载中...</div>
+            ) : shownSessions.length === 0 ? (
+              <button
+                type="button"
+                className="w-full rounded-[10px] px-2 py-2 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
+                onClick={() => handleNewChatInWorkspace(workspace.id)}
+              >
+                暂无会话
+              </button>
+            ) : (
+              shownSessions.map((session) => renderSessionRow(session, workspace.id))
+            )}
+
+            {hiddenCount > 0 ? (
+              <button
+                type="button"
+                className="w-full rounded-[9px] px-2 py-1.5 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
+                onClick={() => handleToggleShowAll(workspace.id)}
+              >
+                展开全部
+              </button>
+            ) : showAllWorkspaceIds.has(workspace.id) &&
+              unpinnedSessions.length > PROJECT_SESSION_PREVIEW_COUNT &&
+              !isSearchActive ? (
+              <button
+                type="button"
+                className="w-full rounded-[9px] px-2 py-1.5 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
+                onClick={() => handleToggleShowAll(workspace.id)}
+              >
+                折叠显示
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  if (!defaultGroup && projectGroups.length === 0 && !isSearchActive) {
     return (
       <div className="px-2 py-8 text-center text-[12px] text-stone-400">
-        {normalizedSearchQuery ? "没有匹配的会话" : "正在读取工作区..."}
+        正在读取对话...
       </div>
     );
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-3">
       {workspaceActionError ? (
         <div className="mx-1 rounded-[9px] bg-red-50/80 px-2.5 py-1.5 text-[12px] leading-4 text-red-600 ring-1 ring-red-100">
           {workspaceActionError}
         </div>
       ) : null}
 
-      {groupViews.map((group) => {
-        const workspace = group.workspace;
-        const isExpanded =
-          normalizedSearchQuery.length > 0 ||
-          expandedWorkspaceIds.has(workspace.id);
-        const isCurrentWorkspace = currentWorkspaceId === workspace.id;
-        const isDefaultWorkspace = workspace.id === DEFAULT_WORKSPACE_ID;
-        const showAll =
-          normalizedSearchQuery.length > 0 || showAllWorkspaceIds.has(workspace.id);
-        const shownSessions = showAll ? group.sessions : group.sessions.slice(0, 4);
-        const hiddenCount = group.sessions.length - shownSessions.length;
-        const hasWorkspaceStatus =
-          group.status === "running" || group.status === "needs-input";
-        const isWorkspaceMenuOpen = workspaceMenuOpenId === workspace.id;
-        const isPinnedWorkspace = pinnedWorkspaceIds.has(workspace.id);
-        const isRenamingWorkspace = renamingWorkspaceId === workspace.id;
-
-        const shouldShowPathPreview =
-          pathPreviewWorkspaceId === workspace.id &&
-          Boolean(workspace.path) &&
-          !isRenamingWorkspace &&
-          !isWorkspaceMenuOpen;
-
-        return (
-          <div key={workspace.id} className="space-y-0.5">
-            <div
-              className={cn(
-                "group/workspace relative flex min-h-9 items-center gap-1 rounded-[9px] px-1.5 pr-1 transition-colors",
-                shouldShowPathPreview ? "z-[60]" : "z-0",
-                isCurrentWorkspace
-                  ? "bg-white/55 text-stone-900"
-                  : "text-stone-700 hover:bg-white/50"
+      {pinnedSessionViews.length > 0 ? (
+        <section className="space-y-0.5">
+          <SectionHeader
+            label="置顶"
+            collapsed={arePinnedCollapsed}
+            onToggle={() => setPinnedCollapsed((current) => !current)}
+          />
+          {!arePinnedCollapsed ? (
+            <div className="space-y-0.5">
+              {pinnedSessionViews.map((item) =>
+                renderSessionRow(item.session, item.workspaceId)
               )}
-            >
-              {isRenamingWorkspace ? (
-                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1">
-                  <FolderIcon expanded={isExpanded} />
-                  <input
-                    autoFocus
-                    value={workspaceRenameValue}
-                    onChange={(event) => setWorkspaceRenameValue(event.target.value)}
-                    onFocus={(event) => event.currentTarget.select()}
-                    onBlur={() => void handleRenameWorkspaceSubmit(workspace)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void handleRenameWorkspaceSubmit(workspace);
-                      }
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setRenamingWorkspaceId(null);
-                        setWorkspaceRenameValue("");
-                      }
-                    }}
-                    className="h-7 min-w-0 flex-1 rounded-md bg-white px-2 text-[13px] font-medium text-stone-900 outline-none ring-1 ring-inset ring-stone-200 focus:ring-2 focus:ring-stone-900/10"
-                  />
-                </div>
-              ) : (
+      <section className="space-y-0.5">
+        <SectionHeader
+          label="项目"
+          collapsed={areProjectsCollapsed}
+          onToggle={() => setProjectsCollapsed((current) => !current)}
+          actions={
+            onCreateProject ? (
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition hover:bg-white/70 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCreateProject();
+                }}
+                aria-label="打开项目"
+                title="打开项目"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+              </button>
+            ) : null
+          }
+        />
+        {!areProjectsCollapsed ? (
+          <div className="space-y-0.5">
+            {projectGroups.length > 0 ? (
+              projectGroups.map(renderProjectGroup)
+            ) : (
+              <div className="px-2 py-2 text-[12px] text-stone-400">暂无项目</div>
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      {defaultGroup ? (
+        <section className="space-y-0.5">
+          <SectionHeader
+            label="对话"
+            collapsed={areConversationsCollapsed}
+            onToggle={() => setConversationsCollapsed((current) => !current)}
+          />
+          {!areConversationsCollapsed ? (
+            <div className="space-y-0.5">
+              {!defaultGroup.loaded ? (
+                <div className="px-2 py-2 text-[12px] text-stone-400">加载中...</div>
+              ) : defaultSessions.length === 0 ? (
                 <button
                   type="button"
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
-                  onClick={() => handleToggleWorkspace(workspace.id)}
-                  aria-expanded={isExpanded}
+                  className="w-full rounded-[10px] px-2 py-2 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
+                  onClick={() => handleNewChatInWorkspace(DEFAULT_WORKSPACE_ID)}
                 >
-                  <FolderIcon expanded={isExpanded} />
-                  <span
-                    onMouseEnter={() => handlePathPreviewEnter(workspace.id)}
-                    onMouseLeave={handlePathPreviewLeave}
-                    className={cn(
-                      "min-w-0 truncate text-[14px] leading-5",
-                      isCurrentWorkspace ? "font-medium" : "font-normal"
-                    )}
-                  >
-                    {workspace.name}
-                  </span>
-                  {isDefaultWorkspace ? (
-                    <span className="shrink-0 rounded bg-stone-200/45 px-1.5 py-0.5 text-[10px] font-medium text-stone-500">
-                      默认
-                    </span>
-                  ) : null}
-                  {isPinnedWorkspace ? (
-                    <span
-                      className="flex h-4 w-4 shrink-0 items-center justify-center text-stone-400"
-                      role="img"
-                      aria-label="已置顶"
-                      title="已置顶"
-                    >
-                      <PinIcon className="h-[15px] w-[15px]" />
-                    </span>
-                  ) : null}
+                  暂无会话
                 </button>
+              ) : (
+                defaultSessions.map((session) =>
+                  renderSessionRow(session, DEFAULT_WORKSPACE_ID)
+                )
               )}
-
-              <div
-                className="relative h-7 w-[60px] shrink-0"
-                onClick={(event) => event.stopPropagation()}
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                <div
-                  className={cn(
-                    "absolute right-0 top-1/2 -translate-y-1/2 transition-opacity",
-                    isWorkspaceMenuOpen
-                      ? "opacity-0"
-                      : "opacity-100 group-hover/workspace:opacity-0"
-                  )}
-                >
-                  {hasWorkspaceStatus ? <WorkspaceBadge status={group.status} /> : null}
-                </div>
-
-                <div
-                  className={cn(
-                    "absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/workspace:opacity-100",
-                    isWorkspaceMenuOpen && "opacity-100"
-                  )}
-                >
-                  <DropdownMenu.Root
-                    open={isWorkspaceMenuOpen}
-                    onOpenChange={(open) =>
-                      setWorkspaceMenuOpenId(open ? workspace.id : null)
-                    }
-                  >
-                    <DropdownMenu.Trigger asChild>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-stone-400 transition",
-                          "hover:bg-stone-900/[0.05] hover:text-stone-700",
-                          "focus-visible:opacity-100 focus-visible:outline-none",
-                          isWorkspaceMenuOpen &&
-                            "bg-white text-stone-800 ring-1 ring-stone-200/70"
-                        )}
-                        aria-label={`打开${workspace.name}的操作菜单`}
-                      >
-                        <EllipsisIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </DropdownMenu.Trigger>
-
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content
-                        align="end"
-                        sideOffset={4}
-                        className={cn(
-                          "z-50 w-[132px] overflow-hidden rounded-[10px]",
-                          "bg-white/95",
-                          "ring-1 ring-stone-200/90 shadow-[0_8px_18px_rgba(41,37,36,0.10)]",
-                          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
-                        )}
-                      >
-                        <div className="px-0.5 py-0.5">
-                          {isDefaultWorkspace ? (
-                            <DropdownMenu.Item
-                              disabled
-                              className="flex w-full cursor-default items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-400 outline-none data-[disabled]:pointer-events-none"
-                            >
-                              <PinIcon className="h-3.5 w-3.5 shrink-0" />
-                              <span>默认置顶</span>
-                            </DropdownMenu.Item>
-                          ) : (
-                            <DropdownMenu.Item
-                              className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-700 transition-colors focus:bg-stone-900/[0.04] focus:outline-none data-[highlighted]:bg-stone-900/[0.04]"
-                              onSelect={() => togglePinWorkspace(workspace.id)}
-                            >
-                              <PinIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                              <span>{isPinnedWorkspace ? "取消置顶" : "置顶"}</span>
-                            </DropdownMenu.Item>
-                          )}
-                          <DropdownMenu.Item
-                            className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-700 transition-colors focus:bg-stone-900/[0.04] focus:outline-none data-[highlighted]:bg-stone-900/[0.04]"
-                            onSelect={() => {
-                              setWorkspaceRenameValue(workspace.name);
-                              setRenamingWorkspaceId(workspace.id);
-                            }}
-                          >
-                            <RenameIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span>重命名</span>
-                          </DropdownMenu.Item>
-                          {!isDefaultWorkspace ? (
-                            <DropdownMenu.Item
-                              className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-red-700 transition-colors focus:bg-red-50 focus:outline-none data-[highlighted]:bg-red-50"
-                              onSelect={() => void handleDeleteWorkspace(workspace)}
-                            >
-                              <TrashIcon className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                              <span>删除</span>
-                            </DropdownMenu.Item>
-                          ) : null}
-                        </div>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
-                  </DropdownMenu.Root>
-
-                  <button
-                    type="button"
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-stone-400 transition hover:bg-stone-900/[0.05] hover:text-stone-700 focus-visible:opacity-100 focus-visible:outline-none"
-                    onClick={() => handleNewChatInWorkspace(workspace.id)}
-                    aria-label={`在${workspace.name}中新建会话`}
-                  >
-                    <PlusIcon className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {shouldShowPathPreview ? (
-                <div className="pointer-events-none absolute left-0 right-0 top-full z-[80] mt-1 rounded-[9px] bg-white/95 px-2.5 py-1.5 text-[12px] leading-4 text-stone-700 shadow-[0_8px_22px_rgba(41,37,36,0.12)] ring-1 ring-stone-200/80">
-                  <span className="block break-all">{workspace.path}</span>
-                </div>
-              ) : null}
             </div>
-
-            {isExpanded ? (
-              <div className="ml-6 space-y-0.5 pl-0.5">
-                {!group.loaded ? (
-                  <div className="px-2 py-2 text-[12px] text-stone-400">加载中...</div>
-                ) : shownSessions.length === 0 ? (
-                  <button
-                    type="button"
-                    className="w-full rounded-[10px] px-2 py-2 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
-                    onClick={() => handleNewChatInWorkspace(workspace.id)}
-                  >
-                    暂无会话
-                  </button>
-                ) : (
-                  shownSessions.map((session) => {
-                    const status = getSessionStatus(
-                      session.id,
-                      currentSessionIdForStatus,
-                      runningSessions,
-                      pendingPermissionsBySession,
-                      pendingAskUsersBySession
-                    );
-                    const isActive =
-                      isChatView &&
-                      currentWorkspaceId === workspace.id &&
-                      currentSessionId === session.id;
-
-                    return (
-                      <SessionRow
-                        key={session.id}
-                        session={session}
-                        workspaceId={workspace.id}
-                        status={status}
-                        isActive={isActive}
-                        isPinned={pinnedSessionIds.has(session.id)}
-                        onSwitch={handleSwitchSession}
-                      />
-                    );
-                  })
-                )}
-
-                {hiddenCount > 0 ? (
-                  <button
-                    type="button"
-                    className="w-full rounded-[9px] px-2 py-1.5 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
-                    onClick={() => handleToggleShowAll(workspace.id)}
-                  >
-                    展开全部
-                  </button>
-                ) : showAllWorkspaceIds.has(workspace.id) &&
-                  group.sessions.length > 4 &&
-                  normalizedSearchQuery.length === 0 ? (
-                  <button
-                    type="button"
-                    className="w-full rounded-[9px] px-2 py-1.5 text-left text-[12px] text-stone-400 transition hover:bg-white/40 hover:text-stone-600"
-                    onClick={() => handleToggleShowAll(workspace.id)}
-                  >
-                    折叠显示
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }

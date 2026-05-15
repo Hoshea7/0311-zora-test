@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import type { ConversationMessage, SessionForkResult } from "../shared/zora";
 import {
+  copySessionWorkingDirectory,
   createForkedSession,
+  createSessionWorkingDirectory,
+  deleteManagedSessionWorkingDirectory,
   getSessionMeta,
   loadMessages,
 } from "./session-store";
-import { getWorkspacePath } from "./workspace-store";
 
 export interface ForkSessionFromSourceInput {
   sourceSessionId: string;
@@ -32,26 +35,50 @@ export async function forkSessionFromSource(
     );
   }
 
-  const workspacePath = await getWorkspacePath(input.workspaceId);
+  const targetSessionId = randomUUID();
+  const targetWorkingDirectory = await createSessionWorkingDirectory(
+    targetSessionId,
+    input.workspaceId
+  );
   const title = normalizeOptionalTitle(input.title) ?? `${source.title} 的分支`;
   const { forkSession: forkSdkSession } = await import(
     "@anthropic-ai/claude-agent-sdk"
   );
-  const sdkFork = await forkSdkSession(source.sdkSessionId, {
-    dir: workspacePath,
-    title,
-  });
+  let forkedSdkSessionId = "";
 
-  if (!sdkFork.sessionId) {
-    throw new Error("Claude Agent SDK did not return a forked session id.");
+  try {
+    await copySessionWorkingDirectory(
+      source.id,
+      targetSessionId,
+      input.workspaceId
+    );
+    const sdkFork = await forkSdkSession(source.sdkSessionId, {
+      dir: targetWorkingDirectory,
+      title,
+    });
+
+    if (!sdkFork.sessionId) {
+      throw new Error("Claude Agent SDK did not return a forked session id.");
+    }
+
+    forkedSdkSessionId = sdkFork.sessionId;
+  } catch (error) {
+    await deleteManagedSessionWorkingDirectory(
+      targetSessionId,
+      input.workspaceId,
+      targetWorkingDirectory
+    );
+    throw error;
   }
 
   const session = await createForkedSession(
     {
+      id: targetSessionId,
       sourceSessionId: source.id,
       sourceSdkSessionId: source.sdkSessionId,
-      sdkSessionId: sdkFork.sessionId,
+      sdkSessionId: forkedSdkSessionId,
       title,
+      workingDirectory: targetWorkingDirectory,
     },
     input.workspaceId
   );

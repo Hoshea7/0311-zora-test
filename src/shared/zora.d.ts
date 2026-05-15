@@ -80,6 +80,7 @@ export interface SessionMeta {
   providerId?: string;
   providerLocked?: boolean;
   selectedModelId?: string;
+  workingDirectory?: string;
   branch?: SessionBranchMeta;
 }
 

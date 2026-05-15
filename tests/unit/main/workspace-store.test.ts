@@ -58,11 +58,14 @@ describe("main workspace-store", () => {
       expect.objectContaining({
         id: "default",
         name: "默认工作区",
-        path: homeDir,
+        path: getZoraPath(homeDir, "workspaces", "default", "files"),
       }),
     ]);
     expect(existsSync(getZoraPath(homeDir, "workspaces.json"))).toBe(true);
     expect(existsSync(getZoraPath(homeDir, "workspaces", "default", "workspace.json"))).toBe(
+      true
+    );
+    expect(existsSync(getZoraPath(homeDir, "workspaces", "default", "files"))).toBe(
       true
     );
   });

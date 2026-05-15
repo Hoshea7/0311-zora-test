@@ -224,7 +224,7 @@ export function LeftSidebar() {
     const nextPath = workspacePath.trim();
 
     if (!nextName || !nextPath) {
-      setWorkspaceError("请先填写工作区名称并选择目录。");
+      setWorkspaceError("请先填写项目名称并选择目录。");
       return;
     }
 
@@ -277,38 +277,21 @@ export function LeftSidebar() {
           <div className="titlebar-no-drag flex min-h-0 flex-1 flex-col">
             {!collapsed ? (
               <>
-                <div className="space-y-1.5 px-4 pb-2 pt-0">
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCreateModalOpen(true);
-                        setWorkspaceError(null);
-                      }}
-                      className={cn(
-                        "flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-[10px] px-2 py-1 text-[13px] font-normal text-stone-700 transition",
-                        "hover:bg-white/70 hover:text-stone-950",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
-                      )}
-                      title="新建工作区"
-                    >
-                      <PlusIcon className="h-4 w-4 shrink-0 text-stone-500" />
-                      <span className="truncate">新工作区</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleNewChat}
-                      className={cn(
-                        "flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-[10px] px-2 py-1 text-[13px] font-normal text-stone-800 transition",
-                        "hover:bg-white/70 hover:text-stone-950",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
-                      )}
-                      title="在默认工作区新建对话"
-                    >
-                      <PlusIcon className="h-4 w-4 shrink-0 text-stone-500" />
-                      <span className="truncate">新对话</span>
-                    </button>
-                  </div>
+                <div className="space-y-2 px-4 pb-2 pt-0">
+                  <button
+                    type="button"
+                    onClick={handleNewChat}
+                    className={cn(
+                      "flex min-h-9 w-full min-w-0 items-center justify-center gap-2 rounded-[11px] px-3 py-1.5 text-[13.5px] font-medium text-stone-800 transition",
+                      "bg-white/70 shadow-sm ring-1 ring-stone-200/55",
+                      "hover:bg-white hover:text-stone-950 hover:ring-stone-200",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-900/10"
+                    )}
+                    title="新建对话"
+                  >
+                    <PlusIcon className="h-4 w-4 shrink-0 text-stone-500" />
+                    <span className="truncate">新话题</span>
+                  </button>
 
                   <div className="relative">
                     <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
@@ -316,7 +299,7 @@ export function LeftSidebar() {
                       type="search"
                       value={sessionSearchQuery}
                       onChange={(event) => setSessionSearchQuery(event.target.value)}
-                      placeholder="搜索对话或工作区..."
+                      placeholder="搜索对话或项目..."
                       className={cn(
                         "h-8 w-full rounded-[10px] border border-transparent bg-white/70 pl-9 pr-3 text-[13px] text-stone-800 outline-none transition",
                         "placeholder:text-stone-400",
@@ -327,14 +310,14 @@ export function LeftSidebar() {
                   </div>
                 </div>
 
-                <div className="pb-1.5 pl-[22px] pr-4">
-                  <h2 className="text-[13px] font-medium leading-5 text-stone-600">
-                    工作区
-                  </h2>
-                </div>
-
                 <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
-                  <SessionList searchQuery={sessionSearchQuery} />
+                  <SessionList
+                    searchQuery={sessionSearchQuery}
+                    onCreateProject={() => {
+                      setIsCreateModalOpen(true);
+                      setWorkspaceError(null);
+                    }}
+                  />
                 </div>
 
                 <div className="mt-auto bg-gradient-to-t from-[#f7f6f2] via-[#f7f6f2] to-transparent px-4 pb-3 pt-3">
@@ -475,7 +458,7 @@ export function LeftSidebar() {
           <div className="w-full max-w-[360px] overflow-hidden rounded-[16px] bg-[#fffdfb] shadow-[0_24px_70px_rgba(41,37,36,0.20)] ring-1 ring-stone-900/10 animate-in fade-in zoom-in-95 duration-150">
             <div className="px-5 pb-2 pt-5">
               <h3 className="text-[17px] font-semibold leading-6 text-stone-950">
-                新建工作区
+                新建项目
               </h3>
             </div>
 
@@ -488,7 +471,7 @@ export function LeftSidebar() {
                   autoFocus
                   value={workspaceName}
                   onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="输入工作区名称"
+                  placeholder="输入项目名称"
                   className="h-10 w-full rounded-[10px] border border-stone-200 bg-white px-3 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 hover:border-stone-300 focus:border-stone-300 focus:ring-2 focus:ring-stone-900/10"
                 />
               </div>

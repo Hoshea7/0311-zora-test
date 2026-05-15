@@ -1,8 +1,10 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +23,17 @@ function getSessionsDir(homeDir: string, workspaceId = "default") {
 
 function getJsonlPath(homeDir: string, sessionId: string, workspaceId = "default") {
   return path.join(getSessionsDir(homeDir, workspaceId), `${sessionId}.jsonl`);
+}
+
+function getSessionFilesDir(homeDir: string, sessionId: string, workspaceId = "default") {
+  return path.join(
+    homeDir,
+    ".zora",
+    "workspaces",
+    workspaceId,
+    "files",
+    sessionId
+  );
 }
 
 async function loadSessionStoreModule(homeDir: string) {
@@ -98,6 +111,58 @@ describe("main session-store", () => {
     const cleared = await getSessionMeta(first.id);
     expect(cleared).not.toBeNull();
     expect(cleared).not.toHaveProperty("sdkSessionId");
+  });
+
+  it("creates a managed working directory for new default sessions", async () => {
+    const homeDir = createTempHome();
+    const { createSession, getSessionWorkingDirectory, listSessions } =
+      await loadSessionStoreModule(homeDir);
+
+    const session = await createSession("Files session");
+    const expectedWorkingDirectory = getSessionFilesDir(homeDir, session.id);
+
+    expect(session.workingDirectory).toBe(expectedWorkingDirectory);
+    expect(existsSync(expectedWorkingDirectory)).toBe(true);
+    await expect(getSessionWorkingDirectory(session.id)).resolves.toBe(
+      expectedWorkingDirectory
+    );
+    await expect(listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        id: session.id,
+        workingDirectory: expectedWorkingDirectory,
+      }),
+    ]);
+  });
+
+  it("hydrates legacy default sessions to the previous home working directory", async () => {
+    const homeDir = createTempHome();
+    const sessionsDir = getSessionsDir(homeDir);
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(
+      path.join(sessionsDir, "index.json"),
+      JSON.stringify([
+        {
+          id: "legacy-session",
+          title: "Legacy session",
+          createdAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+      ]),
+      "utf8"
+    );
+
+    const { getSessionWorkingDirectory, listSessions } =
+      await loadSessionStoreModule(homeDir);
+
+    await expect(listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        id: "legacy-session",
+        workingDirectory: homeDir,
+      }),
+    ]);
+    await expect(getSessionWorkingDirectory("legacy-session")).resolves.toBe(
+      homeDir
+    );
   });
 
   it("appends message records as JSONL and restores merged assistant turns with tool results", async () => {

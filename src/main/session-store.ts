@@ -22,6 +22,11 @@ import type {
   SessionBranchMeta,
 } from "../shared/zora";
 import { extractScheduleDetailLinkFromToolResultValue } from "../shared/schedule-link";
+import {
+  DEFAULT_WORKSPACE_ID,
+  getWorkspaceSessionFilesDir,
+  listWorkspaces,
+} from "./workspace-store";
 
 export interface SessionMeta {
   id: string;
@@ -32,6 +37,7 @@ export interface SessionMeta {
   providerId?: string;
   providerLocked?: boolean;
   selectedModelId?: string;
+  workingDirectory?: string;
   branch?: SessionBranchMeta;
 }
 
@@ -45,10 +51,12 @@ export interface SavedAttachmentMeta {
 }
 
 export interface CreateForkedSessionInput {
+  id?: string;
   sourceSessionId: string;
   sourceSdkSessionId: string;
   sdkSessionId: string;
   title?: string;
+  workingDirectory?: string;
 }
 
 const ZORA_DIR = path.join(homedir(), ".zora");
@@ -168,9 +176,225 @@ async function writeIndex(
   );
 }
 
+function normalizePersistedPath(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+async function getWorkspaceForSession(workspaceId: string) {
+  const workspaces = await listWorkspaces();
+  const workspace = workspaces.find((item) => item.id === workspaceId);
+
+  if (!workspace) {
+    throw new Error(`Workspace ${workspaceId} does not exist.`);
+  }
+
+  return workspace;
+}
+
+async function resolveNewSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<string> {
+  const workspace = await getWorkspaceForSession(workspaceId);
+
+  if (workspace.id === DEFAULT_WORKSPACE_ID) {
+    return getWorkspaceSessionFilesDir(workspace.id, sessionId);
+  }
+
+  return workspace.path;
+}
+
+async function resolveLegacySessionWorkingDirectory(
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<string> {
+  const workspace = await getWorkspaceForSession(workspaceId);
+
+  if (workspace.id === DEFAULT_WORKSPACE_ID) {
+    return homedir();
+  }
+
+  return workspace.path;
+}
+
+function isManagedSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId: string,
+  workingDirectory?: string
+): boolean {
+  const normalizedWorkingDirectory = normalizePersistedPath(workingDirectory);
+
+  if (!normalizedWorkingDirectory) {
+    return false;
+  }
+
+  return (
+    path.resolve(normalizedWorkingDirectory) ===
+    path.resolve(getWorkspaceSessionFilesDir(workspaceId, sessionId))
+  );
+}
+
+async function removeManagedSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId: string,
+  workingDirectory?: string
+): Promise<void> {
+  const normalizedWorkingDirectory = normalizePersistedPath(workingDirectory);
+
+  if (
+    !normalizedWorkingDirectory ||
+    !isManagedSessionWorkingDirectory(
+      sessionId,
+      workspaceId,
+      normalizedWorkingDirectory
+    )
+  ) {
+    return;
+  }
+
+  await rm(normalizedWorkingDirectory, {
+    recursive: true,
+    force: true,
+  });
+}
+
+export async function deleteManagedSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId: string,
+  workingDirectory?: string
+): Promise<void> {
+  await removeManagedSessionWorkingDirectory(
+    sessionId,
+    workspaceId,
+    workingDirectory
+  );
+}
+
+async function hydrateSessionWorkingDirectories(
+  sessions: SessionMeta[],
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<SessionMeta[]> {
+  let didChange = false;
+  const hydrated: SessionMeta[] = [];
+
+  for (const session of sessions) {
+    const workingDirectory = normalizePersistedPath(session.workingDirectory);
+
+    if (workingDirectory) {
+      hydrated.push(
+        workingDirectory === session.workingDirectory
+          ? session
+          : { ...session, workingDirectory }
+      );
+      didChange = didChange || workingDirectory !== session.workingDirectory;
+      continue;
+    }
+
+    const legacyWorkingDirectory = await resolveLegacySessionWorkingDirectory(
+      workspaceId
+    );
+    hydrated.push({
+      ...session,
+      workingDirectory: legacyWorkingDirectory,
+    });
+    didChange = true;
+  }
+
+  if (didChange) {
+    await writeIndex(hydrated, workspaceId);
+  }
+
+  return hydrated;
+}
+
+export async function createSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<string> {
+  const workingDirectory = await resolveNewSessionWorkingDirectory(
+    sessionId,
+    workspaceId
+  );
+  await mkdir(workingDirectory, { recursive: true });
+  return workingDirectory;
+}
+
+export async function getSessionWorkingDirectory(
+  sessionId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<string> {
+  await ensureSessionsDir(workspaceId);
+
+  const sessions = await readIndex(workspaceId);
+  const index = sessions.findIndex((session) => session.id === sessionId);
+
+  if (index === -1) {
+    throw new Error(`Session ${sessionId} not found.`);
+  }
+
+  const existingWorkingDirectory = normalizePersistedPath(
+    sessions[index].workingDirectory
+  );
+
+  if (existingWorkingDirectory) {
+    await mkdir(existingWorkingDirectory, { recursive: true });
+    return existingWorkingDirectory;
+  }
+
+  const workingDirectory = await resolveLegacySessionWorkingDirectory(
+    workspaceId
+  );
+  sessions[index] = {
+    ...sessions[index],
+    workingDirectory,
+  };
+  await writeIndex(sessions, workspaceId);
+  await mkdir(workingDirectory, { recursive: true });
+  return workingDirectory;
+}
+
+export async function copySessionWorkingDirectory(
+  sourceSessionId: string,
+  targetSessionId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<void> {
+  const sourceWorkingDirectory = await getSessionWorkingDirectory(
+    sourceSessionId,
+    workspaceId
+  );
+  const targetWorkingDirectory = getWorkspaceSessionFilesDir(
+    workspaceId,
+    targetSessionId
+  );
+
+  if (
+    !isManagedSessionWorkingDirectory(
+      sourceSessionId,
+      workspaceId,
+      sourceWorkingDirectory
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await cp(sourceWorkingDirectory, targetWorkingDirectory, {
+      recursive: true,
+      force: true,
+    });
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 export async function listSessions(workspaceId = "default"): Promise<SessionMeta[]> {
   await ensureSessionsDir(workspaceId);
-  return readIndex(workspaceId);
+  return hydrateSessionWorkingDirectories(await readIndex(workspaceId), workspaceId);
 }
 
 export async function createSession(
@@ -180,11 +404,17 @@ export async function createSession(
   await ensureSessionsDir(workspaceId);
 
   const now = new Date().toISOString();
+  const sessionId = randomUUID();
+  const workingDirectory = await createSessionWorkingDirectory(
+    sessionId,
+    workspaceId
+  );
   const meta: SessionMeta = {
-    id: randomUUID(),
+    id: sessionId,
     title,
     createdAt: now,
     updatedAt: now,
+    workingDirectory,
   };
 
   const sessions = await readIndex(workspaceId);
@@ -234,7 +464,8 @@ async function copySessionAttachments(
 
 async function removeSessionArtifacts(
   sessionId: string,
-  workspaceId = "default"
+  workspaceId = "default",
+  workingDirectory?: string
 ): Promise<void> {
   await Promise.allSettled([
     unlink(getJsonlPath(sessionId, workspaceId)),
@@ -242,6 +473,7 @@ async function removeSessionArtifacts(
       recursive: true,
       force: true,
     }),
+    removeManagedSessionWorkingDirectory(sessionId, workspaceId, workingDirectory),
   ]);
 }
 
@@ -261,13 +493,19 @@ export async function createForkedSession(
   const sourceMessages = await loadMessages(input.sourceSessionId, workspaceId);
   const now = new Date().toISOString();
   const title = input.title?.trim() || `${source.title} 的分支`;
+  const sessionId = input.id ?? randomUUID();
+  const workingDirectory =
+    normalizePersistedPath(input.workingDirectory) ??
+    (await createSessionWorkingDirectory(sessionId, workspaceId));
+  await mkdir(workingDirectory, { recursive: true });
   const meta: SessionMeta = {
-    id: randomUUID(),
+    id: sessionId,
     title,
     createdAt: now,
     updatedAt: now,
     sdkSessionId: input.sdkSessionId,
     providerLocked: false,
+    workingDirectory,
     branch: {
       sourceSessionId: source.id,
       sourceSdkSessionId: input.sourceSdkSessionId,
@@ -282,7 +520,7 @@ export async function createForkedSession(
     await copySessionAttachments(source.id, meta.id, workspaceId);
     await writeIndex([meta, ...sessions], workspaceId);
   } catch (error) {
-    await removeSessionArtifacts(meta.id, workspaceId);
+    await removeSessionArtifacts(meta.id, workspaceId, meta.workingDirectory);
     throw error;
   }
 
@@ -296,23 +534,11 @@ export async function deleteSession(
   await ensureSessionsDir(workspaceId);
 
   const sessions = await readIndex(workspaceId);
+  const session = sessions.find((item) => item.id === sessionId);
   const filtered = sessions.filter((session) => session.id !== sessionId);
   await writeIndex(filtered, workspaceId);
 
-  try {
-    await unlink(getJsonlPath(sessionId, workspaceId));
-  } catch {
-    // Ignore missing message files so metadata cleanup can still succeed.
-  }
-
-  try {
-    await rm(getAttachmentsDir(sessionId, workspaceId), {
-      recursive: true,
-      force: true,
-    });
-  } catch {
-    // Ignore attachment cleanup failures so metadata cleanup can still succeed.
-  }
+  await removeSessionArtifacts(sessionId, workspaceId, session?.workingDirectory);
 }
 
 export async function updateSessionMeta(
@@ -320,7 +546,12 @@ export async function updateSessionMeta(
   updates: Partial<
     Pick<
       SessionMeta,
-      "title" | "sdkSessionId" | "providerId" | "providerLocked" | "selectedModelId"
+      | "title"
+      | "sdkSessionId"
+      | "providerId"
+      | "providerLocked"
+      | "selectedModelId"
+      | "workingDirectory"
     >
   >,
   workspaceId = "default"
@@ -348,7 +579,10 @@ export async function getSessionMeta(
   workspaceId = "default"
 ): Promise<SessionMeta | null> {
   await ensureSessionsDir(workspaceId);
-  const sessions = await readIndex(workspaceId);
+  const sessions = await hydrateSessionWorkingDirectories(
+    await readIndex(workspaceId),
+    workspaceId
+  );
   return sessions.find((session) => session.id === sessionId) ?? null;
 }
 
