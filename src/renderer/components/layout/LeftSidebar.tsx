@@ -3,6 +3,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
+  activeMainViewAtom,
   clampSidebarWidth,
   isSettingsOpenAtom,
   sidebarCollapsedAtom,
@@ -92,6 +93,8 @@ function SearchIcon({ className }: { className?: string }) {
 export function LeftSidebar() {
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
   const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
+  const activeMainView = useAtomValue(activeMainViewAtom);
+  const setActiveMainView = useSetAtom(activeMainViewAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const loadWorkspaces = useSetAtom(loadWorkspacesAtom);
@@ -114,6 +117,7 @@ export function LeftSidebar() {
   const resizeStartWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const resizePreviewWidthRef = useRef<number | null>(null);
   const displayedSidebarWidth = resizePreviewWidth ?? sidebarWidth;
+  const isScheduleOpen = activeMainView === "schedule";
 
   useEffect(() => {
     void loadWorkspaces().catch((error) => {
@@ -380,38 +384,69 @@ export function LeftSidebar() {
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(!isSettingsOpen)}
-                  className={cn(
-                    "mx-auto flex h-10 w-10 items-center justify-center rounded-[14px] transition",
-                    isSettingsOpen
-                      ? "text-stone-700"
-                      : "text-stone-400 hover:bg-stone-900/[0.05] hover:text-stone-600"
-                  )}
-                  title="设置"
-                >
-                  <svg
-                    className="h-[18px] w-[18px]"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveMainView("schedule")}
+                    className={cn(
+                      "mx-auto flex h-10 w-10 items-center justify-center rounded-[14px] transition",
+                      isScheduleOpen
+                        ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
+                        : "text-stone-400 hover:bg-stone-900/[0.05] hover:text-stone-600"
+                    )}
+                    title="定时任务"
+                    aria-current={isScheduleOpen ? "page" : undefined}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="h-[18px] w-[18px]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2z"
+                      />
+                    </svg>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(!isSettingsOpen)}
+                    className={cn(
+                      "mx-auto flex h-10 w-10 items-center justify-center rounded-[14px] transition",
+                      isSettingsOpen
+                        ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
+                        : "text-stone-400 hover:bg-stone-900/[0.05] hover:text-stone-600"
+                    )}
+                    title="设置"
+                    aria-current={isSettingsOpen ? "page" : undefined}
+                  >
+                    <svg
+                      className="h-[18px] w-[18px]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -1,11 +1,18 @@
 import type { SessionMeta, WorkspaceMeta } from "../../shared/zora";
 
 export type {
+  AssistantAction,
   AssistantTurn,
   BodySegment,
   ConversationMessage,
   FileAttachment,
   ProcessStep,
+  ScheduledTask,
+  ScheduledTaskCreateInput,
+  ScheduledTaskDetailLink,
+  ScheduledTaskSchedule,
+  ScheduledTaskStatus,
+  ScheduledTaskUpdateInput,
   ThinkingBlock,
   ToolAction,
 } from "../../shared/zora";

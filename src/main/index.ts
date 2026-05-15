@@ -20,6 +20,16 @@ import { FEISHU_IPC, type FeishuConfig } from "../shared/types/feishu";
 import type { DefaultModelSettings } from "../shared/types/default-model";
 import type { MemorySettings } from "../shared/types/memory";
 import type { McpSaveInput, McpServerEntry, McpTransportType } from "../shared/types/mcp";
+import type {
+  ScheduledTaskSchedule,
+  ScheduledTaskStatus,
+  ScheduledTaskUpdateInput,
+} from "../shared/types/schedule";
+import {
+  isValidScheduleTime,
+  isValidScheduleWeekdays,
+  normalizeScheduleWeekdays,
+} from "../shared/types/schedule";
 import type { ImportMethod, ImportResult, ImportSelection } from "../shared/types/skill";
 import type {
   ProviderCreateInput,
@@ -44,7 +54,6 @@ import { loadMemorySettings, saveMemorySettings } from "./memory-settings";
 import { migrateLegacyMemoryIfNeeded } from "./memory-store";
 import {
   loadDefaultModelSettings,
-  resolveDefaultModelTarget,
   saveDefaultModelSettings,
 } from "./default-model-settings";
 import {
@@ -53,8 +62,8 @@ import {
   saveFeishuConfig,
   testFeishuConnection,
 } from "./feishu";
-import { runProductivitySession } from "./productivity-runner";
 import { forkSessionFromSource } from "./session-fork";
+import { runPromptInSession } from "./session-runner";
 import { providerManager } from "./provider-manager";
 import { McpManager, setSharedMcpManager } from "./mcp-manager";
 import { listDirectory, startFileWatcher, stopFileWatcher } from "./file-tree";
@@ -66,10 +75,7 @@ import {
   listSessions,
   loadMessages,
   migrateSessionsIfNeeded,
-  persistAssistantMessage,
-  persistToolResults,
   renameSession,
-  saveAttachments,
   updateSessionMeta,
 } from "./session-store";
 import {
@@ -78,6 +84,15 @@ import {
   listWorkspaces,
   renameWorkspace,
 } from "./workspace-store";
+import {
+  deleteScheduledTask,
+  getScheduledTask,
+  listAllScheduledTasks,
+  listScheduledTasks,
+  onScheduledTasksStoreChanged,
+  updateScheduledTask,
+} from "./schedule-store";
+import { startScheduleRunner } from "./schedule-runner";
 import {
   GLOBAL_SKILLS_DIR,
   listSkills,
@@ -104,6 +119,7 @@ import { normalizeExternalUrl } from "./external-url";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEV_ELECTRON_PROFILE_DIR_NAME = "zora-dev";
+let stopScheduleRunner: (() => void) | null = null;
 
 function configureDevElectronProfilePath() {
   if (!isDev) {
@@ -302,6 +318,128 @@ function parseMcpSaveInput(input: unknown): McpSaveInput {
   }
 
   throw new Error('mcp.mode must be one of: "entry", "merge-json", "single-json".');
+}
+
+function isScheduledTaskStatus(value: unknown): value is ScheduledTaskStatus {
+  return value === "active" || value === "paused";
+}
+
+function parseScheduledTaskSchedule(input: unknown): ScheduledTaskSchedule {
+  if (!isRecord(input) || typeof input.type !== "string") {
+    throw new Error("A valid schedule payload is required.");
+  }
+
+  if (input.type === "once") {
+    return {
+      type: "once",
+      runAt: assertRequiredString(input.runAt, "schedule.runAt").trim(),
+    };
+  }
+
+  if (input.type === "daily") {
+    const time = assertRequiredString(input.time, "schedule.time").trim();
+
+    if (!isValidScheduleTime(time)) {
+      throw new Error("schedule.time must use HH:mm format.");
+    }
+
+    return {
+      type: "daily",
+      time,
+    };
+  }
+
+  if (input.type === "hourly") {
+    return {
+      type: "hourly",
+    };
+  }
+
+  if (input.type === "weekdays") {
+    const time = assertRequiredString(input.time, "schedule.time").trim();
+
+    if (!isValidScheduleTime(time)) {
+      throw new Error("schedule.time must use HH:mm format.");
+    }
+
+    return {
+      type: "weekdays",
+      time,
+    };
+  }
+
+  if (input.type === "weekly") {
+    const time = assertRequiredString(input.time, "schedule.time").trim();
+    const weekdays = Array.isArray(input.weekdays) ? input.weekdays : null;
+
+    if (!isValidScheduleTime(time)) {
+      throw new Error("schedule.time must use HH:mm format.");
+    }
+
+    if (!isValidScheduleWeekdays(weekdays)) {
+      throw new Error("schedule.weekdays must contain unique values from 1 to 7.");
+    }
+
+    return {
+      type: "weekly",
+      weekdays: normalizeScheduleWeekdays(weekdays),
+      time,
+    };
+  }
+
+  throw new Error(
+    'schedule.type must be one of: "once", "hourly", "daily", "weekdays", "weekly".'
+  );
+}
+
+function parseScheduledTaskUpdateInput(input: unknown): ScheduledTaskUpdateInput {
+  if (!isRecord(input) || !isRecord(input.updates)) {
+    throw new Error("A valid scheduled task update payload is required.");
+  }
+
+  const updates: ScheduledTaskUpdateInput["updates"] = {};
+
+  if (input.updates.title !== undefined) {
+    updates.title = assertRequiredString(input.updates.title, "title").trim();
+  }
+
+  if (input.updates.workspaceId !== undefined) {
+    updates.workspaceId = assertRequiredString(
+      input.updates.workspaceId,
+      "workspaceId"
+    ).trim();
+  }
+
+  if (input.updates.executionPrompt !== undefined) {
+    updates.executionPrompt = assertRequiredString(
+      input.updates.executionPrompt,
+      "executionPrompt"
+    ).trim();
+  }
+
+  if (input.updates.status !== undefined) {
+    if (!isScheduledTaskStatus(input.updates.status)) {
+      throw new Error('status must be one of: "active", "paused".');
+    }
+
+    updates.status = input.updates.status;
+  }
+
+  if (input.updates.schedule !== undefined) {
+    updates.schedule = parseScheduledTaskSchedule(input.updates.schedule);
+  }
+
+  return {
+    taskId: assertRequiredString(input.taskId, "taskId").trim(),
+    workspaceId: resolveWorkspaceId(input.workspaceId),
+    updates,
+  };
+}
+
+function emitScheduledTasksChanged(workspaceId: string): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send("schedule:changed", workspaceId);
+  }
 }
 
 function truncateForPreview(value: string, maxChars = 200): string {
@@ -733,6 +871,10 @@ app.whenReady().then(async () => {
   }
   await seedBundledSkills();
   const mcpManager = setSharedMcpManager(new McpManager());
+  onScheduledTasksStoreChanged(emitScheduledTasksChanged);
+  stopScheduleRunner = startScheduleRunner({
+    forwardEvent: broadcastAgentStreamEvent,
+  });
 
   ipcMain.handle("app:get-version", () => app.getVersion());
 
@@ -1209,6 +1351,37 @@ app.whenReady().then(async () => {
     return result.filePaths[0] ?? null;
   });
 
+  ipcMain.handle("schedule:list", async (_event, workspaceId: unknown) => {
+    if (workspaceId === undefined || workspaceId === null || workspaceId === "") {
+      return listAllScheduledTasks();
+    }
+
+    return listScheduledTasks(resolveWorkspaceId(workspaceId));
+  });
+
+  ipcMain.handle("schedule:update", async (_event, input: unknown) => {
+    const payload = parseScheduledTaskUpdateInput(input);
+    return updateScheduledTask(payload);
+  });
+
+  ipcMain.handle(
+    "schedule:get",
+    async (_event, taskId: unknown, workspaceId: unknown) => {
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+      const targetTaskId = assertRequiredString(taskId, "taskId").trim();
+      return getScheduledTask(targetTaskId, targetWorkspaceId);
+    }
+  );
+
+  ipcMain.handle(
+    "schedule:delete",
+    async (_event, taskId: unknown, workspaceId: unknown) => {
+      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+      const targetTaskId = assertRequiredString(taskId, "taskId").trim();
+      await deleteScheduledTask(targetTaskId, targetWorkspaceId);
+    }
+  );
+
   ipcMain.handle(
     "filetree:list",
     async (_event, dirPath: unknown, workspacePath: unknown) => {
@@ -1463,69 +1636,15 @@ app.whenReady().then(async () => {
         `[index] Current mode: productivity, workspace: ${targetWorkspaceId}, session: ${sessionId}`
       );
 
-      const session = await getSessionMeta(sessionId, targetWorkspaceId);
-      let providerId = session?.providerId;
-      let selectedModelId = session?.selectedModelId;
-      const sessionUpdates: Parameters<typeof updateSessionMeta>[1] = {};
-
-      if (!session?.providerLocked) {
-        const defaultTarget = await resolveDefaultModelTarget();
-        if (defaultTarget) {
-          providerId = defaultTarget.provider.id;
-          selectedModelId = defaultTarget.selectedModelId;
-          sessionUpdates.providerId = defaultTarget.provider.id;
-          sessionUpdates.providerLocked = true;
-          sessionUpdates.selectedModelId = defaultTarget.selectedModelId;
-        }
-      }
-
-      await updateSessionMeta(sessionId, sessionUpdates, targetWorkspaceId);
-      const savedAttachments =
-        attachments && attachments.length > 0
-          ? await saveAttachments(sessionId, attachments, targetWorkspaceId)
-          : [];
-
-      await appendMessageRecord(
+      await runPromptInSession({
         sessionId,
-        {
-          kind: "user",
-          message: {
-            id: `user-${randomUUID()}`,
-            role: "user",
-            text: text.trim(),
-            timestamp: Date.now(),
-            attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
-          },
-        },
-        targetWorkspaceId
-      );
-      memoryAgent.scheduleProcessing(sessionId, targetWorkspaceId);
-
-      const forwardEvent = (payload: AgentStreamEvent) => {
-        broadcastAgentStreamEvent(sessionId, payload);
-
-        const message = payload as Record<string, unknown>;
-
-        if (message.type === "assistant" && "message" in message) {
-          persistAssistantMessage(sessionId, message.message, targetWorkspaceId);
-        }
-
-        if (message.type === "user" && "message" in message) {
-          persistToolResults(sessionId, message.message, targetWorkspaceId);
-        }
-      };
-
-      void runProductivitySession({
-        sessionId,
-        text: text.trim(),
-        forwardEvent,
         workspaceId: targetWorkspaceId,
+        text,
         attachments,
         source: "desktop",
-        providerId,
-        selectedModelId,
-      }).catch((err) => {
-        console.error(`[index] Agent run failed for session ${sessionId}:`, err);
+        forwardEvent: (payload) => {
+          broadcastAgentStreamEvent(sessionId, payload);
+        },
       });
     }
   );
@@ -1644,6 +1763,8 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async (event) => {
   cleanupAutoUpdater();
+  stopScheduleRunner?.();
+  stopScheduleRunner = null;
 
   if (isInstallingUpdate()) {
     return;

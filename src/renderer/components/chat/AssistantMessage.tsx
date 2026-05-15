@@ -1,9 +1,14 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { ConversationMessage } from "../../types";
 import { CopyButton, MarkdownMessage } from "./MarkdownMessage";
 import { ProcessCollapsible } from "./ProcessCollapsible";
 import { SegmentDivider } from "./SegmentDivider";
 import { StreamingStatusHint } from "./StreamingStatusHint";
+import {
+  findScheduleDetailLinkInActions,
+  findScheduleDetailLinkInSteps,
+} from "../../utils/scheduleLink";
+import { ScheduleTaskLinkButton } from "../schedule/ScheduleTaskLinkButton";
 
 function formatMessageTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -28,6 +33,14 @@ export const AssistantMessage = memo(function AssistantMessage({
   const bodySegments = turn.bodySegments.filter((segment) => segment.text.trim().length > 0);
   const hasBody = bodySegments.length > 0;
   const copyContent = bodySegments.map((segment) => segment.text).join("\n\n");
+  const scheduleDetailLink = useMemo(
+    () =>
+      !isStreaming
+        ? findScheduleDetailLinkInActions(turn.actions) ??
+          findScheduleDetailLinkInSteps(turn.processSteps)
+        : null,
+    [isStreaming, turn.actions, turn.processSteps]
+  );
 
   if (!isStreaming && !hasProcess && !hasBody && !turn.error) {
     return null;
@@ -76,6 +89,12 @@ export const AssistantMessage = memo(function AssistantMessage({
         {turn.error ? (
           <div className="chat-message-content mt-3 rounded-xl bg-rose-50/80 px-4 py-3 text-rose-800 ring-1 ring-rose-200/50">
             {turn.error}
+          </div>
+        ) : null}
+
+        {scheduleDetailLink ? (
+          <div className={hasBody || hasProcess ? "mt-3" : "mt-1"}>
+            <ScheduleTaskLinkButton link={scheduleDetailLink} />
           </div>
         ) : null}
 

@@ -6,7 +6,7 @@ import {
   pendingAskUsersBySessionAtom,
   pendingPermissionsBySessionAtom,
 } from "../../store/hitl";
-import { isSettingsOpenAtom } from "../../store/ui";
+import { activeMainViewAtom, isSettingsOpenAtom } from "../../store/ui";
 import {
   DEFAULT_WORKSPACE_ID,
   currentSessionIdAtom,
@@ -99,8 +99,8 @@ function StatusDot({ status }: { status: SessionStatus }) {
   if (status === "needs-input") {
     return (
       <span className="relative flex h-1.5 w-1.5 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400/55 opacity-75" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-500" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#d77a70]/45 opacity-75" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#bf665d]" />
       </span>
     );
   }
@@ -108,14 +108,14 @@ function StatusDot({ status }: { status: SessionStatus }) {
   if (status === "running") {
     return (
       <span className="relative flex h-1.5 w-1.5 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400/60 opacity-75" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-orange-500" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#d6a37e]/45 opacity-75" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#b87955]" />
       </span>
     );
   }
 
   if (status === "current") {
-    return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />;
+    return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#b87955]" />;
   }
 
   return (
@@ -127,7 +127,7 @@ function WorkspaceBadge({ status }: { status: SessionStatus }) {
   if (status === "needs-input") {
     return (
       <span className="flex shrink-0 justify-end">
-        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 ring-1 ring-rose-100">
+        <span className="rounded-full bg-[#fff4f2] px-2 py-0.5 text-[10px] font-medium text-[#bf665d] ring-1 ring-[#efd0cc]">
           待确认
         </span>
       </span>
@@ -137,7 +137,7 @@ function WorkspaceBadge({ status }: { status: SessionStatus }) {
   if (status === "running") {
     return (
       <span className="flex shrink-0 justify-end">
-        <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-600 ring-1 ring-orange-100">
+        <span className="rounded-full bg-[#fff6ef] px-2 py-0.5 text-[10px] font-medium text-[#b87955] ring-1 ring-[#efd9c7]">
           运行中
         </span>
       </span>
@@ -483,6 +483,8 @@ function SessionRow({
           <span
             className={cn(
               "absolute right-0 top-1/2 -translate-y-1/2 text-right text-[11px] text-stone-400 transition-opacity",
+              status === "running" && "text-[#b87955]",
+              status === "needs-input" && "text-[#bf665d]",
               hovered || menuOpen ? "opacity-0" : "opacity-100"
             )}
           >
@@ -566,7 +568,9 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
   const runningSessions = useAtomValue(runningSessionsAtom);
   const pendingPermissionsBySession = useAtomValue(pendingPermissionsBySessionAtom);
   const pendingAskUsersBySession = useAtomValue(pendingAskUsersBySessionAtom);
-  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
+  const activeMainView = useAtomValue(activeMainViewAtom);
+  const isChatView = activeMainView === "chat";
+  const currentSessionIdForStatus = isChatView ? currentSessionId : null;
   const pinnedWorkspaceIds = useAtomValue(pinnedWorkspaceIdsAtom);
   const pinnedSessionIds = useAtomValue(pinnedSessionIdsAtom);
   const switchWorkspaceSession = useSetAtom(switchWorkspaceSessionAtom);
@@ -623,7 +627,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
           loaded: group.loaded,
           status: getWorkspaceStatus(
             group.sessions,
-            currentSessionId,
+            currentSessionIdForStatus,
             runningSessions,
             pendingPermissionsBySession,
             pendingAskUsersBySession
@@ -632,7 +636,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
       ];
     });
   }, [
-    currentSessionId,
+    currentSessionIdForStatus,
     groups,
     normalizedSearchQuery,
     pendingAskUsersBySession,
@@ -644,9 +648,9 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
     setExpandedWorkspaceIds((current) => {
       const next = new Set(current);
 
-      const activeSessionWorkspaceId = currentSessionId
+      const activeSessionWorkspaceId = currentSessionIdForStatus
         ? groupViews.find((group) =>
-            group.sessions.some((session) => session.id === currentSessionId)
+            group.sessions.some((session) => session.id === currentSessionIdForStatus)
           )?.workspace.id
         : undefined;
 
@@ -675,7 +679,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
 
       return areSetsEqual(next, current) ? current : next;
     });
-  }, [currentSessionId, groups, groupViews, userCollapsedWorkspaceIds]);
+  }, [currentSessionIdForStatus, groups, groupViews, userCollapsedWorkspaceIds]);
 
   useEffect(() => {
     return () => {
@@ -919,7 +923,7 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                     </span>
                   ) : null}
                   {isPinnedWorkspace ? (
-                    <span className="shrink-0 rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 ring-1 ring-orange-100/70">
+                    <span className="shrink-0 rounded bg-[#fff6ef] px-1.5 py-0.5 text-[10px] font-medium text-[#b87955] ring-1 ring-[#efd9c7]">
                       置顶
                     </span>
                   ) : null}
@@ -1057,13 +1061,13 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                   shownSessions.map((session) => {
                     const status = getSessionStatus(
                       session.id,
-                      currentSessionId,
+                      currentSessionIdForStatus,
                       runningSessions,
                       pendingPermissionsBySession,
                       pendingAskUsersBySession
                     );
                     const isActive =
-                      !isSettingsOpen &&
+                      isChatView &&
                       currentWorkspaceId === workspace.id &&
                       currentSessionId === session.id;
 

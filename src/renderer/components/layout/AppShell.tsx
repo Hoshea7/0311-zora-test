@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { fileTreeVisibleAtom } from "../../store/filetree";
-import { isSettingsOpenAtom } from "../../store/ui";
+import { activeMainViewAtom } from "../../store/ui";
 import { LeftSidebar } from "./LeftSidebar";
 import { MainArea } from "./MainArea";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { FileTreePanel } from "../filetree/FileTreePanel";
+import { SchedulePage } from "../schedule/SchedulePage";
 
 /**
  * 应用根布局容器
  * 提供整体布局结构：左侧边栏 + 中间对话区域
  */
 export function AppShell() {
-  const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
+  const activeMainView = useAtomValue(activeMainViewAtom);
   const fileTreeVisible = useAtomValue(fileTreeVisibleAtom);
   const [shouldRenderFileTree, setShouldRenderFileTree] = useState(fileTreeVisible);
+  const isChatView = activeMainView === "chat";
+  const isScheduleView = activeMainView === "schedule";
+  const isSettingsView = activeMainView === "settings";
 
   useEffect(() => {
     if (fileTreeVisible) {
@@ -37,10 +41,15 @@ export function AppShell() {
       <div className="relative z-40 flex h-full">
         <LeftSidebar />
         <div className="flex-1 bg-white relative min-w-0 h-full overflow-hidden">
-          <div className={isSettingsOpen ? "h-full" : "hidden"} aria-hidden={!isSettingsOpen}>
+          <div className={isSettingsView ? "h-full" : "hidden"} aria-hidden={!isSettingsView}>
             <SettingsPanel />
           </div>
-          <div className={isSettingsOpen ? "hidden" : "h-full"} aria-hidden={isSettingsOpen}>
+          {isScheduleView ? (
+            <div className="h-full">
+              <SchedulePage />
+            </div>
+          ) : null}
+          <div className={isChatView ? "h-full" : "hidden"} aria-hidden={!isChatView}>
             <MainArea />
           </div>
         </div>

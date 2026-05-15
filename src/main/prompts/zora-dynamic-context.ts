@@ -59,7 +59,7 @@ function buildMemorySection(
     .join("\n\n");
 }
 
-export async function buildZoraDynamicContext(): Promise<string> {
+export async function buildZoraDynamicContext(workspaceId?: string): Promise<string> {
   try {
     await migrateLegacyMemoryIfNeeded();
   } catch (error) {
@@ -77,14 +77,20 @@ export async function buildZoraDynamicContext(): Promise<string> {
     "  <current_context>",
     `    <local_time granularity="hour">${formatLocalHour()}</local_time>`,
     `    <timezone>${escapeXmlText(getLocalTimezone())}</timezone>`,
+    workspaceId
+      ? `    <current_workspace_id>${escapeXmlText(workspaceId)}</current_workspace_id>`
+      : "",
     "  </current_context>",
     "  <memory>",
     buildMemorySection(userContent, memoryContent, recentLogs),
     "  </memory>",
     "</zora_dynamic_context>",
-  ].join("\n");
+  ].filter((line) => line.length > 0).join("\n");
 }
 
-export async function buildZoraPrompt(rawUserPrompt: string): Promise<string> {
-  return `${await buildZoraDynamicContext()}\n\n${rawUserPrompt}`;
+export async function buildZoraPrompt(
+  rawUserPrompt: string,
+  workspaceId?: string
+): Promise<string> {
+  return `${await buildZoraDynamicContext(workspaceId)}\n\n${rawUserPrompt}`;
 }

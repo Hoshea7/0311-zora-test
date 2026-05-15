@@ -29,8 +29,21 @@ import type {
   McpServerEntry,
   McpServerTestResult,
 } from "./types/mcp";
+import type {
+  ScheduledTask,
+  ScheduledTaskDetailLink,
+  ScheduledTaskUpdateInput,
+} from "./types/schedule";
 
 export type { SkillMeta };
+export type {
+  ScheduledTask,
+  ScheduledTaskCreateInput,
+  ScheduledTaskDetailLink,
+  ScheduledTaskSchedule,
+  ScheduledTaskStatus,
+  ScheduledTaskUpdateInput,
+} from "./types/schedule";
 
 export type AgentStatus = "started" | "finished" | "stopped";
 export type AgentRunSource = "desktop" | "feishu" | "memory";
@@ -117,10 +130,16 @@ export interface BodySegment {
   text: string;
 }
 
+export type AssistantAction = {
+  type: "schedule-task-link";
+  link: ScheduledTaskDetailLink;
+};
+
 export interface AssistantTurn {
   id: string;
   processSteps: ProcessStep[];
   bodySegments: BodySegment[];
+  actions?: AssistantAction[];
   status: "streaming" | "done" | "stopped" | "error";
   error?: string;
   startedAt: number;
@@ -333,6 +352,18 @@ export interface ZoraApi {
   deleteWorkspace: (workspaceId: string) => Promise<void>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<WorkspaceMeta>;
   pickWorkspaceDirectory: () => Promise<string | null>;
+  listScheduledTasks: (workspaceId?: string) => Promise<ScheduledTask[]>;
+  getScheduledTask: (
+    taskId: string,
+    workspaceId: string
+  ) => Promise<ScheduledTask | null>;
+  updateScheduledTask: (
+    input: ScheduledTaskUpdateInput
+  ) => Promise<ScheduledTask>;
+  deleteScheduledTask: (taskId: string, workspaceId: string) => Promise<void>;
+  onScheduledTasksChanged: (
+    callback: (workspaceId: string) => void
+  ) => () => void;
   filetree: {
     list: (dirPath: string, workspacePath: string) => Promise<FileTreeEntry[]>;
     openInFinder: (dirPath: string) => Promise<void>;

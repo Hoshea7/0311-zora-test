@@ -6,6 +6,7 @@ import type {
   PermissionRequest,
 } from "../shared/zora";
 import { isSafeBuiltinMcpToolName } from "../shared/types/mcp";
+import { ZORA_SCHEDULE_MANAGE_FULL_TOOL_NAME } from "./builtin-mcp/schedule";
 
 type PermissionResult =
   | { behavior: "allow"; updatedInput?: Record<string, unknown> }
@@ -56,6 +57,17 @@ const SMART_AUTO_ALLOW_TOOLS = new Set([
   "Agent",
   "Task", "TaskStop",
 ]);
+
+const BLOCKED_SCHEDULE_FALLBACK_TOOLS = new Set([
+  "cron",
+  "croncreate",
+  "cronupdate",
+  "crondelete",
+  "cronlist",
+  "cronget",
+]);
+
+const READ_ONLY_SCHEDULE_ACTIONS = new Set(["list", "get"]);
 
 const SAFE_BASH_PATTERNS = [
   /^git\s+(status|log|diff|show|branch|remote|tag)\b/,
@@ -220,13 +232,34 @@ function isSafeBashCommand(command: string): boolean {
   return SAFE_BASH_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-function isReadOnlyTool(toolName: string, input: Record<string, unknown>): boolean {
+function getTerminalToolName(toolName: string): string {
+  const cleaned = toolName.replace(/^default_api:/, "").trim();
+  const parts = cleaned.split("__").filter(Boolean);
+  return (parts[parts.length - 1] ?? cleaned).toLowerCase();
+}
+
+function isBlockedScheduleFallbackTool(toolName: string): boolean {
+  return BLOCKED_SCHEDULE_FALLBACK_TOOLS.has(getTerminalToolName(toolName));
+}
+
+function isReadOnlyScheduleManageInput(input: Record<string, unknown>): boolean {
+  return (
+    typeof input.action === "string" &&
+    READ_ONLY_SCHEDULE_ACTIONS.has(input.action)
+  );
+}
+
+function isAutoAllowedTool(toolName: string, input: Record<string, unknown>): boolean {
   if (SAFE_TOOLS.has(toolName)) {
     return true;
   }
 
   if (isSafeBuiltinMcpToolName(toolName)) {
     return true;
+  }
+
+  if (toolName === ZORA_SCHEDULE_MANAGE_FULL_TOOL_NAME) {
+    return isReadOnlyScheduleManageInput(input);
   }
 
   if (toolName === "Bash") {
@@ -359,7 +392,19 @@ export function createCanUseTool(
       return { behavior: "deny", message: "操作已中止" };
     }
 
-    if (options.agentID) {
+    if (isBlockedScheduleFallbackTool(toolName)) {
+      console.warn("[hitl] Denying non-Zora schedule fallback tool.", {
+        toolName,
+        toolUseID: options.toolUseID,
+      });
+      return {
+        behavior: "deny",
+        message:
+          "Zora 的定时任务必须使用 mcp__zora_schedule__zora_schedule_manage。不要使用 CronCreate、Claude Code cron 或其他临时 cron 工具；如果参数校验失败，请修正 zora_schedule_manage 参数后重试。",
+      };
+    }
+
+    if (options.agentID && toolName !== ZORA_SCHEDULE_MANAGE_FULL_TOOL_NAME) {
       console.log("[hitl] Auto-allow because tool call belongs to agent.", {
         toolName,
         toolUseID: options.toolUseID,
@@ -367,8 +412,8 @@ export function createCanUseTool(
       return allow();
     }
 
-    if (isReadOnlyTool(toolName, input)) {
-      console.log("[hitl] Auto-allow read-only tool.", {
+    if (isAutoAllowedTool(toolName, input)) {
+      console.log("[hitl] Auto-allow safe tool.", {
         toolName,
         toolUseID: options.toolUseID,
       });
