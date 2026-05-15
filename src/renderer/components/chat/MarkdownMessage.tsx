@@ -16,6 +16,11 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
   node?: unknown;
 };
 
+type MarkdownTableProps = ComponentPropsWithoutRef<"table"> & {
+  children?: ReactNode;
+  node?: unknown;
+};
+
 type SyntaxHighlighterAssets = {
   SyntaxHighlighter: typeof import("react-syntax-highlighter")["Prism"];
   syntaxTheme: Record<string, CSSProperties>;
@@ -26,7 +31,83 @@ type SvgSize = {
   height: number;
 };
 
-const TableContext = createContext(false);
+type TableVariant = "compact" | "regular" | "wide";
+
+type TableContextValue = {
+  inTable: boolean;
+  variant: TableVariant;
+};
+
+type TableMetrics = {
+  averageCellUnits: number;
+  columnCount: number;
+  maxCellUnits: number;
+  rowCount: number;
+};
+
+type TablePresentation = {
+  cellContentClassName: string;
+  scrollerClassName: string;
+  shellClassName: string;
+  tableClassName: string;
+  tdClassName: string;
+  thClassName: string;
+};
+
+type TableScrollState = {
+  atEnd: boolean;
+  atStart: boolean;
+  canScroll: boolean;
+};
+
+const TABLE_PRESENTATION = {
+  compact: {
+    shellClassName: "w-full max-w-full",
+    scrollerClassName: "w-full",
+    tableClassName:
+      "w-full min-w-full table-fixed border-collapse text-center text-[15px] leading-[1.58] [font-family:var(--font-family-chat)]",
+    thClassName:
+      "border-b border-stone-200 px-4 py-2.5 align-top font-semibold text-stone-700",
+    tdClassName: "px-4 py-2.5 align-top text-[#4b443d]",
+    cellContentClassName:
+      "mx-auto w-max max-w-[min(18rem,72vw)] whitespace-normal break-words text-center [overflow-wrap:anywhere] [word-break:break-word]"
+  },
+  regular: {
+    shellClassName: "w-full max-w-full",
+    scrollerClassName: "w-full",
+    tableClassName:
+      "w-full min-w-full border-collapse table-auto text-left text-[15px] leading-[1.58] [font-family:var(--font-family-chat)]",
+    thClassName:
+      "border-b border-stone-200 px-3.5 py-2.5 align-top font-semibold text-stone-700",
+    tdClassName: "px-3.5 py-2.5 align-top text-[#4b443d]",
+    cellContentClassName:
+      "mx-auto w-full max-w-[min(28rem,68vw)] whitespace-normal break-words text-center [overflow-wrap:anywhere] [word-break:break-word]"
+  },
+  wide: {
+    shellClassName: "w-full max-w-full",
+    scrollerClassName: "w-full",
+    tableClassName:
+      "w-max min-w-full max-w-none border-collapse table-auto text-left text-[15px] leading-[1.58] [font-family:var(--font-family-chat)]",
+    thClassName:
+      "border-b border-stone-200 px-3 py-2.5 align-top font-semibold text-stone-700",
+    tdClassName: "px-3 py-2.5 align-top text-[#4b443d]",
+    cellContentClassName:
+      "mx-auto w-max max-w-[min(14rem,58vw)] whitespace-normal break-words text-center [overflow-wrap:anywhere] [word-break:break-word]"
+  }
+} as const satisfies Record<TableVariant, TablePresentation>;
+
+const DEFAULT_TABLE_CONTEXT: TableContextValue = {
+  inTable: false,
+  variant: "regular"
+};
+
+const INITIAL_TABLE_SCROLL_STATE: TableScrollState = {
+  atEnd: true,
+  atStart: true,
+  canScroll: false
+};
+
+const TableContext = createContext<TableContextValue>(DEFAULT_TABLE_CONTEXT);
 const MERMAID_DISALLOWED_TAGS = ["script", "foreignObject", "iframe", "object", "embed"] as const;
 const MERMAID_URL_ATTRS = new Set(["href", "xlink:href"]);
 const CODE_FONT_FAMILY =
@@ -41,6 +122,125 @@ const EXTERNAL_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 let syntaxHighlighterAssetsPromise: Promise<SyntaxHighlighterAssets> | null = null;
 let mermaidPromise: Promise<typeof import("mermaid")["default"]> | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getAstTagName(node: unknown) {
+  if (!isRecord(node) || typeof node.tagName !== "string") {
+    return null;
+  }
+
+  return node.tagName.toLowerCase();
+}
+
+function getAstChildren(node: unknown) {
+  if (!isRecord(node) || !Array.isArray(node.children)) {
+    return [];
+  }
+
+  return node.children;
+}
+
+function getAstText(node: unknown): string {
+  if (!isRecord(node)) {
+    return "";
+  }
+
+  if (typeof node.value === "string") {
+    return node.value;
+  }
+
+  return getAstChildren(node).map(getAstText).join("");
+}
+
+function normalizeCellText(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function estimateTextUnits(text: string) {
+  return Array.from(text).reduce((units, character) => {
+    return units + (/[^\x00-\xff]/.test(character) ? 1 : 0.58);
+  }, 0);
+}
+
+function shouldCenterTableCell(variant: TableVariant, text: string) {
+  if (variant === "compact") {
+    return true;
+  }
+
+  const normalizedText = normalizeCellText(text);
+  if (!normalizedText) {
+    return true;
+  }
+
+  return (
+    /^[-–—]+$/.test(normalizedText) ||
+    /^[★☆⭐✦✧]+$/.test(normalizedText) ||
+    /^(投递|详情|查看|打开)$/.test(normalizedText) ||
+    /^[~≈]?\d[\d\s:：.,，/%~+\-–—/]*%?$/.test(normalizedText)
+  );
+}
+
+function collectTableRows(node: unknown) {
+  const rows: string[][] = [];
+
+  function visit(currentNode: unknown) {
+    if (getAstTagName(currentNode) === "tr") {
+      const cells = getAstChildren(currentNode)
+        .filter((child) => {
+          const tagName = getAstTagName(child);
+          return tagName === "th" || tagName === "td";
+        })
+        .map((cell) => normalizeCellText(getAstText(cell)));
+
+      if (cells.length > 0) {
+        rows.push(cells);
+      }
+      return;
+    }
+
+    getAstChildren(currentNode).forEach(visit);
+  }
+
+  visit(node);
+  return rows;
+}
+
+function getTableMetrics(node: unknown): TableMetrics {
+  const rows = collectTableRows(node);
+  const cells = rows.flat();
+  const cellUnits = cells.map(estimateTextUnits);
+  const totalUnits = cellUnits.reduce((sum, units) => sum + units, 0);
+
+  return {
+    averageCellUnits: cellUnits.length > 0 ? totalUnits / cellUnits.length : 0,
+    columnCount: rows.reduce((max, row) => Math.max(max, row.length), 0),
+    maxCellUnits: cellUnits.length > 0 ? Math.max(...cellUnits) : 0,
+    rowCount: rows.length
+  };
+}
+
+function getTableVariant(metrics: TableMetrics): TableVariant {
+  if (
+    metrics.columnCount > 0 &&
+    metrics.columnCount <= 4 &&
+    metrics.maxCellUnits <= 18 &&
+    metrics.averageCellUnits <= 11
+  ) {
+    return "compact";
+  }
+
+  if (
+    metrics.columnCount >= 6 ||
+    metrics.columnCount * Math.max(metrics.averageCellUnits, 1) >= 90
+  ) {
+    return "wide";
+  }
+
+  return "regular";
+}
 
 function buildSyntaxTheme(baseTheme: Record<string, CSSProperties>) {
   return {
@@ -364,6 +564,88 @@ function HighlightedCodeBlock({
   );
 }
 
+function MarkdownTable({ children, className, node, ...props }: MarkdownTableProps) {
+  const metrics = useMemo(() => getTableMetrics(node), [node]);
+  const variant = getTableVariant(metrics);
+  const presentation = TABLE_PRESENTATION[variant];
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollState, setScrollState] = useState<TableScrollState>(INITIAL_TABLE_SCROLL_STATE);
+  const contextValue = useMemo<TableContextValue>(
+    () => ({
+      inTable: true,
+      variant
+    }),
+    [variant]
+  );
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) {
+      return;
+    }
+
+    let frameId = 0;
+    const updateScrollState = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+        setScrollState({
+          atEnd: scroller.scrollLeft >= maxScrollLeft - 1,
+          atStart: scroller.scrollLeft <= 1,
+          canScroll: maxScrollLeft > 1
+        });
+      });
+    };
+
+    updateScrollState();
+    scroller.addEventListener("scroll", updateScrollState, { passive: true });
+    window.addEventListener("resize", updateScrollState);
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateScrollState) : null;
+    resizeObserver?.observe(scroller);
+
+    if (scroller.firstElementChild) {
+      resizeObserver?.observe(scroller.firstElementChild);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      scroller.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+      resizeObserver?.disconnect();
+    };
+  }, [metrics.columnCount, metrics.maxCellUnits, metrics.rowCount, variant]);
+
+  return (
+    <TableContext.Provider value={contextValue}>
+      <div className={cn("relative my-1", presentation.shellClassName)} data-table-variant={variant}>
+        <div
+          ref={scrollerRef}
+          aria-label={scrollState.canScroll ? "Markdown 表格，可横向滚动" : undefined}
+          tabIndex={scrollState.canScroll ? 0 : undefined}
+          className={cn(
+            "custom-scrollbar max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-stone-200 bg-white shadow-sm outline-none focus-ring-sm",
+            presentation.scrollerClassName
+          )}
+        >
+          <table className={cn(presentation.tableClassName, className)} {...props}>
+            {children}
+          </table>
+        </div>
+
+        {scrollState.canScroll && !scrollState.atStart ? (
+          <div className="pointer-events-none absolute inset-y-px left-px w-8 rounded-l-xl bg-gradient-to-r from-white via-white/85 to-transparent" />
+        ) : null}
+
+        {scrollState.canScroll && !scrollState.atEnd ? (
+          <div className="pointer-events-none absolute inset-y-px right-px w-8 rounded-r-xl bg-gradient-to-l from-white via-white/85 to-transparent" />
+        ) : null}
+      </div>
+    </TableContext.Provider>
+  );
+}
+
 function MermaidBlock({ code }: { code: string }) {
   const [svgContent, setSvgContent] = useState<string>("");
   const [hasError, setHasError] = useState(false);
@@ -371,7 +653,7 @@ function MermaidBlock({ code }: { code: string }) {
   const [fullscreenSvgContent, setFullscreenSvgContent] = useState<string>("");
   const [isFullscreenLoading, setIsFullscreenLoading] = useState(false);
   const [fullscreenRenderFailed, setFullscreenRenderFailed] = useState(false);
-  const inTable = useContext(TableContext);
+  const { inTable } = useContext(TableContext);
   const previewIdRef = useRef(`mermaid-preview-${Math.random().toString(36).slice(2, 11)}`);
   const fullscreenIdRef = useRef(`mermaid-fullscreen-${Math.random().toString(36).slice(2, 11)}`);
   const fullscreenSvgSize = useMemo(
@@ -662,17 +944,10 @@ const markdownComponents: Components = {
       {children}
     </em>
   ),
-  table: ({ children, ...props }) => (
-    <TableContext.Provider value={true}>
-      <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
-        <table
-          className="min-w-full border-collapse text-left text-[14px] [font-family:var(--font-family-chat)]"
-          {...props}
-        >
-          {children}
-        </table>
-      </div>
-    </TableContext.Provider>
+  table: ({ children, node, ...props }) => (
+    <MarkdownTable node={node} {...props}>
+      {children}
+    </MarkdownTable>
   ),
   thead: ({ children, ...props }) => (
     <thead className="bg-stone-50/80 text-stone-700 font-medium" {...props}>
@@ -689,16 +964,41 @@ const markdownComponents: Components = {
       {children}
     </tr>
   ),
-  th: ({ children, ...props }) => (
-    <th className="px-4 py-3 font-semibold text-stone-700 border-b border-stone-200" {...props}>
-      {children}
-    </th>
-  ),
-  td: ({ children, ...props }) => (
-    <td className="px-4 py-3 align-top text-[#4b443d]" {...props}>
-      {children}
-    </td>
-  ),
+  th: ({ children, node: _node, ...props }) => {
+    const { variant } = useContext(TableContext);
+    const presentation = TABLE_PRESENTATION[variant];
+
+    return (
+      <th className={presentation.thClassName} {...props}>
+        <div
+          className={cn(
+            presentation.cellContentClassName,
+            variant === "compact" ? "mx-auto text-center" : "mx-0 w-max whitespace-nowrap text-left"
+          )}
+        >
+          {children}
+        </div>
+      </th>
+    );
+  },
+  td: ({ children, node, ...props }) => {
+    const { variant } = useContext(TableContext);
+    const presentation = TABLE_PRESENTATION[variant];
+    const shouldCenter = shouldCenterTableCell(variant, getAstText(node));
+
+    return (
+      <td className={presentation.tdClassName} {...props}>
+        <div
+          className={cn(
+            presentation.cellContentClassName,
+            shouldCenter ? "mx-auto w-max whitespace-nowrap text-center" : "mx-0 text-left"
+          )}
+        >
+          {children}
+        </div>
+      </td>
+    );
+  },
   input: ({ type, checked, ...props }) =>
     type === "checkbox" ? (
       <input
@@ -714,7 +1014,7 @@ const markdownComponents: Components = {
     ),
   pre: ({ children }) => children,
   code: ({ inline, className, children, node: _node, ...props }: MarkdownCodeProps) => {
-    const inTable = useContext(TableContext);
+    const { inTable } = useContext(TableContext);
     const match = /language-([\w-]+)/.exec(className || "");
     const language = match?.[1];
     const code = String(children).replace(/\n$/, "");
@@ -726,8 +1026,8 @@ const markdownComponents: Components = {
       return (
         <code
           className={cn(
-            "rounded-md border border-stone-200 bg-stone-100 font-mono text-[13px] text-stone-700 break-words",
-            inline ? "px-1.5 py-0.5" : "px-2 py-[2px] inline-block my-0.5"
+            "rounded-[3px] bg-[#f2f2f3] font-mono text-[0.85em] text-[#5a5450]",
+            inline ? "px-[0.25em] py-[0.06em]" : "px-[0.35em] py-[0.1em] inline-block"
           )}
           {...props}
         >
@@ -784,7 +1084,7 @@ const FullMarkdown = memo(function FullMarkdown({ content }: { content: string }
   const blocks = useMemo(() => splitMarkdownIntoBlocks(content), [content]);
 
   return (
-    <div className="ai-message-content min-w-0 space-y-[18px]">
+    <div className="ai-message-content min-w-0 space-y-4">
       {blocks.map((block, index) => (
         <MarkdownBlock key={`${index}-${block.slice(0, 20)}`} block={block} />
       ))}

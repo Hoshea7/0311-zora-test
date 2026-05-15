@@ -284,7 +284,7 @@ export function SidebarFooter() {
           type="button"
           onClick={() => setActiveMainView("schedule")}
           className={cn(
-            "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[10px] px-2 py-1.5 text-center text-[11.5px] leading-4 transition-colors",
+            "flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 text-center text-[12px] font-medium leading-[14px] transition-colors",
             isScheduleOpen
               ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
               : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
@@ -292,7 +292,7 @@ export function SidebarFooter() {
           aria-current={isScheduleOpen ? "page" : undefined}
         >
           <svg
-            className="h-3.5 w-3.5 shrink-0"
+            className="h-4 w-4 shrink-0"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -311,7 +311,7 @@ export function SidebarFooter() {
           type="button"
           onClick={() => setSettingsOpen(!isSettingsOpen)}
           className={cn(
-            "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[10px] px-2 py-1.5 text-center text-[11.5px] leading-4 transition-colors",
+            "flex h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 text-center text-[12px] font-medium leading-[14px] transition-colors",
             isSettingsOpen
               ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
               : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
@@ -319,7 +319,7 @@ export function SidebarFooter() {
           aria-current={isSettingsOpen ? "page" : undefined}
         >
           <svg
-            className="h-3.5 w-3.5 shrink-0"
+            className="h-4 w-4 shrink-0"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

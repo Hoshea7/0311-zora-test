@@ -159,8 +159,14 @@ function PinIcon({ className }: { className?: string }) {
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M14.25 4.75l5 5-2.7 2.7.35 4.85-1.1 1.1-4.25-4.25-4.3 4.3-1.7-1.7 4.3-4.3L5.6 8.2l1.1-1.1 4.85.35 2.7-2.7z"
+        strokeWidth={1.8}
+        d="M14.45 4.15l4.9 4.9-2.9 2.9.38 5.45-1.18 1.18L5.42 8.35 6.6 7.17l5.45.38 2.4-3.4z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M10.95 13.05L5.1 18.9"
       />
     </svg>
   );
@@ -923,8 +929,13 @@ export function SessionList({ searchQuery = "" }: SessionListProps) {
                     </span>
                   ) : null}
                   {isPinnedWorkspace ? (
-                    <span className="shrink-0 rounded bg-[#fff6ef] px-1.5 py-0.5 text-[10px] font-medium text-[#b87955] ring-1 ring-[#efd9c7]">
-                      置顶
+                    <span
+                      className="flex h-4 w-4 shrink-0 items-center justify-center text-stone-400"
+                      role="img"
+                      aria-label="已置顶"
+                      title="已置顶"
+                    >
+                      <PinIcon className="h-[15px] w-[15px]" />
                     </span>
                   ) : null}
                 </button>

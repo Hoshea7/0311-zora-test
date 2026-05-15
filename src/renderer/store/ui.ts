@@ -5,7 +5,7 @@ export type MainView = "chat" | "schedule" | "settings";
 const SIDEBAR_WIDTH_STORAGE_KEY = "zora:sidebarWidth";
 
 export const SIDEBAR_COLLAPSED_WIDTH = 72;
-export const SIDEBAR_MIN_WIDTH = 292;
+export const SIDEBAR_MIN_WIDTH = 260;
 export const SIDEBAR_MAX_WIDTH = 520;
 export const SIDEBAR_DEFAULT_WIDTH = 344;
 

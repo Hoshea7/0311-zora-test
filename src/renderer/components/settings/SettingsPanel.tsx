@@ -110,11 +110,11 @@ export function SettingsPanel() {
                   className={[
                     "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all duration-200",
                     isActive
-                      ? "bg-white text-stone-800 shadow-sm ring-1 ring-stone-200/60"
-                      : "text-stone-500 hover:bg-stone-200/30 hover:text-stone-700",
+                      ? "bg-white text-black shadow-sm ring-1 ring-stone-200/60"
+                      : "text-black hover:bg-stone-200/30",
                   ].join(" ")}
                 >
-                  <div className={isActive ? "text-stone-900" : "text-stone-400"}>{tab.icon}</div>
+                  <div className="text-black">{tab.icon}</div>
                   {tab.label}
                 </button>
               );
