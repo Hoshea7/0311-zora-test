@@ -4,11 +4,12 @@ import { createPortal } from "react-dom";
 import type { MemorySettings } from "../../../shared/types/memory";
 import { mcpConfigAtom } from "../../store/mcp";
 import { loadSkillsAtom, skillsAtom } from "../../store/skill";
-import { isSettingsOpenAtom, settingsTabAtom } from "../../store/ui";
+import { activeMainViewAtom, isSettingsOpenAtom, settingsTabAtom } from "../../store/ui";
 import {
   emitMemorySettingsUpdated,
   MEMORY_SETTINGS_UPDATED_EVENT,
 } from "../../utils/memory-settings-event";
+import { cn } from "../../utils/cn";
 
 function MemoryProcessButton() {
   const [loading, setLoading] = useState(false);
@@ -241,6 +242,8 @@ export function SidebarFooter() {
   const mcpConfig = useAtomValue(mcpConfigAtom);
   const skills = useAtomValue(skillsAtom);
   const loadSkills = useSetAtom(loadSkillsAtom);
+  const activeMainView = useAtomValue(activeMainViewAtom);
+  const setActiveMainView = useSetAtom(activeMainViewAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
   const setSettingsTab = useSetAtom(settingsTabAtom);
@@ -248,6 +251,7 @@ export function SidebarFooter() {
   const enabledMcpCount = Object.values(mcpConfig.servers).filter(
     (server) => server.enabled
   ).length;
+  const isScheduleOpen = activeMainView === "schedule";
 
   useEffect(() => {
     void loadSkills();
@@ -290,6 +294,7 @@ export function SidebarFooter() {
     <div className="space-y-4 pt-1">
       <div className="flex items-center gap-3 px-3 text-[12px] text-stone-500">
         <button
+          type="button"
           onClick={() => {
             setSettingsTab("mcp");
             setSettingsOpen(true);
@@ -308,6 +313,7 @@ export function SidebarFooter() {
         </button>
         <span className="h-1 w-1 rounded-full bg-stone-300"></span>
         <button
+          type="button"
           onClick={() => {
             setSettingsTab("skills");
             setSettingsOpen(true);
@@ -326,11 +332,44 @@ export function SidebarFooter() {
         </button>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          onClick={() => setActiveMainView("schedule")}
+          className={cn(
+            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 py-2.5 text-center text-[12px] transition-colors",
+            isScheduleOpen
+              ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
+              : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
+          )}
+          aria-current={isScheduleOpen ? "page" : undefined}
+        >
+          <svg
+            className="h-4 w-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2z"
+            />
+          </svg>
+          <span>定时任务</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setSettingsOpen(!isSettingsOpen)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13px] text-stone-500 transition-colors hover:bg-white/50 hover:text-stone-900"
+          className={cn(
+            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 py-2.5 text-center text-[12px] transition-colors",
+            isSettingsOpen
+              ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
+              : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
+          )}
+          aria-current={isSettingsOpen ? "page" : undefined}
         >
           <svg
             className="h-4 w-4 shrink-0"
@@ -353,8 +392,13 @@ export function SidebarFooter() {
           </svg>
           <span>设置</span>
         </button>
-        {memoryMode === "manual" ? <MemoryProcessButton /> : null}
       </div>
+
+      {memoryMode === "manual" ? (
+        <div className="flex justify-end px-1">
+          <MemoryProcessButton />
+        </div>
+      ) : null}
     </div>
   );
 }

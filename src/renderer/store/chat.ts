@@ -583,10 +583,12 @@ function mergeAssistantSnapshotIntoTurn(
   for (const block of blocks) {
     if (block.type === "thinking" && typeof block.thinking === "string") {
       const thinkingId = typeof block.id === "string" ? block.id : "";
+      const normalizedThinking = normalizeThinkingContent(block.thinking);
       const alreadyExists = processSteps.some(
         (step) =>
           step.type === "thinking" &&
-          (step.thinking.id === thinkingId || step.thinking.content === block.thinking)
+          ((thinkingId.length > 0 && step.thinking.id === thinkingId) ||
+            normalizeThinkingContent(step.thinking.content) === normalizedThinking)
       );
 
       if (!alreadyExists) {
@@ -596,7 +598,7 @@ function mergeAssistantSnapshotIntoTurn(
             type: "thinking",
             thinking: {
               id: thinkingId || createId("thinking"),
-              content: normalizeThinkingContent(block.thinking),
+              content: normalizedThinking,
               startedAt: timestamp,
               completedAt: timestamp,
             },
@@ -781,9 +783,9 @@ export const appendBodyTextAtom = atom<null, [string, string], void>(
   }
 );
 
-export const addThinkingStepAtom = atom<null, [string, string?], void>(
+export const addThinkingStepAtom = atom<null, [string, string?, string?], void>(
   null,
-  (_get, set, sessionId: string, initialContent = "") => {
+  (_get, set, sessionId: string, initialContent = "", thinkingId?: string) => {
     const startedAt = Date.now();
     const normalizedContent = normalizeThinkingContent(initialContent);
 
@@ -795,7 +797,7 @@ export const addThinkingStepAtom = atom<null, [string, string?], void>(
           {
             type: "thinking",
             thinking: {
-              id: createId("thinking"),
+              id: thinkingId || createId("thinking"),
               content: normalizedContent,
               startedAt,
             },

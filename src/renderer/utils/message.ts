@@ -7,6 +7,7 @@ type AssistantBlockPayload =
     }
   | {
       type: "thinking";
+      thinkingId?: string;
       thinking: string;
     }
   | {
@@ -178,6 +179,10 @@ export function extractStreamChunks(streamEvent: AgentStreamEvent): {
       return {
         blockStart: {
           type: "thinking",
+          thinkingId:
+            typeof event.content_block.id === "string"
+              ? event.content_block.id
+              : undefined,
           thinking
         }
       };

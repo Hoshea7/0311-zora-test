@@ -46,6 +46,10 @@ import type {
   McpServerEntry,
   McpServerTestResult,
 } from "../shared/types/mcp";
+import type {
+  ScheduledTask,
+  ScheduledTaskUpdateInput,
+} from "../shared/types/schedule";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
@@ -282,6 +286,25 @@ const zoraApi: ZoraApi = {
     ipcRenderer.invoke("workspace:delete", workspaceId) as Promise<void>,
   pickWorkspaceDirectory: () =>
     ipcRenderer.invoke("workspace:pick-directory") as Promise<string | null>,
+  listScheduledTasks: (workspaceId?: string) =>
+    ipcRenderer.invoke("schedule:list", workspaceId) as Promise<ScheduledTask[]>,
+  getScheduledTask: (taskId: string, workspaceId: string) =>
+    ipcRenderer.invoke("schedule:get", taskId, workspaceId) as Promise<ScheduledTask | null>,
+  updateScheduledTask: (input: ScheduledTaskUpdateInput) =>
+    ipcRenderer.invoke("schedule:update", input) as Promise<ScheduledTask>,
+  deleteScheduledTask: (taskId: string, workspaceId: string) =>
+    ipcRenderer.invoke("schedule:delete", taskId, workspaceId) as Promise<void>,
+  onScheduledTasksChanged: (callback: (workspaceId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string) => {
+      callback(workspaceId);
+    };
+
+    ipcRenderer.on("schedule:changed", handler);
+
+    return () => {
+      ipcRenderer.removeListener("schedule:changed", handler);
+    };
+  },
   filetree: {
     list: (dirPath: string, workspacePath: string) =>
       ipcRenderer.invoke("filetree:list", dirPath, workspacePath) as Promise<FileTreeEntry[]>,

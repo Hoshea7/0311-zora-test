@@ -14,12 +14,14 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import type {
+  AssistantAction,
   AssistantTurn,
   ConversationMessage,
   FileAttachment,
   ProcessStep,
   SessionBranchMeta,
 } from "../shared/zora";
+import { extractScheduleDetailLinkFromToolResultValue } from "../shared/schedule-link";
 
 export interface SessionMeta {
   id: string;
@@ -399,6 +401,7 @@ type MessageRecord =
       result: string;
       isError: boolean;
       completedAt?: number;
+      assistantActions?: AssistantAction[];
     };
 
 function getJsonlPath(sessionId: string, workspaceId = "default"): string {
@@ -450,6 +453,96 @@ function createAssistantMessageFromTurn(turn: AssistantTurn): ConversationMessag
   };
 }
 
+function getAssistantActionKey(action: AssistantAction): string {
+  if (action.type === "schedule-task-link") {
+    return `${action.type}:${action.link.workspaceId}:${action.link.taskId}`;
+  }
+
+  return action.type;
+}
+
+function normalizeAssistantActions(value: unknown): AssistantAction[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const actions: AssistantAction[] = [];
+  const seen = new Set<string>();
+
+  for (const item of value) {
+    if (!isRecord(item) || item.type !== "schedule-task-link") {
+      continue;
+    }
+
+    const link = extractScheduleDetailLinkFromToolResultValue({
+      detailLink: item.link,
+    });
+
+    if (!link) {
+      continue;
+    }
+
+    const action: AssistantAction = {
+      type: "schedule-task-link",
+      link,
+    };
+    const key = getAssistantActionKey(action);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    actions.push(action);
+  }
+
+  return actions;
+}
+
+function toAssistantActions(value: unknown): AssistantAction[] | undefined {
+  const actions = normalizeAssistantActions(value);
+
+  return actions.length > 0 ? actions : undefined;
+}
+
+function mergeAssistantActions(
+  existingActions: AssistantAction[] | undefined,
+  nextActions: AssistantAction[] | undefined
+): AssistantAction[] | undefined {
+  if (!nextActions || nextActions.length === 0) {
+    return existingActions;
+  }
+
+  const merged = existingActions ? [...existingActions] : [];
+  const seen = new Set(merged.map(getAssistantActionKey));
+
+  for (const action of nextActions) {
+    const key = getAssistantActionKey(action);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    merged.push(action);
+  }
+
+  return merged;
+}
+
+function extractAssistantActionsFromToolResult(content: unknown): AssistantAction[] {
+  const link = extractScheduleDetailLinkFromToolResultValue(content);
+
+  return link
+    ? [
+        {
+          type: "schedule-task-link",
+          link,
+        },
+      ]
+    : [];
+}
+
 function mergeAssistantTurns(
   existingTurn: AssistantTurn,
   nextTurn: AssistantTurn
@@ -458,6 +551,7 @@ function mergeAssistantTurns(
     ...existingTurn,
     processSteps: [...existingTurn.processSteps, ...nextTurn.processSteps],
     bodySegments: [...existingTurn.bodySegments, ...nextTurn.bodySegments],
+    actions: mergeAssistantActions(existingTurn.actions, nextTurn.actions),
     status: "done",
     error: nextTurn.error ?? existingTurn.error,
     completedAt: nextTurn.completedAt ?? existingTurn.completedAt,
@@ -565,6 +659,7 @@ function normalizeTurn(rawTurn: unknown): AssistantTurn | null {
     id: typeof rawTurn.id === "string" ? rawTurn.id : makeId("turn"),
     processSteps,
     bodySegments,
+    actions: toAssistantActions(rawTurn.actions),
     status,
     error: typeof rawTurn.error === "string" ? rawTurn.error : undefined,
     startedAt,
@@ -577,7 +672,8 @@ function applyToolResultToTurn(
   toolUseId: string,
   result: string,
   isError: boolean,
-  completedAt?: number
+  completedAt?: number,
+  assistantActions?: AssistantAction[]
 ) {
   if (!turn.processSteps.some((step) => step.type === "tool" && step.tool.id === toolUseId)) {
     return turn;
@@ -585,6 +681,7 @@ function applyToolResultToTurn(
 
   return {
     ...turn,
+    actions: mergeAssistantActions(turn.actions, assistantActions),
     processSteps: turn.processSteps.map<ProcessStep>((step) =>
       step.type === "tool" && step.tool.id === toolUseId
         ? {
@@ -875,7 +972,11 @@ export async function loadMessages(
             record.toolUseId,
             record.result,
             record.isError,
-            record.completedAt
+            record.completedAt,
+            mergeAssistantActions(
+              toAssistantActions(record.assistantActions),
+              extractAssistantActionsFromToolResult(record.result)
+            )
           ),
         };
         break;
@@ -985,6 +1086,8 @@ export function persistToolResults(
       continue;
     }
 
+    const assistantActions = extractAssistantActionsFromToolResult(item.content);
+
     void appendMessageRecord(sessionId, {
       kind: "tool_result",
       toolUseId: item.tool_use_id,
@@ -994,6 +1097,8 @@ export function persistToolResults(
           : JSON.stringify(item.content ?? ""),
       isError: item.is_error === true,
       completedAt: Date.now(),
+      assistantActions:
+        assistantActions.length > 0 ? assistantActions : undefined,
     }, workspaceId);
   }
 }

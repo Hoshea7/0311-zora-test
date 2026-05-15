@@ -26,6 +26,10 @@ import {
   isBuiltinWebSearchEntry,
   testBuiltinWebSearch,
 } from "./builtin-mcp/web-search";
+import {
+  createBuiltinScheduleServer,
+  ZORA_SCHEDULE_SERVER_NAME,
+} from "./builtin-mcp/schedule";
 import { isRecord } from "./utils/guards";
 import { isEnoentError, replaceFileAtomically } from "./utils/fs";
 
@@ -1170,10 +1174,19 @@ export class McpManager {
 
   async buildSdkMcpServers(): Promise<SdkMcpServers> {
     const config = await this.readConfig();
-    const sdkServers: SdkMcpServers = {};
+    const sdkServers: SdkMcpServers = {
+      [ZORA_SCHEDULE_SERVER_NAME]: createBuiltinScheduleServer(),
+    };
 
     for (const [name, entry] of Object.entries(config.servers)) {
       if (!entry.enabled) {
+        continue;
+      }
+
+      if (name === ZORA_SCHEDULE_SERVER_NAME) {
+        console.warn(
+          `[mcp-manager] Ignoring user MCP server named "${ZORA_SCHEDULE_SERVER_NAME}" because it is reserved for Zora's built-in schedule tool.`
+        );
         continue;
       }
 

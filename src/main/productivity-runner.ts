@@ -41,6 +41,7 @@ type ProductivityProfile = Awaited<ReturnType<typeof buildProductivityProfile>>;
 
 type BuildRunProfileParams = {
   prompt: string;
+  workspaceId: string;
   workspacePath: string;
   sdkRuntime: ReturnType<typeof getSDKRuntimeOptions>;
   forwardEvent: (payload: AgentStreamEvent) => void;
@@ -168,6 +169,7 @@ function buildLateQueuedPrompt(messages: QueuedAgentMessage[]): string {
 
 async function buildRunProfile({
   prompt,
+  workspaceId,
   workspacePath,
   sdkRuntime,
   forwardEvent,
@@ -179,7 +181,7 @@ async function buildRunProfile({
   selectedModelId,
 }: BuildRunProfileParams): Promise<ProductivityProfile> {
   const profile = await buildProductivityProfile({
-    userPrompt: await buildZoraPrompt(prompt),
+    userPrompt: await buildZoraPrompt(prompt, workspaceId),
     cwd: workspacePath,
     sdkRuntime,
     onEvent: forwardEvent,
@@ -225,6 +227,7 @@ export async function runProductivitySession({
 
   const profile = await buildRunProfile({
     prompt: initialPrompt,
+    workspaceId,
     workspacePath,
     sdkRuntime,
     forwardEvent,
@@ -267,6 +270,7 @@ export async function runProductivitySession({
     );
     const recoveredProfile = await buildRunProfile({
       prompt: rebuiltPrompt,
+      workspaceId,
       workspacePath,
       sdkRuntime,
       forwardEvent,
@@ -310,6 +314,7 @@ export async function runProductivitySession({
 
     const followUpProfile = await buildRunProfile({
       prompt: followUpPrompt,
+      workspaceId,
       workspacePath,
       sdkRuntime,
       forwardEvent,
