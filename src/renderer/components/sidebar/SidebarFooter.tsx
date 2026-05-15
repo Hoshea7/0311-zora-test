@@ -2,9 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { createPortal } from "react-dom";
 import type { MemorySettings } from "../../../shared/types/memory";
-import { mcpConfigAtom } from "../../store/mcp";
-import { loadSkillsAtom, skillsAtom } from "../../store/skill";
-import { activeMainViewAtom, isSettingsOpenAtom, settingsTabAtom } from "../../store/ui";
+import { activeMainViewAtom, isSettingsOpenAtom } from "../../store/ui";
 import {
   emitMemorySettingsUpdated,
   MEMORY_SETTINGS_UPDATED_EVENT,
@@ -236,26 +234,15 @@ function MemoryProcessButton() {
 
 /**
  * 侧边栏底部组件
- * 显示 MCP 和 Skills 状态，以及设置按钮
+ * 显示主视图入口。
  */
 export function SidebarFooter() {
-  const mcpConfig = useAtomValue(mcpConfigAtom);
-  const skills = useAtomValue(skillsAtom);
-  const loadSkills = useSetAtom(loadSkillsAtom);
   const activeMainView = useAtomValue(activeMainViewAtom);
   const setActiveMainView = useSetAtom(activeMainViewAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
-  const setSettingsTab = useSetAtom(settingsTabAtom);
   const [memoryMode, setMemoryMode] = useState<MemorySettings["mode"] | null>(null);
-  const enabledMcpCount = Object.values(mcpConfig.servers).filter(
-    (server) => server.enabled
-  ).length;
   const isScheduleOpen = activeMainView === "schedule";
-
-  useEffect(() => {
-    void loadSkills();
-  }, [loadSkills]);
 
   useEffect(() => {
     let isActive = true;
@@ -291,53 +278,13 @@ export function SidebarFooter() {
   }, []);
 
   return (
-    <div className="space-y-4 pt-1">
-      <div className="flex items-center gap-3 px-3 text-[12px] text-stone-500">
-        <button
-          type="button"
-          onClick={() => {
-            setSettingsTab("mcp");
-            setSettingsOpen(true);
-          }}
-          className="flex items-center gap-1.5 hover:text-stone-800 transition-colors rounded px-1.5 -ml-1.5 py-0.5 hover:bg-stone-200/50"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-          <span>{enabledMcpCount} MCP</span>
-        </button>
-        <span className="h-1 w-1 rounded-full bg-stone-300"></span>
-        <button
-          type="button"
-          onClick={() => {
-            setSettingsTab("skills");
-            setSettingsOpen(true);
-          }}
-          className="flex items-center gap-1.5 hover:text-stone-800 transition-colors rounded px-1.5 -mr-1.5 py-0.5 hover:bg-stone-200/50"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          <span>{skills.length} 个技能</span>
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-1.5">
+    <div className="space-y-2 pt-0">
+      <div className="grid grid-cols-2 gap-1">
         <button
           type="button"
           onClick={() => setActiveMainView("schedule")}
           className={cn(
-            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 py-2.5 text-center text-[12px] transition-colors",
+            "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[10px] px-2 py-1.5 text-center text-[11.5px] leading-4 transition-colors",
             isScheduleOpen
               ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
               : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
@@ -345,7 +292,7 @@ export function SidebarFooter() {
           aria-current={isScheduleOpen ? "page" : undefined}
         >
           <svg
-            className="h-4 w-4 shrink-0"
+            className="h-3.5 w-3.5 shrink-0"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -357,14 +304,14 @@ export function SidebarFooter() {
               d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2z"
             />
           </svg>
-          <span>定时任务</span>
+          <span>定时</span>
         </button>
 
         <button
           type="button"
           onClick={() => setSettingsOpen(!isSettingsOpen)}
           className={cn(
-            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-[12px] px-2 py-2.5 text-center text-[12px] transition-colors",
+            "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[10px] px-2 py-1.5 text-center text-[11.5px] leading-4 transition-colors",
             isSettingsOpen
               ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
               : "text-stone-500 hover:bg-white/50 hover:text-stone-900"
@@ -372,7 +319,7 @@ export function SidebarFooter() {
           aria-current={isSettingsOpen ? "page" : undefined}
         >
           <svg
-            className="h-4 w-4 shrink-0"
+            className="h-3.5 w-3.5 shrink-0"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

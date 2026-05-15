@@ -337,7 +337,7 @@ export function LeftSidebar() {
                   <SessionList searchQuery={sessionSearchQuery} />
                 </div>
 
-                <div className="mt-auto bg-gradient-to-t from-[#f7f6f2] via-[#f7f6f2] to-transparent px-4 pb-4 pt-5">
+                <div className="mt-auto bg-gradient-to-t from-[#f7f6f2] via-[#f7f6f2] to-transparent px-4 pb-3 pt-3">
                   <SidebarFooter />
                 </div>
               </>
@@ -394,7 +394,7 @@ export function LeftSidebar() {
                         ? "bg-white/65 text-[#b87955] shadow-sm ring-1 ring-stone-200/60"
                         : "text-stone-400 hover:bg-stone-900/[0.05] hover:text-stone-600"
                     )}
-                    title="定时任务"
+                    title="定时"
                     aria-current={isScheduleOpen ? "page" : undefined}
                   >
                     <svg
@@ -488,7 +488,7 @@ export function LeftSidebar() {
                   autoFocus
                   value={workspaceName}
                   onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="例如：客户端重构"
+                  placeholder="输入工作区名称"
                   className="h-10 w-full rounded-[10px] border border-stone-200 bg-white px-3 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 hover:border-stone-300 focus:border-stone-300 focus:ring-2 focus:ring-stone-900/10"
                 />
               </div>
