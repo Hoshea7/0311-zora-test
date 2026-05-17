@@ -1,4 +1,4 @@
-import { atom, type Setter } from "jotai";
+import { atom, type Getter, type Setter } from "jotai";
 import type { Workspace, Session } from "../types";
 import {
   clearDraftStateForSessionAtom,
@@ -7,6 +7,7 @@ import {
   sessionMessagesAtom,
   setSessionMessagesAtom,
 } from "./chat";
+import { emitArchivedSessionsChanged } from "../utils/archived-sessions-event";
 
 const CURRENT_WORKSPACE_STORAGE_KEY = "zora:currentWorkspaceId";
 const PINNED_WORKSPACES_STORAGE_KEY = "zora:pinnedWorkspaceIds";
@@ -227,6 +228,39 @@ function resetWorkspaceSurface(set: Setter): void {
   set(draftSelectedProviderIdAtom, undefined);
   set(draftSelectedModelIdAtom, undefined);
   set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
+}
+
+function removeSessionFromClientState(
+  get: Getter,
+  set: Setter,
+  sessionId: string,
+  workspaceId: string
+): void {
+  set(workspaceSessionsAtom, (current) => ({
+    ...current,
+    [workspaceId]: removeSession(current[workspaceId] ?? [], sessionId),
+  }));
+  set(pinnedSessionIdsAtom, (current) => {
+    if (!current.has(sessionId)) {
+      return current;
+    }
+
+    const next = new Set(current);
+    next.delete(sessionId);
+    persistPinnedSessionIds(next);
+    return next;
+  });
+  set(clearSessionMessagesAtom, sessionId);
+  set(clearDraftStateForSessionAtom, sessionId);
+
+  if (
+    get(currentWorkspaceIdAtom) === workspaceId &&
+    get(currentSessionIdAtom) === sessionId
+  ) {
+    set(currentSessionIdAtom, null);
+    set(messagesAtom, []);
+    set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
+  }
 }
 
 /**
@@ -718,9 +752,19 @@ export const createSessionAtom = atom(
  */
 export const forkSessionAtom = atom(
   null,
-  async (get, set, sourceSessionId: string, workspaceId?: string) => {
+  async (
+    get,
+    set,
+    sourceSessionId: string,
+    workspaceId?: string,
+    upToMessageId?: string
+  ) => {
     const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
-    const result = await window.zora.forkSession(sourceSessionId, targetWorkspaceId);
+    const result = await window.zora.forkSession({
+      sourceSessionId,
+      workspaceId: targetWorkspaceId,
+      upToMessageId,
+    });
 
     const currentWorkspaceSessions =
       get(workspaceSessionsAtom)[targetWorkspaceId] ?? [];
@@ -813,45 +857,70 @@ export const switchSessionAtom = atom(
 );
 
 /**
+ * 操作：归档会话
+ */
+export const archiveSessionAtom = atom(
+  null,
+  async (get, set, sessionId: string, workspaceId?: string) => {
+    const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
+    const archived = await window.zora.archiveSession(
+      sessionId,
+      targetWorkspaceId
+    );
+
+    if (!archived) {
+      throw new Error("Session not found.");
+    }
+
+    removeSessionFromClientState(get, set, sessionId, targetWorkspaceId);
+    emitArchivedSessionsChanged();
+    return archived;
+  }
+);
+
+/**
+ * 操作：恢复归档会话
+ */
+export const restoreSessionAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    params: { sessionId: string; workspaceId?: string }
+  ) => {
+    const targetWorkspaceId = params.workspaceId ?? get(currentWorkspaceIdAtom);
+    const restored = await window.zora.restoreSession(
+      params.sessionId,
+      targetWorkspaceId
+    );
+
+    if (!restored) {
+      return null;
+    }
+
+    set(workspaceSessionsAtom, (current) => ({
+      ...current,
+      [targetWorkspaceId]: upsertSession(
+        current[targetWorkspaceId] ?? [],
+        restored,
+        get(pinnedSessionIdsAtom)
+      ),
+    }));
+
+    return restored;
+  }
+);
+
+/**
  * 操作：删除会话
  */
 export const deleteSessionAtom = atom(
   null,
-  (get, set, sessionId: string, workspaceId?: string) => {
+  async (get, set, sessionId: string, workspaceId?: string) => {
     const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
 
-    set(workspaceSessionsAtom, (current) => ({
-      ...current,
-      [targetWorkspaceId]: removeSession(
-        current[targetWorkspaceId] ?? [],
-        sessionId
-      ),
-    }));
-    set(pinnedSessionIdsAtom, (current) => {
-      if (!current.has(sessionId)) {
-        return current;
-      }
-
-      const next = new Set(current);
-      next.delete(sessionId);
-      persistPinnedSessionIds(next);
-      return next;
-    });
-    set(clearSessionMessagesAtom, sessionId);
-    set(clearDraftStateForSessionAtom, sessionId);
-
-    if (
-      get(currentWorkspaceIdAtom) === targetWorkspaceId &&
-      get(currentSessionIdAtom) === sessionId
-    ) {
-      set(currentSessionIdAtom, null);
-      set(messagesAtom, []);
-      set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
-    }
-
-    window.zora.deleteSession(sessionId, targetWorkspaceId).catch((error) => {
-      console.error("[workspace] Failed to delete session from disk:", error);
-    });
+    await window.zora.deleteSession(sessionId, targetWorkspaceId);
+    removeSessionFromClientState(get, set, sessionId, targetWorkspaceId);
   }
 );
 

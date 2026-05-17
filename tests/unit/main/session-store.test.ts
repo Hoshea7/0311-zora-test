@@ -36,6 +36,20 @@ function getSessionFilesDir(homeDir: string, sessionId: string, workspaceId = "d
   );
 }
 
+function getAttachmentPath(
+  homeDir: string,
+  sessionId: string,
+  savedFileName: string,
+  workspaceId = "default"
+) {
+  return path.join(
+    getSessionsDir(homeDir, workspaceId),
+    "attachments",
+    sessionId,
+    savedFileName
+  );
+}
+
 async function loadSessionStoreModule(homeDir: string) {
   vi.resetModules();
 
@@ -165,6 +179,110 @@ describe("main session-store", () => {
     );
   });
 
+  it("preserves archived sessions when hydrating active legacy sessions", async () => {
+    const homeDir = createTempHome();
+    const sessionsDir = getSessionsDir(homeDir);
+    const indexPath = path.join(sessionsDir, "index.json");
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(
+      indexPath,
+      JSON.stringify([
+        {
+          id: "active-legacy",
+          title: "Active legacy",
+          createdAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+        {
+          id: "archived-legacy",
+          title: "Archived legacy",
+          createdAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          archivedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ]),
+      "utf8"
+    );
+
+    const { listSessions } = await loadSessionStoreModule(homeDir);
+
+    await expect(listSessions()).resolves.toEqual([
+      expect.objectContaining({
+        id: "active-legacy",
+        workingDirectory: homeDir,
+      }),
+    ]);
+
+    const persisted = JSON.parse(readFileSync(indexPath, "utf8")) as Array<{
+      id: string;
+      workingDirectory?: string;
+    }>;
+    expect(persisted.map((session) => session.id)).toEqual([
+      "active-legacy",
+      "archived-legacy",
+    ]);
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        id: "active-legacy",
+        workingDirectory: homeDir,
+      }),
+      expect.objectContaining({
+        id: "archived-legacy",
+        workingDirectory: homeDir,
+      }),
+    ]);
+  });
+
+  it("preserves sibling sessions when archiving a legacy session", async () => {
+    const homeDir = createTempHome();
+    const sessionsDir = getSessionsDir(homeDir);
+    const indexPath = path.join(sessionsDir, "index.json");
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(
+      indexPath,
+      JSON.stringify([
+        {
+          id: "archive-target",
+          title: "Archive target",
+          createdAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+        {
+          id: "sibling",
+          title: "Sibling",
+          createdAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        },
+      ]),
+      "utf8"
+    );
+
+    const { archiveSession } = await loadSessionStoreModule(homeDir);
+
+    await archiveSession("archive-target");
+
+    const persisted = JSON.parse(readFileSync(indexPath, "utf8")) as Array<{
+      id: string;
+      archivedAt?: string;
+      workingDirectory?: string;
+    }>;
+    expect(persisted.map((session) => session.id)).toEqual([
+      "archive-target",
+      "sibling",
+    ]);
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        id: "archive-target",
+        archivedAt: expect.any(String),
+        workingDirectory: homeDir,
+      }),
+      expect.objectContaining({
+        id: "sibling",
+        workingDirectory: homeDir,
+      }),
+    ]);
+  });
+
   it("appends message records as JSONL and restores merged assistant turns with tool results", async () => {
     const homeDir = createTempHome();
     const { appendMessageRecord, createSession, loadMessages } =
@@ -252,7 +370,7 @@ describe("main session-store", () => {
         role: "assistant",
         timestamp: 2,
         turn: {
-          id: "turn-1",
+          id: "turn-2",
           processSteps: [
             {
               type: "tool",
@@ -414,6 +532,190 @@ describe("main session-store", () => {
     expect(existsSync(messages[0].attachments?.[0]?.localPath ?? "")).toBe(true);
   });
 
+  it("creates message-level forked sessions with a truncated transcript", async () => {
+    const homeDir = createTempHome();
+    const { appendMessageRecord, createForkedSession, createSession, loadMessages } =
+      await loadSessionStoreModule(homeDir);
+
+    const source = await createSession("Source session");
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-1",
+        role: "user",
+        text: "Start here.",
+        timestamp: 1,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "assistant_turn",
+      turn: {
+        id: "assistant-1",
+        processSteps: [],
+        bodySegments: [{ id: "segment-1", text: "First part." }],
+        status: "done",
+        startedAt: 2,
+        completedAt: 2,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "assistant_turn",
+      turn: {
+        id: "assistant-2",
+        processSteps: [],
+        bodySegments: [{ id: "segment-2", text: "Fork from here." }],
+        status: "done",
+        startedAt: 3,
+        completedAt: 3,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-after-fork",
+        role: "user",
+        text: "Do not copy this.",
+        timestamp: 4,
+      },
+    });
+
+    const fork = await createForkedSession({
+      sourceSessionId: source.id,
+      sourceSdkSessionId: "sdk-source",
+      sdkSessionId: "sdk-fork",
+      upToMessageId: "assistant-2",
+    });
+
+    expect(fork.branch).toEqual(
+      expect.objectContaining({
+        forkMode: "message",
+        forkedFromMessageId: "assistant-2",
+        inheritedMessageCount: 2,
+      })
+    );
+
+    await expect(loadMessages(fork.id)).resolves.toEqual([
+      {
+        id: "user-1",
+        role: "user",
+        text: "Start here.",
+        timestamp: 1,
+      },
+      expect.objectContaining({
+        id: "assistant-1",
+        role: "assistant",
+        turn: expect.objectContaining({
+          id: "assistant-2",
+          bodySegments: [
+            { id: "segment-1", text: "First part." },
+            { id: "segment-2", text: "Fork from here." },
+          ],
+        }),
+      }),
+    ]);
+  });
+
+  it("copies only inherited attachments for message-level forks", async () => {
+    const homeDir = createTempHome();
+    const {
+      appendMessageRecord,
+      createForkedSession,
+      createSession,
+      loadMessages,
+      saveAttachments,
+    } = await loadSessionStoreModule(homeDir);
+
+    const source = await createSession("Source session");
+    const inheritedAttachments = await saveAttachments(source.id, [
+      {
+        id: "before-attachment",
+        name: "before.txt",
+        category: "text",
+        mimeType: "text/plain",
+        size: 6,
+        localPath: "",
+        base64Data: Buffer.from("before").toString("base64"),
+      },
+    ]);
+    const skippedAttachments = await saveAttachments(source.id, [
+      {
+        id: "after-attachment",
+        name: "after.txt",
+        category: "text",
+        mimeType: "text/plain",
+        size: 5,
+        localPath: "",
+        base64Data: Buffer.from("after").toString("base64"),
+      },
+    ]);
+
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-before",
+        role: "user",
+        text: "Use this file.",
+        timestamp: 1,
+        attachments: inheritedAttachments,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "assistant_turn",
+      turn: {
+        id: "assistant-fork-point",
+        processSteps: [],
+        bodySegments: [{ id: "segment-1", text: "Fork here." }],
+        status: "done",
+        startedAt: 2,
+        completedAt: 2,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-after",
+        role: "user",
+        text: "Do not copy this file.",
+        timestamp: 3,
+        attachments: skippedAttachments,
+      },
+    });
+
+    const fork = await createForkedSession({
+      sourceSessionId: source.id,
+      sourceSdkSessionId: "sdk-source",
+      sdkSessionId: "sdk-fork",
+      upToMessageId: "assistant-fork-point",
+    });
+
+    const messages = await loadMessages(fork.id);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].attachments?.[0]).toEqual(
+      expect.objectContaining({
+        id: "before-attachment",
+        localPath: expect.stringContaining(fork.id),
+      })
+    );
+    expect(
+      existsSync(
+        getAttachmentPath(
+          homeDir,
+          fork.id,
+          inheritedAttachments[0]?.savedFileName ?? ""
+        )
+      )
+    ).toBe(true);
+    expect(
+      existsSync(
+        getAttachmentPath(
+          homeDir,
+          fork.id,
+          skippedAttachments[0]?.savedFileName ?? ""
+        )
+      )
+    ).toBe(false);
+  });
+
   it("rejects fork creation when the source session is missing", async () => {
     const { createForkedSession } = await loadSessionStoreModule(createTempHome());
 
@@ -424,6 +726,61 @@ describe("main session-store", () => {
         sdkSessionId: "sdk-fork",
       })
     ).rejects.toThrow("Source session missing not found.");
+  });
+
+  it("archives and restores sessions without deleting artifacts", async () => {
+    const homeDir = createTempHome();
+    vi.useFakeTimers();
+    const {
+      archiveSession,
+      createSession,
+      listArchivedSessions,
+      listSessions,
+      restoreSession,
+    } = await loadSessionStoreModule(homeDir);
+
+    vi.setSystemTime(new Date("2026-05-17T10:00:00+08:00"));
+    const session = await createSession("Archive me");
+    const sessionFilesDir = getSessionFilesDir(homeDir, session.id);
+
+    vi.setSystemTime(new Date("2026-05-17T10:05:00+08:00"));
+    const archived = await archiveSession(session.id);
+
+    expect(archived).toEqual(
+      expect.objectContaining({
+        id: session.id,
+        archivedAt: "2026-05-17T02:05:00.000Z",
+      })
+    );
+    await expect(listSessions()).resolves.toEqual([]);
+    await expect(listArchivedSessions()).resolves.toEqual([
+      expect.objectContaining({
+        workspaceId: "default",
+        workspaceName: "默认工作区",
+        session: expect.objectContaining({
+          id: session.id,
+          title: "Archive me",
+          archivedAt: "2026-05-17T02:05:00.000Z",
+        }),
+      }),
+    ]);
+    expect(existsSync(sessionFilesDir)).toBe(true);
+
+    vi.setSystemTime(new Date("2026-05-17T10:10:00+08:00"));
+    const restored = await restoreSession(session.id);
+
+    expect(restored).toEqual(
+      expect.objectContaining({
+        id: session.id,
+        updatedAt: "2026-05-17T02:10:00.000Z",
+      })
+    );
+    expect(restored).not.toHaveProperty("archivedAt");
+    await expect(listSessions()).resolves.toEqual([
+      expect.objectContaining({ id: session.id, title: "Archive me" }),
+    ]);
+    await expect(listArchivedSessions()).resolves.toEqual([]);
+    expect(existsSync(sessionFilesDir)).toBe(true);
   });
 
   it("deletes session metadata and transcript files cleanly", async () => {

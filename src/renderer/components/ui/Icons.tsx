@@ -1,0 +1,65 @@
+export function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.9}
+        d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.7.55-1.25 1.25-1.25h2c.7 0 1.25.55 1.25 1.25v1.75m2.5 0l-.7 10.2a2 2 0 01-2 1.86h-4.1a2 2 0 01-2-1.86l-.7-10.2"
+      />
+    </svg>
+  );
+}
+
+export function ArchiveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M5.25 8.25h13.5m-12 0V18a1.75 1.75 0 001.75 1.75h7A1.75 1.75 0 0017.25 18V8.25m-10.5 0L7.7 4.75h8.6l.95 3.5M10 12h4"
+      />
+    </svg>
+  );
+}
+
+export function ForkIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.25}
+        d="M12 16.25v-2.1c0-1.25-.55-2.25-1.45-3.15L8.45 8.9"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.25}
+        d="M13.45 12c.75-1.12 1.45-2 2.1-2.95"
+      />
+      <circle cx={12} cy={18.9} r={1.7} fill="none" strokeWidth={1.7} />
+      <circle cx={6.75} cy={7.2} r={1.7} fill="none" strokeWidth={1.7} />
+      <circle cx={17.25} cy={7.2} r={1.7} fill="none" strokeWidth={1.7} />
+    </svg>
+  );
+}

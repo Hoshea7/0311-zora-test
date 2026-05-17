@@ -1,5 +1,6 @@
 import { useAtom, useSetAtom } from "jotai";
 import { AboutSettings } from "./AboutSettings";
+import { ArchivedSessionsSettings } from "./ArchivedSessionsSettings";
 import { FeishuSettings } from "./FeishuSettings";
 import { MemorySettings } from "./MemorySettings";
 import { McpSettings } from "./McpSettings";
@@ -56,6 +57,20 @@ const tabs = [
     icon: (
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+      </svg>
+    ),
+  },
+  {
+    id: "archived",
+    label: "已归档会话",
+    icon: (
+      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M5 8h14M6.5 8v10A1.5 1.5 0 008 19.5h8a1.5 1.5 0 001.5-1.5V8M7.5 8l.8-3.5h7.4L16.5 8M10 12h4"
+        />
       </svg>
     ),
   },
@@ -126,7 +141,11 @@ export function SettingsPanel() {
           <div
             className={cn(
               "mx-auto w-full px-6 pb-10 pt-8 sm:px-8 lg:px-10",
-              settingsTab === "mcp" ? "max-w-[1100px]" : "max-w-[760px]"
+              settingsTab === "mcp"
+                ? "max-w-[1100px]"
+                : settingsTab === "archived"
+                  ? "max-w-[860px]"
+                  : "max-w-[760px]"
             )}
           >
             {settingsTab === "provider" ? <ProviderSettings /> : null}
@@ -134,6 +153,7 @@ export function SettingsPanel() {
             {settingsTab === "skills" ? <SkillManagerPanel /> : null}
             {settingsTab === "memory" ? <MemorySettings /> : null}
             {settingsTab === "mcp" ? <McpSettings /> : null}
+            {settingsTab === "archived" ? <ArchivedSessionsSettings /> : null}
             {settingsTab === "about" ? <AboutSettings /> : null}
           </div>
         </main>

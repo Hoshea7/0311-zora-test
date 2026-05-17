@@ -739,6 +739,11 @@ export async function runAgentWithProfile(
         break;
       }
     }
+
+    if (missingSdkSessionError) {
+      throw missingSdkSessionError;
+    }
+
     console.log(`${logPrefix} Query finished`);
     if (!run.stopping && profile.name !== "memory") {
       memoryAgent.onConversationEnd(sessionId, workspaceId).catch((err) => {

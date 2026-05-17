@@ -2,10 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AgentRunInfo,
   AgentStreamEvent,
+  ArchivedSessionEntry,
   AskUserResponse,
   ConversationMessage,
   FileAttachment,
   FileTreeEntry,
+  ForkSessionInput,
   PermissionMode,
   PermissionResponse,
   SessionForkResult,
@@ -244,17 +246,18 @@ const zoraApi: ZoraApi = {
     >,
   listSessions: (workspaceId?: string) =>
     ipcRenderer.invoke("session:list", workspaceId) as Promise<SessionMeta[]>,
+  listArchivedSessions: () =>
+    ipcRenderer.invoke("session:list-archived") as Promise<ArchivedSessionEntry[]>,
   loadMessages: (sessionId: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ConversationMessage[]>,
   createSession: (title: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:create", title, workspaceId) as Promise<SessionMeta>,
-  forkSession: (sourceSessionId: string, workspaceId?: string, title?: string) =>
-    ipcRenderer.invoke(
-      "session:fork",
-      sourceSessionId,
-      workspaceId,
-      title
-    ) as Promise<SessionForkResult>,
+  forkSession: (input: ForkSessionInput) =>
+    ipcRenderer.invoke("session:fork", input) as Promise<SessionForkResult>,
+  archiveSession: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:archive", sessionId, workspaceId) as Promise<SessionMeta | null>,
+  restoreSession: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke("session:restore", sessionId, workspaceId) as Promise<SessionMeta | null>,
   deleteSession: (sessionId: string, workspaceId?: string) =>
     ipcRenderer.invoke("session:delete", sessionId, workspaceId) as Promise<void>,
   renameSession: (sessionId: string, title: string, workspaceId?: string) =>

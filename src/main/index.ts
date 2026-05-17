@@ -69,13 +69,16 @@ import { McpManager, setSharedMcpManager } from "./mcp-manager";
 import { listDirectory, startFileWatcher, stopFileWatcher } from "./file-tree";
 import {
   appendMessageRecord,
+  archiveSession,
   createSession,
   deleteSession,
   getSessionMeta,
+  listArchivedSessions,
   listSessions,
   loadMessages,
   migrateSessionsIfNeeded,
   renameSession,
+  restoreSession,
   updateSessionMeta,
 } from "./session-store";
 import {
@@ -1423,6 +1426,10 @@ app.whenReady().then(async () => {
     return listSessions(resolveWorkspaceId(workspaceId));
   });
 
+  ipcMain.handle("session:list-archived", async () => {
+    return listArchivedSessions();
+  });
+
   ipcMain.handle("session:create", async (_event, title: string, workspaceId: unknown) => {
     if (typeof title !== "string" || title.trim().length === 0) {
       throw new Error("Session title is required.");
@@ -1433,18 +1440,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     "session:fork",
-    async (
-      _event,
-      sourceSessionId: unknown,
-      workspaceId: unknown,
-      title: unknown
-    ) => {
-      if (typeof sourceSessionId !== "string" || sourceSessionId.trim().length === 0) {
-        throw new Error("A valid sourceSessionId is required.");
+    async (_event, input: unknown) => {
+      if (!isRecord(input)) {
+        throw new Error("Fork input is required.");
       }
 
-      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
-      const trimmedSessionId = sourceSessionId.trim();
+      const targetWorkspaceId = resolveWorkspaceId(input.workspaceId);
+      const trimmedSessionId = assertRequiredString(
+        input.sourceSessionId,
+        "sourceSessionId"
+      ).trim();
 
       if (isAgentRunningForSession(trimmedSessionId)) {
         throw new Error("当前会话正在运行，结束后再 Fork。");
@@ -1453,7 +1458,11 @@ app.whenReady().then(async () => {
       const result = await forkSessionFromSource({
         sourceSessionId: trimmedSessionId,
         workspaceId: targetWorkspaceId,
-        title: typeof title === "string" ? title : undefined,
+        title: typeof input.title === "string" ? input.title : undefined,
+        upToMessageId:
+          typeof input.upToMessageId === "string"
+            ? input.upToMessageId
+            : undefined,
       });
 
       console.log(
@@ -1464,13 +1473,46 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle("session:delete", async (_event, sessionId: unknown, workspaceId: unknown) => {
-    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
-      throw new Error("A valid sessionId is required.");
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    if (isAgentRunningForSession(targetSessionId)) {
+      throw new Error("当前会话正在运行，结束后再删除。");
     }
 
-    await deleteSession(sessionId, resolveWorkspaceId(workspaceId));
-    clearSessionWhitelist(sessionId);
-    console.log(`[index] Session deleted: ${sessionId}`);
+    await deleteSession(targetSessionId, resolveWorkspaceId(workspaceId));
+    clearSessionWhitelist(targetSessionId);
+    console.log(`[index] Session deleted: ${targetSessionId}`);
+  });
+
+  ipcMain.handle("session:archive", async (_event, sessionId: unknown, workspaceId: unknown) => {
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    if (isAgentRunningForSession(targetSessionId)) {
+      throw new Error("当前会话正在运行，结束后再归档。");
+    }
+
+    const archived = await archiveSession(
+      targetSessionId,
+      resolveWorkspaceId(workspaceId)
+    );
+
+    if (!archived) {
+      throw new Error(`Session ${targetSessionId} not found.`);
+    }
+
+    console.log(`[index] Session archived: ${targetSessionId}`);
+    return archived;
+  });
+
+  ipcMain.handle("session:restore", async (_event, sessionId: unknown, workspaceId: unknown) => {
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    const restored = await restoreSession(
+      targetSessionId,
+      resolveWorkspaceId(workspaceId)
+    );
+    console.log(`[index] Session restored: ${targetSessionId}`);
+    return restored;
   });
 
   ipcMain.handle(

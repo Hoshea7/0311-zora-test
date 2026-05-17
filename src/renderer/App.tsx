@@ -605,7 +605,7 @@ export default function App() {
 
       if (streamEvent.type === "assistant") {
         if (isRecord(streamEvent.message)) {
-          applyAssistantSnapshot(targetSessionId, streamEvent.message);
+          applyAssistantSnapshot(targetSessionId, streamEvent);
           if (isCurrentSessionEvent) {
             bumpContentActivity();
           }

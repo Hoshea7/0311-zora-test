@@ -74,5 +74,5 @@ export const isSettingsOpenAtom = atom(
  * 设置面板当前 Tab
  */
 export const settingsTabAtom = atom<
-  "provider" | "feishu" | "skills" | "memory" | "mcp" | "about"
+  "provider" | "feishu" | "skills" | "memory" | "mcp" | "archived" | "about"
 >("provider");

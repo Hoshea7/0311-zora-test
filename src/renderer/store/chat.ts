@@ -539,12 +539,32 @@ function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResu
       : turn;
 }
 
+function getAssistantSnapshotMessage(sdkMessage: unknown): Record<string, unknown> | null {
+  if (!isRecord(sdkMessage)) {
+    return null;
+  }
+
+  if (sdkMessage.type === "assistant" && isRecord(sdkMessage.message)) {
+    return sdkMessage.message;
+  }
+
+  return sdkMessage;
+}
+
+function getAssistantSnapshotUuid(sdkMessage: unknown): string | undefined {
+  return isRecord(sdkMessage) && typeof sdkMessage.uuid === "string"
+    ? sdkMessage.uuid
+    : undefined;
+}
+
 function getAssistantSnapshotBlocks(sdkMessage: unknown): Record<string, unknown>[] {
-  if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
+  const message = getAssistantSnapshotMessage(sdkMessage);
+
+  if (!message || !Array.isArray(message.content)) {
     return [];
   }
 
-  return sdkMessage.content.filter(isRecord);
+  return message.content.filter(isRecord);
 }
 
 function getSnapshotText(blocks: Record<string, unknown>[]): string {
@@ -703,10 +723,18 @@ export const applyAssistantSnapshotAtom = atom<null, [string, unknown], void>(
     }
 
     const timestamp = Date.now();
+    const messageUuid = getAssistantSnapshotUuid(sdkMessage);
     set(setSessionMessagesAtom, sessionId, (current) =>
-      updateOrCreateActiveTurn(current, (turn) =>
-        mergeAssistantSnapshotIntoTurn(turn, blocks, timestamp)
-      )
+      updateOrCreateActiveTurn(current, (turn) => {
+        const nextTurn = mergeAssistantSnapshotIntoTurn(turn, blocks, timestamp);
+
+        return messageUuid && nextTurn.id !== messageUuid
+          ? {
+              ...nextTurn,
+              id: messageUuid,
+            }
+          : nextTurn;
+      })
     );
   }
 );
