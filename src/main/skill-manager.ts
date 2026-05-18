@@ -10,14 +10,15 @@ import {
   unlink,
   writeFile
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { app } from "electron";
 import type { SkillMeta } from "../shared/types/skill";
+import { logSystemEvent } from "./system-log";
+import { ZORA_DIR } from "./utils/fs";
 
 export type { SkillMeta };
 
-export const ZORA_HOME = join(homedir(), ".zora");
+export const ZORA_HOME = ZORA_DIR;
 export const GLOBAL_SKILLS_DIR = join(ZORA_HOME, "skills");
 
 const PLUGIN_MANIFEST_DIR = join(ZORA_HOME, ".claude-plugin");
@@ -160,7 +161,14 @@ export function getBundledSkillsDir(): string | null {
     return devPath;
   }
 
-  console.warn("[skill-manager] Could not locate bundled skills directory");
+  logSystemEvent(
+    "skill",
+    "manager",
+    "bundled:missing",
+    "未找到内置技能目录",
+    undefined,
+    { level: "warn" }
+  );
   return null;
 }
 
@@ -280,12 +288,24 @@ export async function seedBundledSkills() {
 
     const targetDir = join(GLOBAL_SKILLS_DIR, skillName);
     if (await pathExists(targetDir)) {
-      console.log(`[skill-manager] Skill already exists, skipping: ${skillName}`);
+      logSystemEvent(
+        "skill",
+        "manager",
+        "seed:skip",
+        "技能已存在，跳过初始化",
+        { skill: skillName }
+      );
       continue;
     }
 
     await cp(sourceDir, targetDir, { recursive: true });
-    console.log(`[skill-manager] Seeded bundled skill: ${skillName}`);
+    logSystemEvent(
+      "skill",
+      "manager",
+      "seed",
+      "已初始化内置技能",
+      { skill: skillName }
+    );
   }
 
   await ensurePluginManifest();

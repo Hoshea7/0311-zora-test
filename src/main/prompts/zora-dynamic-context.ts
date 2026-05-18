@@ -3,6 +3,7 @@ import {
   loadRecentLogs,
   migrateLegacyMemoryIfNeeded,
 } from "../memory-store";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 
 function padNumber(value: number) {
   return value.toString().padStart(2, "0");
@@ -66,7 +67,14 @@ export async function buildZoraDynamicContext(
   try {
     await migrateLegacyMemoryIfNeeded();
   } catch (error) {
-    console.error("[zora-dynamic-context] Legacy memory migration failed:", error);
+    logSystemEvent(
+      "agent",
+      "dynamic-context",
+      "memory:migrate:error",
+      "构建动态上下文时迁移旧版记忆失败",
+      { error: getErrorMessage(error) },
+      { level: "error" }
+    );
   }
 
   const [userContent, memoryContent, recentLogs] = await Promise.all([

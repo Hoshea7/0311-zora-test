@@ -8,6 +8,7 @@ import type {
 import { resolveDefaultModelTarget } from "./default-model-settings";
 import { memoryAgent } from "./memory-agent";
 import { runProductivitySession } from "./productivity-runner";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 import {
   appendMessageRecord,
   createSession,
@@ -62,13 +63,23 @@ export async function runPromptInSession({
 
   if (!session.providerLocked) {
     const defaultTarget = await resolveDefaultModelTarget();
-    if (defaultTarget) {
-      providerId = defaultTarget.provider.id;
-      selectedModelId = defaultTarget.selectedModelId;
-      sessionUpdates.providerId = defaultTarget.provider.id;
-      sessionUpdates.providerLocked = true;
-      sessionUpdates.selectedModelId = defaultTarget.selectedModelId;
+    if (!defaultTarget) {
+      logSystemEvent(
+        "app",
+        "session-runner",
+        "model:missing",
+        "会话启动失败：未配置可用模型",
+        { sessionId, workspaceId, source },
+        { level: "warn" }
+      );
+      throw new Error("当前未配置可用模型，请先在设置里完成模型配置。");
     }
+
+    providerId = defaultTarget.provider.id;
+    selectedModelId = defaultTarget.selectedModelId;
+    sessionUpdates.providerId = defaultTarget.provider.id;
+    sessionUpdates.providerLocked = true;
+    sessionUpdates.selectedModelId = defaultTarget.selectedModelId;
   }
 
   await updateSessionMeta(sessionId, sessionUpdates, workspaceId);
@@ -128,7 +139,14 @@ export async function runPromptInSession({
   }
 
   void runPromise.catch((error) => {
-    console.error(`[session-runner] Agent run failed for session ${sessionId}:`, error);
+    logSystemEvent(
+      "app",
+      "session-runner",
+      "agent:error",
+      "会话 Agent 运行失败",
+      { sessionId, workspaceId, error: getErrorMessage(error) },
+      { level: "error" }
+    );
   });
 }
 

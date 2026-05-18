@@ -6,6 +6,7 @@ import type {
   PermissionRequest,
 } from "../shared/zora";
 import { isSafeBuiltinMcpToolName } from "../shared/types/mcp";
+import { logAgentEvent, truncateLogText } from "./agent-loop-log";
 import { ZORA_SCHEDULE_MANAGE_FULL_TOOL_NAME } from "./builtin-mcp/schedule";
 
 type PermissionResult =
@@ -105,6 +106,24 @@ function summarizeToolInput(input: Record<string, unknown>) {
   };
 }
 
+function summarizeToolForLog(
+  toolName: string,
+  toolUseID: string,
+  input: Record<string, unknown>
+) {
+  return {
+    tool: toolName,
+    toolUseId: toolUseID,
+    command: typeof input.command === "string" ? truncateLogText(input.command, 240) : undefined,
+    file:
+      typeof input.file_path === "string"
+        ? input.file_path
+        : typeof input.path === "string"
+          ? input.path
+          : undefined,
+  };
+}
+
 function extractBaseCommand(input: Record<string, unknown>): string | null {
   if (typeof input.command !== "string") {
     return null;
@@ -161,13 +180,11 @@ function isWhitelisted(
 
   const command = typeof input.command === "string" ? input.command : "";
   if (isDangerousCommand(command)) {
-    console.warn(
-      "[hitl] Refusing whitelisted Bash auto-allow for dangerous command.",
-      {
-        sessionId,
-        command: command.slice(0, 200),
-      }
-    );
+    logAgentEvent("runtime", "hitl:deny", "工具权限被拒绝", {
+      tool: toolName,
+      reason: "dangerous_whitelisted_bash",
+      command: truncateLogText(command, 200),
+    });
     return false;
   }
 
@@ -185,42 +202,70 @@ function addToWhitelist(
   if (toolName === "Bash") {
     const command = typeof input.command === "string" ? input.command : "";
     if (isDangerousCommand(command)) {
-      console.warn("[hitl] Skipping dangerous Bash command whitelist entry.", {
-        sessionId,
-        command: command.slice(0, 200),
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:whitelist",
+        "权限白名单跳过",
+        {
+          tool: toolName,
+          reason: "dangerous_bash",
+          command: truncateLogText(command, 200),
+        },
+        { verbose: true }
+      );
       return;
     }
 
     const baseCommand = extractBaseCommand(input);
     if (!baseCommand) {
-      console.warn(
-        "[hitl] Skipping Bash whitelist entry without a base command.",
+      logAgentEvent(
+        "runtime",
+        "hitl:whitelist",
+        "权限白名单跳过",
         {
-          sessionId,
-        }
+          tool: toolName,
+          reason: "missing_base_command",
+        },
+        { verbose: true }
       );
       return;
     }
 
     whitelist.allowedBashCommands.add(baseCommand);
-    console.log("[hitl] Added Bash command to session whitelist.", {
-      sessionId,
-      baseCommand,
-    });
+    logAgentEvent(
+      "runtime",
+      "hitl:whitelist",
+      "权限白名单已更新",
+      {
+        tool: toolName,
+        baseCommand,
+      },
+      { verbose: true }
+    );
     return;
   }
 
   whitelist.allowedTools.add(toolName);
-  console.log("[hitl] Added tool to session whitelist.", {
-    sessionId,
-    toolName,
-  });
+  logAgentEvent(
+    "runtime",
+    "hitl:whitelist",
+    "权限白名单已更新",
+    {
+      tool: toolName,
+    },
+    { verbose: true }
+  );
 }
 
 export function clearSessionWhitelist(sessionId: string): void {
   if (sessionWhitelists.delete(sessionId)) {
-    console.log("[hitl] Cleared session whitelist.", { sessionId });
+    logAgentEvent(
+      "runtime",
+      "hitl:whitelist",
+      "权限白名单已清理",
+      undefined,
+      { verbose: true }
+    );
   }
 }
 
@@ -336,19 +381,26 @@ export function createCanUseTool(
     input: Record<string, unknown>,
     options: CanUseToolOptions
   ): Promise<PermissionResult> => {
+    const withSession = (fields: Record<string, unknown> = {}) => ({
+      session: sessionId,
+      ...fields,
+    });
     const allow = (): PermissionResult => ({
       behavior: "allow",
       updatedInput: input,
     });
 
-    console.log("[hitl] canUseTool invoked.", {
-      toolName,
-      permissionMode: currentPermissionMode,
-      toolUseID: options.toolUseID,
-      agentID: options.agentID ?? null,
-      sessionId,
-      input: summarizeToolInput(input),
-    });
+    logAgentEvent(
+      "runtime",
+      "hitl:check",
+      "检查工具权限",
+      withSession({
+        ...summarizeToolForLog(toolName, options.toolUseID, input),
+        permissionMode: currentPermissionMode,
+        agentId: options.agentID,
+      }),
+      { verbose: true }
+    );
 
     if (toolName === "AskUserQuestion") {
       const requestId = crypto.randomUUID();
@@ -357,18 +409,23 @@ export function createCanUseTool(
         questions: parseAskUserQuestions(input),
         toolInput: input,
       };
-      console.log("[hitl] Emitting ask_user_request.", {
+      logAgentEvent("runtime", "hitl:ask", "等待用户回答", withSession({
         requestId,
-        toolName,
+        tool: toolName,
         questionCount: request.questions.length,
-      });
+      }));
       onEvent({ type: "ask_user_request", request });
 
       return new Promise<PermissionResult>((resolve) => {
         pendingAskUsers.set(requestId, { resolve, request });
 
         const handleAbort = () => {
-          console.warn("[hitl] AskUser request aborted.", { requestId, toolName });
+          logAgentEvent(
+            "runtime",
+            "hitl:abort",
+            "用户提问中止",
+            withSession({ requestId, tool: toolName })
+          );
           if (pendingAskUsers.has(requestId)) {
             pendingAskUsers.delete(requestId);
           }
@@ -385,18 +442,17 @@ export function createCanUseTool(
     }
 
     if (options.signal.aborted) {
-      console.warn("[hitl] Tool permission check aborted before evaluation.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent("runtime", "hitl:abort", "权限检查中止", withSession({
+        ...summarizeToolForLog(toolName, options.toolUseID, input),
+      }));
       return { behavior: "deny", message: "操作已中止" };
     }
 
     if (isBlockedScheduleFallbackTool(toolName)) {
-      console.warn("[hitl] Denying non-Zora schedule fallback tool.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent("runtime", "hitl:deny", "工具权限被拒绝", withSession({
+        ...summarizeToolForLog(toolName, options.toolUseID, input),
+        reason: "blocked_schedule_fallback_tool",
+      }));
       return {
         behavior: "deny",
         message:
@@ -405,35 +461,58 @@ export function createCanUseTool(
     }
 
     if (options.agentID && toolName !== ZORA_SCHEDULE_MANAGE_FULL_TOOL_NAME) {
-      console.log("[hitl] Auto-allow because tool call belongs to agent.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:auto",
+        "工具权限自动允许",
+        withSession({
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+          reason: "subagent_tool_call",
+        }),
+        { verbose: true }
+      );
       return allow();
     }
 
     if (isAutoAllowedTool(toolName, input)) {
-      console.log("[hitl] Auto-allow safe tool.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:auto",
+        "工具权限自动允许",
+        withSession({
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+          reason: "readonly",
+        }),
+        { verbose: true }
+      );
       return allow();
     }
 
     if (isWhitelisted(sessionId, toolName, input)) {
-      console.log("[hitl] Auto-allow whitelisted tool.", {
-        toolName,
-        toolUseID: options.toolUseID,
-        sessionId,
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:auto",
+        "工具权限自动允许",
+        withSession({
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+          reason: "session_whitelist",
+        }),
+        { verbose: true }
+      );
       return allow();
     }
 
     if (currentPermissionMode === "yolo") {
-      console.log("[hitl] Auto-allow because permission mode is yolo.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:auto",
+        "工具权限自动允许",
+        withSession({
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+          reason: "permissionMode:yolo",
+        }),
+        { verbose: true }
+      );
       return allow();
     }
 
@@ -441,10 +520,16 @@ export function createCanUseTool(
       currentPermissionMode === "smart" &&
       SMART_AUTO_ALLOW_TOOLS.has(toolName)
     ) {
-      console.log("[hitl] Auto-allow because permission mode is smart.", {
-        toolName,
-        toolUseID: options.toolUseID,
-      });
+      logAgentEvent(
+        "runtime",
+        "hitl:auto",
+        "工具权限自动允许",
+        withSession({
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+          reason: "permissionMode:smart",
+        }),
+        { verbose: true }
+      );
       return allow();
     }
 
@@ -460,24 +545,21 @@ export function createCanUseTool(
       description: buildDescription(toolName, input),
       command,
     };
-    console.log("[hitl] Emitting permission_request.", {
+    logAgentEvent("runtime", "hitl:request", "等待用户授权", withSession({
       requestId,
-      toolName,
-      toolUseID: options.toolUseID,
+      ...summarizeToolForLog(toolName, options.toolUseID, input),
       description: request.description,
-      input: summarizeToolInput(input),
-    });
+    }));
     onEvent({ type: "permission_request", request });
 
     return new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(requestId, { resolve, request, sessionId });
 
       const handleAbort = () => {
-        console.warn("[hitl] Permission request aborted.", {
+        logAgentEvent("runtime", "hitl:abort", "权限请求中止", withSession({
           requestId,
-          toolName,
-          toolUseID: options.toolUseID,
-        });
+          ...summarizeToolForLog(toolName, options.toolUseID, input),
+        }));
         if (pendingPermissions.has(requestId)) {
           pendingPermissions.delete(requestId);
         }
@@ -502,16 +584,16 @@ export function respondToPermission(
 ) {
   const pending = pendingPermissions.get(requestId);
   if (!pending) {
-    console.warn("[hitl] Tried to resolve unknown permission request.", {
+    logAgentEvent("runtime", "hitl:unknown", "收到未知权限响应", {
       requestId,
       behavior,
     });
     return;
   }
 
-  console.log("[hitl] Resolving permission request.", {
+  logAgentEvent("runtime", "hitl:response", "用户授权已响应", {
     requestId,
-    toolName: pending.request.toolName,
+    tool: pending.request.toolName,
     behavior,
     alwaysAllow,
     hasUserMessage: Boolean(userMessage?.trim()),
@@ -544,13 +626,13 @@ export function respondToAskUser(
 ) {
   const pending = pendingAskUsers.get(requestId);
   if (!pending) {
-    console.warn("[hitl] Tried to resolve unknown ask_user request.", {
+    logAgentEvent("runtime", "hitl:unknown", "收到未知用户回答", {
       requestId,
     });
     return;
   }
 
-  console.log("[hitl] Resolving ask_user request.", {
+  logAgentEvent("runtime", "hitl:answer", "用户已回答", {
     requestId,
     answerKeys: Object.keys(answers),
   });
@@ -564,7 +646,7 @@ export function respondToAskUser(
 
 export function clearAllPending(): void {
   if (pendingPermissions.size > 0 || pendingAskUsers.size > 0) {
-    console.log("[hitl] Clearing pending HITL state.", {
+    logAgentEvent("runtime", "hitl:cleanup", "清理未完成 HITL 请求", {
       pendingPermissions: pendingPermissions.size,
       pendingAskUsers: pendingAskUsers.size,
     });

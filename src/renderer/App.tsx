@@ -200,7 +200,9 @@ export default function App() {
   const clearHitlForSession = useSetAtom(clearHitlForSessionAtom);
 
   useEffect(() => {
-    void loadProviders();
+    void loadProviders().catch((error) => {
+      console.warn("[app] Failed to load providers.", error);
+    });
   }, [loadProviders]);
 
   useEffect(() => {

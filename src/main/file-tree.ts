@@ -4,6 +4,7 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import type { BrowserWindow } from "electron";
 import type { FileTreeEntry } from "../shared/zora";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 
 const EMPTY_ON_ERROR_CODES = new Set(["ENOENT", "EACCES", "EPERM"]);
 const FILE_TREE_CHANGE_CHANNEL = "filetree:changed";
@@ -117,17 +118,36 @@ export function startFileWatcher(workspacePath: string, win: BrowserWindow): voi
     });
 
     currentWatcher.on("error", (error) => {
-      console.error("[filetree] File watcher error:", error);
+      logSystemEvent(
+        "app",
+        "filetree",
+        "watch:error",
+        "文件监听异常，已停止监听",
+        { path: resolvedWorkspacePath, error: getErrorMessage(error) },
+        { level: "error" }
+      );
       stopFileWatcher();
     });
   } catch (error) {
     if (getErrorCode(error) === "ENOENT") {
-      console.warn(
-        `[filetree] Workspace path does not exist, skipping watcher: ${resolvedWorkspacePath}`
+      logSystemEvent(
+        "app",
+        "filetree",
+        "watch:skip",
+        "工作区路径不存在，跳过文件监听",
+        { path: resolvedWorkspacePath },
+        { level: "warn" }
       );
       return;
     }
 
-    console.warn("[filetree] Failed to start file watcher:", error);
+    logSystemEvent(
+      "app",
+      "filetree",
+      "watch:start:error",
+      "启动文件监听失败",
+      { path: resolvedWorkspacePath, error: getErrorMessage(error) },
+      { level: "warn" }
+    );
   }
 }

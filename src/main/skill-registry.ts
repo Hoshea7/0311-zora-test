@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SkillRegistryData, SkillRegistryEntry } from "../shared/types/skill";
 import { ZORA_HOME, hasErrorCode } from "./skill-manager";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 
 const REGISTRY_PATH = join(ZORA_HOME, "skill-registry.json");
 
@@ -11,7 +12,14 @@ export async function readRegistry(): Promise<SkillRegistryData> {
     return JSON.parse(content);
   } catch (error) {
     if (!hasErrorCode(error, "ENOENT")) {
-      console.warn("[skill-registry] Failed to read registry, falling back to empty state:", error);
+      logSystemEvent(
+        "skill",
+        "registry",
+        "read:error",
+        "读取技能注册表失败，使用空状态",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
     return { version: 1, skills: {} };
   }

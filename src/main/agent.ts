@@ -10,6 +10,17 @@ import type {
   AgentStreamEvent,
   FileAttachment,
 } from "../shared/zora";
+import {
+  formatAgentName,
+  formatCostUsd,
+  formatDurationMs,
+  isAgentLoopActiveFor,
+  isVerboseAgentLoopLog,
+  logAgentEvent,
+  logAgentLoopEnd,
+  logAgentLoopStart,
+  truncateLogText,
+} from "./agent-loop-log";
 import { buildMultimodalPrompt } from "./attachment-handler";
 import { clearAllPending } from "./hitl";
 import { memoryAgent } from "./memory-agent";
@@ -182,18 +193,6 @@ function stringifyContent(value: unknown): string {
   }
 }
 
-function truncateForLog(value: string, maxChars = 1600): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-
-  return `${value.slice(0, maxChars)}...(${value.length} chars)`;
-}
-
-function getProfileLogPrefix(profileName: QueryProfile["name"]): string {
-  return `[${profileName}]`;
-}
-
 function summarizeSdkModelEnv(env: Record<string, string> | undefined): Record<string, unknown> | null {
   if (!env) {
     return null;
@@ -209,6 +208,193 @@ function summarizeSdkModelEnv(env: Record<string, string> | undefined): Record<s
     disableExperimentalBetas: env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS === "1",
     clientApp: env.CLAUDE_AGENT_SDK_CLIENT_APP ?? "(unset)",
   };
+}
+
+function countRecordItems(value: unknown): number | undefined {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+
+  if (isRecord(value)) {
+    return Object.keys(value).length;
+  }
+
+  return undefined;
+}
+
+function listRecordNames(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+
+        if (isRecord(item) && typeof item.name === "string") {
+          return item.name;
+        }
+
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  if (isRecord(value)) {
+    return Object.keys(value);
+  }
+
+  return undefined;
+}
+
+function summarizeQueryOptions(options: QueryProfile["options"]): Record<string, unknown> {
+  const rawOptions = options as Record<string, unknown>;
+  const env = isRecord(rawOptions.env) ? rawOptions.env as Record<string, string> : undefined;
+  const systemPrompt = rawOptions.systemPrompt;
+
+  return {
+    cwd: typeof rawOptions.cwd === "string" ? rawOptions.cwd : undefined,
+    permissionMode: typeof rawOptions.permissionMode === "string" ? rawOptions.permissionMode : undefined,
+    maxTurns: typeof rawOptions.maxTurns === "number" ? rawOptions.maxTurns : undefined,
+    persistSession: rawOptions.persistSession,
+    includePartialMessages: rawOptions.includePartialMessages,
+    strictMcpConfig: rawOptions.strictMcpConfig,
+    resume: typeof rawOptions.resume === "string" ? rawOptions.resume : undefined,
+    executable: rawOptions.executable,
+    executableArgs: Array.isArray(rawOptions.executableArgs) ? rawOptions.executableArgs : undefined,
+    modelEnv: summarizeSdkModelEnv(env),
+    mcpServers: listRecordNames(rawOptions.mcpServers),
+    plugins: Array.isArray(rawOptions.plugins)
+      ? rawOptions.plugins.map((item) =>
+          isRecord(item) && typeof item.path === "string" ? item.path : stringifyContent(item)
+        )
+      : undefined,
+    hasCanUseTool: typeof rawOptions.canUseTool === "function",
+    systemPrompt:
+      typeof systemPrompt === "string"
+        ? { type: "string", chars: systemPrompt.length }
+        : isRecord(systemPrompt)
+          ? { type: systemPrompt.type, preset: systemPrompt.preset, appendChars: typeof systemPrompt.append === "string" ? systemPrompt.append.length : undefined }
+          : undefined,
+    extraArgs: isRecord(rawOptions.extraArgs) ? rawOptions.extraArgs : undefined,
+  };
+}
+
+function summarizePreparedOptions(options: QueryProfile["options"]): Record<string, unknown> {
+  const rawOptions = options as Record<string, unknown>;
+  return {
+    permissionMode: typeof rawOptions.permissionMode === "string" ? rawOptions.permissionMode : undefined,
+    maxTurns: typeof rawOptions.maxTurns === "number" ? rawOptions.maxTurns : undefined,
+    mcpServers: countRecordItems(rawOptions.mcpServers),
+    includePartialMessages: rawOptions.includePartialMessages,
+    persistSession: rawOptions.persistSession,
+    strictMcpConfig: rawOptions.strictMcpConfig,
+  };
+}
+
+function summarizeToolInput(toolName: string, input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) {
+    return { input: truncateLogText(stringifyContent(input), 240) };
+  }
+
+  if (toolName === "Bash" && typeof input.command === "string") {
+    return { command: input.command };
+  }
+
+  const filePath =
+    typeof input.file_path === "string"
+      ? input.file_path
+      : typeof input.path === "string"
+        ? input.path
+        : undefined;
+  if (filePath) {
+    return {
+      file: filePath,
+      action:
+        typeof input.action === "string"
+          ? input.action
+          : typeof input.command === "string"
+            ? input.command
+            : undefined,
+    };
+  }
+
+  if (typeof input.pattern === "string") {
+    return {
+      pattern: input.pattern,
+      path: typeof input.path === "string" ? input.path : undefined,
+    };
+  }
+
+  if (typeof input.url === "string") {
+    return { url: input.url };
+  }
+
+  return {
+    inputKeys: Object.keys(input),
+    inputPreview: truncateLogText(stringifyContent(input), 240),
+  };
+}
+
+function extractTextFromToolResultContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (!isRecord(item)) {
+          return stringifyContent(item);
+        }
+
+        if (item.type === "text" && typeof item.text === "string") {
+          return item.text;
+        }
+
+        return stringifyContent(item);
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return stringifyContent(content);
+}
+
+function formatCacheHit(usage: unknown): string | undefined {
+  if (!isRecord(usage)) {
+    return undefined;
+  }
+
+  const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const cacheRead =
+    typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : 0;
+  const cacheCreate =
+    typeof usage.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : 0;
+  const total = input + cacheRead + cacheCreate;
+
+  if (total <= 0) {
+    return undefined;
+  }
+
+  return `${((cacheRead / total) * 100).toFixed(1)}%`;
+}
+
+function summarizeSdkUsage(usage: unknown): Record<string, unknown> {
+  if (!isRecord(usage)) {
+    return {};
+  }
+
+  return {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens,
+    cacheCreateTokens: usage.cache_creation_input_tokens,
+    cacheHit: formatCacheHit(usage),
+  };
+}
+
+function hasLogFields(fields: Record<string, unknown>): boolean {
+  return Object.values(fields).some((value) => value !== undefined);
 }
 
 function extractAssistantContent(message: unknown): string {
@@ -237,96 +423,6 @@ function extractAssistantContent(message: unknown): string {
     .join("\n");
 }
 
-function extractUserContent(message: unknown): string {
-  if (!isRecord(message)) {
-    return stringifyContent(message);
-  }
-
-  const content = message.content;
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return stringifyContent(message);
-  }
-
-  return content
-    .map((block) => {
-      if (!isRecord(block)) {
-        return "";
-      }
-
-      return block.type === "text" && typeof block.text === "string" ? block.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function logAssistantToolUses(message: unknown, prefix: string): boolean {
-  if (!isRecord(message) || !Array.isArray(message.content)) {
-    return false;
-  }
-
-  let logged = false;
-
-  for (const block of message.content) {
-    if (!isRecord(block) || block.type !== "tool_use") {
-      continue;
-    }
-
-    const toolName = typeof block.name === "string" ? block.name : "unknown";
-    const toolInput = "input" in block ? stringifyContent(block.input) : "";
-    console.log(`${prefix}[tool_use:${toolName}]`, toolInput);
-    logged = true;
-  }
-
-  return logged;
-}
-
-function logStreamToolUse(event: unknown, prefix: string): boolean {
-  if (
-    !isRecord(event) ||
-    event.type !== "content_block_start" ||
-    !isRecord(event.content_block) ||
-    event.content_block.type !== "tool_use"
-  ) {
-    return false;
-  }
-
-  const toolName =
-    typeof event.content_block.name === "string" ? event.content_block.name : "unknown";
-  const toolInput = "input" in event.content_block ? stringifyContent(event.content_block.input) : "";
-  console.log(`${prefix}[tool_use:${toolName}]`, toolInput);
-  return true;
-}
-
-function extractStreamContent(event: unknown): string {
-  if (!isRecord(event)) {
-    return stringifyContent(event);
-  }
-
-  if (event.type === "content_block_delta") {
-    const delta = isRecord(event.delta) ? event.delta : undefined;
-
-    if (delta?.type === "text_delta" && typeof delta.text === "string") {
-      return delta.text;
-    }
-
-    return stringifyContent(delta);
-  }
-
-  if (event.type === "content_block_start") {
-    return stringifyContent(event.content_block);
-  }
-
-  if (event.type === "message_delta") {
-    return stringifyContent(event.delta);
-  }
-
-  return stringifyContent(event);
-}
-
 function emitAgentStatus(
   status: AgentStatus,
   onEvent?: AgentEventForwarder,
@@ -349,175 +445,489 @@ function emitAgentError(
     error: error instanceof Error ? error.message : stringifyContent(error)
   } as const;
 
-  const logPrefix = profileName ? getProfileLogPrefix(profileName) : "[runtime]";
-  console.error(`${logPrefix} Claude Agent SDK chat failed.`);
-  console.error(error);
+  logAgentEvent(
+    "runtime",
+    "sdk:error",
+    "SDK 返回错误",
+    {
+      profile: profileName,
+      reason: payload.error,
+    },
+    { level: "error" }
+  );
   onEvent?.(payload);
 }
 
-function logSdkMessage(
-  message: SDKMessage,
-  profileName: QueryProfile["name"],
-  onEvent?: AgentEventForwarder
-) {
-  onEvent?.(message as AgentStreamEvent);
+class SdkMessageConsoleLogger {
+  private readonly completedThinkingIndexes = new Set<number>();
+  private readonly loggedThinkingContentIndexes = new Set<number>();
+  private readonly thinkingByIndex = new Map<number, { content: string; startedAt: number }>();
+  private readonly toolNamesById = new Map<string, string>();
+  private readonly loggedToolUseIds = new Set<string>();
+  private hasCurrentStreamedAssistantMessage = false;
 
-  if (profileName === "memory") {
-    const memoryPrefix = getProfileLogPrefix(profileName);
-    if (message.type !== "stream_event") {
-      const messageSubtype =
-        "subtype" in message && typeof message.subtype === "string" ? `:${message.subtype}` : "";
-      console.log(
-        `${memoryPrefix}[raw:${message.type}${messageSubtype}]`,
-        truncateForLog(stringifyContent(message))
-      );
-    }
+  constructor(private readonly onEvent?: AgentEventForwarder) {}
 
-    if (message.type === "system") {
-      const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
-      if (subtype === "init" && "model" in message) {
-        console.log(
-          `${memoryPrefix}[system:${subtype}] session=${stringifyContent(message.session_id)} model=${stringifyContent(message.model)}`
+  log(message: SDKMessage): void {
+    this.onEvent?.(message as AgentStreamEvent);
+
+    switch (message.type) {
+      case "stream_event":
+        this.logStreamEvent(message);
+        return;
+      case "assistant":
+        this.logAssistantMessage(message);
+        return;
+      case "user":
+        this.logUserMessage(message);
+        return;
+      case "system":
+        this.logSystemMessage(message);
+        return;
+      case "result":
+        this.logResultMessage(message);
+        return;
+      case "auth_status":
+        this.logAuthStatus(message);
+        return;
+      case "tool_progress":
+        logAgentEvent(
+          "runtime",
+          "tool:progress",
+          "工具进度",
+          {
+            tool: message.tool_name,
+            toolUseId: message.tool_use_id,
+            elapsed: `${message.elapsed_time_seconds}s`,
+          },
+          { verbose: true }
         );
-      } else {
-        console.log(`${memoryPrefix}[system:${subtype}]`, stringifyContent(message));
-      }
-      return;
+        return;
+      case "tool_use_summary":
+        logAgentEvent(
+          "runtime",
+          "tool:summary",
+          "工具摘要",
+          {
+            summary: message.summary,
+            toolUseIds: message.preceding_tool_use_ids,
+          },
+          { verbose: true }
+        );
+        return;
+      case "rate_limit_event":
+        logAgentEvent("runtime", "sdk:rate-limit", "SDK 限流状态", {
+          status: isRecord(message.rate_limit_info) ? message.rate_limit_info.status : undefined,
+          rateLimitType: isRecord(message.rate_limit_info)
+            ? message.rate_limit_info.rateLimitType
+            : undefined,
+        });
+        return;
+      default:
+        logAgentEvent(
+          "runtime",
+          "sdk:message",
+          "SDK 消息",
+          {
+            type: message.type,
+            detail: truncateLogText(stringifyContent(message), 500),
+          },
+          { verbose: true }
+        );
     }
-
-    if (message.type === "result") {
-      const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
-      console.log(`${memoryPrefix}[result:${subtype}]`);
-      return;
-    }
-
-    if (message.type === "auth_status") {
-      const output = Array.isArray(message.output) ? message.output.join("\n") : "";
-      const error = typeof message.error === "string" ? ` error=${message.error}` : "";
-      console.log(`${memoryPrefix}[auth_status]`, `${output}${error}`.trim());
-      return;
-    }
-
-    if (message.type === "assistant") {
-      if (!logAssistantToolUses(message.message, memoryPrefix)) {
-        console.log(`${memoryPrefix}[assistant]`, extractAssistantContent(message.message));
-      }
-      return;
-    }
-
-    if (message.type === "stream_event") {
-      const event = message.event;
-      logStreamToolUse(event, memoryPrefix);
-      return;
-    }
-
-    if (message.type === "tool_progress") {
-      console.log(
-        `${memoryPrefix}[tool_progress:${message.tool_name}]`,
-        `tool_use_id=${message.tool_use_id} elapsed=${message.elapsed_time_seconds}s`
-      );
-      return;
-    }
-
-    if (message.type === "tool_use_summary") {
-      console.log(`${memoryPrefix}[tool_summary]`, message.summary);
-      return;
-    }
-
-    if (message.type === "user" && message.tool_use_result !== undefined) {
-      console.log(`${memoryPrefix}[tool_result]`, stringifyContent(message.tool_use_result));
-      return;
-    }
-
-    console.log(`${memoryPrefix}[${message.type}]`, stringifyContent(message));
-    return;
   }
 
-  const profilePrefix = getProfileLogPrefix(profileName);
-
-  if (message.type === "stream_event") {
+  private logStreamEvent(message: Extract<SDKMessage, { type: "stream_event" }>): void {
     const event = message.event;
-    const eventType = isRecord(event) && typeof event.type === "string" ? event.type : "unknown";
-    const content = extractStreamContent(event);
-    console.log(`${profilePrefix}[stream_event:${eventType}]`, content);
-    return;
-  }
-
-  if (message.type === "assistant") {
-    console.log(`${profilePrefix}[assistant]`, extractAssistantContent(message.message));
-    return;
-  }
-
-  if (message.type === "result") {
-    const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
-    const content =
-      message.subtype === "success"
-        ? message.result
-        : Array.isArray(message.errors)
-          ? message.errors.join(" | ")
-          : stringifyContent(message);
-
-    console.log(`${profilePrefix}[result:${subtype}]`, content);
-    return;
-  }
-
-  if (message.type === "user") {
-    if (message.tool_use_result !== undefined) {
-      console.log(`${profilePrefix}[tool_result]`, stringifyContent(message.tool_use_result));
+    if (!isRecord(event) || typeof event.type !== "string") {
       return;
     }
 
-    const replay = "isReplay" in message && message.isReplay === true ? ":replay" : "";
-    const uuid = typeof message.uuid === "string" ? ` uuid=${message.uuid}` : "";
-    console.log(
-      `${profilePrefix}[user${replay}]${uuid}`,
-      truncateForLog(extractUserContent(message.message))
-    );
-    return;
+    if (event.type === "content_block_start") {
+      if (event.index === 0) {
+        this.resetMessageScopedThinkingState();
+        this.hasCurrentStreamedAssistantMessage = true;
+      }
+      this.logContentBlockStart(event);
+      return;
+    }
+
+    if (event.type === "content_block_delta") {
+      this.collectContentBlockDelta(event);
+      return;
+    }
+
+    if (event.type === "content_block_stop") {
+      this.logContentBlockStop(event);
+    }
   }
 
-  if (message.type === "system") {
+  private logContentBlockStart(event: JsonRecord): void {
+    const index = typeof event.index === "number" ? event.index : -1;
+    const block = isRecord(event.content_block) ? event.content_block : undefined;
+    if (!block || block.type !== "thinking") {
+      return;
+    }
+
+    this.thinkingByIndex.set(index, {
+      content: typeof block.thinking === "string" ? block.thinking : "",
+      startedAt: Date.now(),
+    });
+    logAgentEvent("runtime", "thinking:start", "开始思考");
+  }
+
+  private collectContentBlockDelta(event: JsonRecord): void {
+    const index = typeof event.index === "number" ? event.index : -1;
+    const delta = isRecord(event.delta) ? event.delta : undefined;
+    if (!delta || delta.type !== "thinking_delta" || typeof delta.thinking !== "string") {
+      return;
+    }
+
+    const current = this.thinkingByIndex.get(index) ?? { content: "", startedAt: Date.now() };
+    current.content += delta.thinking;
+    this.thinkingByIndex.set(index, current);
+  }
+
+  private logContentBlockStop(event: JsonRecord): void {
+    const index = typeof event.index === "number" ? event.index : -1;
+    const thinking = this.thinkingByIndex.get(index);
+    if (!thinking) {
+      return;
+    }
+
+    const duration = Date.now() - thinking.startedAt;
+    this.completedThinkingIndexes.add(index);
+    this.thinkingByIndex.delete(index);
+    logAgentEvent("runtime", "thinking:done", "思考完成", {
+      duration: formatDurationMs(duration),
+      chars: thinking.content.length,
+    });
+    if (thinking.content.trim() && !this.loggedThinkingContentIndexes.has(index)) {
+      this.loggedThinkingContentIndexes.add(index);
+      logAgentEvent(
+        "runtime",
+        "thinking:content",
+        "思考内容",
+        {
+          chars: thinking.content.length,
+          text: thinking.content.trim(),
+        },
+        { verbose: true }
+      );
+    }
+  }
+
+  private logAssistantMessage(message: Extract<SDKMessage, { type: "assistant" }>): void {
+    const hasStreamedThinkingState = this.hasCurrentStreamedAssistantMessage;
+    if (!hasStreamedThinkingState) {
+      this.resetMessageScopedThinkingState();
+    }
+
+    if (message.error) {
+      logAgentEvent("runtime", "assistant:error", "回复异常", {
+        error: message.error,
+      });
+    }
+
+    const sdkMessage = message.message;
+    if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
+      logAgentEvent("runtime", "assistant", "收到回复", {
+        text: extractAssistantContent(sdkMessage),
+      });
+      this.resetMessageScopedThinkingState();
+      return;
+    }
+
+    sdkMessage.content.forEach((block, index) => {
+      if (!isRecord(block)) {
+        return;
+      }
+
+      if (block.type === "thinking" && typeof block.thinking === "string") {
+        if (this.completedThinkingIndexes.has(index)) {
+          return;
+        }
+
+        if (this.loggedThinkingContentIndexes.has(index)) {
+          return;
+        }
+
+        this.loggedThinkingContentIndexes.add(index);
+        logAgentEvent(
+          "runtime",
+          "thinking:content",
+          "思考内容",
+          {
+            chars: block.thinking.length,
+            text: block.thinking.trim(),
+          },
+          { verbose: true }
+        );
+        return;
+      }
+
+      if (block.type === "tool_use") {
+        const toolUseId = typeof block.id === "string" ? block.id : undefined;
+        const toolName = typeof block.name === "string" ? block.name : "unknown";
+        if (toolUseId) {
+          this.toolNamesById.set(toolUseId, toolName);
+          if (this.loggedToolUseIds.has(toolUseId)) {
+            return;
+          }
+          this.loggedToolUseIds.add(toolUseId);
+        }
+
+        logAgentEvent("runtime", "tool:call", "调用工具", {
+          tool: toolName,
+          toolUseId,
+          ...summarizeToolInput(toolName, block.input),
+        });
+        if (isVerboseAgentLoopLog()) {
+          logAgentEvent(
+            "runtime",
+            "tool:input",
+            "工具输入",
+            {
+              tool: toolName,
+              toolUseId,
+              input: stringifyContent(block.input),
+            },
+            { verbose: true }
+          );
+        }
+        return;
+      }
+
+      if (block.type === "text" && typeof block.text === "string") {
+        logAgentEvent("runtime", "assistant", "收到回复", {
+          chars: block.text.length,
+          text: block.text.trim(),
+        });
+      }
+    });
+    this.resetMessageScopedThinkingState();
+  }
+
+  private resetMessageScopedThinkingState(): void {
+    this.completedThinkingIndexes.clear();
+    this.loggedThinkingContentIndexes.clear();
+    this.thinkingByIndex.clear();
+    this.hasCurrentStreamedAssistantMessage = false;
+  }
+
+  private logUserMessage(message: Extract<SDKMessage, { type: "user" }>): void {
+    if ("isReplay" in message && message.isReplay === true) {
+      logAgentEvent(
+        "runtime",
+        "queue:received",
+        "队列消息已确认",
+        { uuid: message.uuid },
+        { verbose: true }
+      );
+    }
+
+    if (message.tool_use_result !== undefined) {
+      this.logToolResult(undefined, message.tool_use_result, false);
+      return;
+    }
+
+    const sdkMessage = message.message;
+    if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
+      return;
+    }
+
+    for (const block of sdkMessage.content) {
+      if (!isRecord(block) || block.type !== "tool_result") {
+        continue;
+      }
+
+      this.logToolResult(
+        typeof block.tool_use_id === "string" ? block.tool_use_id : undefined,
+        block.content,
+        block.is_error === true
+      );
+    }
+  }
+
+  private logToolResult(
+    toolUseId: string | undefined,
+    content: unknown,
+    isError: boolean
+  ): void {
+    const toolName = toolUseId ? this.toolNamesById.get(toolUseId) : undefined;
+    const text = extractTextFromToolResultContent(content);
+    logAgentEvent("runtime", "tool:result", "工具返回", {
+      tool: toolName,
+      toolUseId,
+      status: isError ? "error" : "success",
+      chars: text.length,
+      preview: truncateLogText(text.trim(), 220),
+    });
+    if (isVerboseAgentLoopLog()) {
+      logAgentEvent(
+        "runtime",
+        "tool:result:detail",
+        "工具返回详情",
+        {
+          tool: toolName,
+          toolUseId,
+          content: text,
+        },
+        { verbose: true }
+      );
+    }
+  }
+
+  private logSystemMessage(message: Extract<SDKMessage, { type: "system" }>): void {
     const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
+
+    if (subtype === "init") {
+      logAgentEvent("runtime", "sdk:init", "SDK 初始化完成", {
+        sdkSessionId: "session_id" in message ? stringifyContent(message.session_id) : undefined,
+        model: "model" in message ? stringifyContent(message.model) : undefined,
+        tools: "tools" in message && Array.isArray(message.tools) ? message.tools.length : undefined,
+        mcpServers:
+          "mcp_servers" in message && Array.isArray(message.mcp_servers)
+            ? message.mcp_servers.length
+            : undefined,
+        permissionMode:
+          "permissionMode" in message ? stringifyContent(message.permissionMode) : undefined,
+      });
+      return;
+    }
 
     if (subtype === "task_started") {
-      console.log("[agent][subagent:start]", {
-        taskId: "task_id" in message ? stringifyContent(message.task_id) : "(unknown)",
-        taskType: "task_type" in message ? stringifyContent(message.task_type) : "(unknown)",
-        description: "description" in message ? stringifyContent(message.description) : "",
-        prompt:
-          "prompt" in message && typeof message.prompt === "string"
-            ? truncateForLog(message.prompt)
-            : "(not provided)",
+      logAgentEvent("runtime", "subtask:start", "子任务开始", {
+        taskId: "task_id" in message ? stringifyContent(message.task_id) : undefined,
+        taskType: "task_type" in message ? stringifyContent(message.task_type) : undefined,
+        description: "description" in message ? stringifyContent(message.description) : undefined,
       });
+      return;
+    }
+
+    if (subtype === "task_progress") {
+      const usage = "usage" in message && isRecord(message.usage) ? message.usage : undefined;
+      logAgentEvent(
+        "runtime",
+        "subtask:progress",
+        "子任务进度",
+        {
+          taskId: "task_id" in message ? stringifyContent(message.task_id) : undefined,
+          description: "description" in message ? stringifyContent(message.description) : undefined,
+          totalTokens: usage?.total_tokens,
+          toolUses: usage?.tool_uses,
+          duration: formatDurationMs(usage?.duration_ms),
+          lastTool: "last_tool_name" in message ? stringifyContent(message.last_tool_name) : undefined,
+          summary: "summary" in message ? stringifyContent(message.summary) : undefined,
+        },
+        { verbose: true }
+      );
       return;
     }
 
     if (subtype === "task_notification") {
-      console.log("[agent][subagent:stop]", {
-        taskId: "task_id" in message ? stringifyContent(message.task_id) : "(unknown)",
-        status: "status" in message ? stringifyContent(message.status) : "(unknown)",
-        summary: "summary" in message ? stringifyContent(message.summary) : "",
+      const usage = "usage" in message && isRecord(message.usage) ? message.usage : undefined;
+      logAgentEvent("runtime", "subtask:done", "子任务结束", {
+        taskId: "task_id" in message ? stringifyContent(message.task_id) : undefined,
+        status: "status" in message ? stringifyContent(message.status) : undefined,
+        totalTokens: usage?.total_tokens,
+        toolUses: usage?.tool_uses,
+        duration: formatDurationMs(usage?.duration_ms),
+        summary: "summary" in message ? stringifyContent(message.summary) : undefined,
       });
       return;
     }
 
-    const content =
-      subtype === "init" && "model" in message
-        ? `session=${stringifyContent(message.session_id)} model=${stringifyContent(message.model)}`
-        : stringifyContent(message);
+    if (subtype === "compact_boundary") {
+      const metadata =
+        "compact_metadata" in message && isRecord(message.compact_metadata)
+          ? message.compact_metadata
+          : undefined;
+      logAgentEvent(
+        "runtime",
+        "sdk:compact",
+        "SDK 上下文压缩边界",
+        {
+          trigger: metadata?.trigger,
+          preTokens: metadata?.pre_tokens,
+        },
+        { verbose: true }
+      );
+      return;
+    }
 
-    console.log(`${profilePrefix}[system:${subtype}]`, content);
-    return;
+    logAgentEvent(
+      "runtime",
+      "sdk:system",
+      "SDK system 消息",
+      {
+        subtype,
+        detail: truncateLogText(stringifyContent(message), 500),
+      },
+      { verbose: true }
+    );
   }
 
-  if (message.type === "auth_status") {
-    const output = Array.isArray(message.output) ? message.output.join("\n") : "";
-    const error = typeof message.error === "string" ? ` error=${message.error}` : "";
-    console.log(`${profilePrefix}[auth_status]`, `${output}${error}`.trim());
-    return;
+  private logResultMessage(message: Extract<SDKMessage, { type: "result" }>): void {
+    const subtype = typeof message.subtype === "string" ? message.subtype : "unknown";
+    const isError = "is_error" in message && message.is_error === true;
+    logAgentEvent("runtime", "sdk:result", "SDK 返回结果", {
+      status: isError ? "error" : "success",
+      subtype,
+      turns: "num_turns" in message ? message.num_turns : undefined,
+      total: "duration_ms" in message ? formatDurationMs(message.duration_ms) : undefined,
+      api: "duration_api_ms" in message ? formatDurationMs(message.duration_api_ms) : undefined,
+      stop: "stop_reason" in message ? message.stop_reason : undefined,
+    });
+
+    const usageFields = {
+      cost: "total_cost_usd" in message ? formatCostUsd(message.total_cost_usd) : undefined,
+      ...summarizeSdkUsage("usage" in message ? message.usage : undefined),
+    };
+    if (hasLogFields(usageFields)) {
+      logAgentEvent("post", "usage", "本次消耗", usageFields);
+    }
+
+    if (message.subtype === "success" && typeof message.result === "string" && message.result.trim()) {
+      logAgentEvent(
+        "runtime",
+        "sdk:result:detail",
+        "SDK 结果内容",
+        {
+          summary: message.result.trim(),
+        },
+        { verbose: true }
+      );
+      return;
+    }
+
+    if ("errors" in message && Array.isArray(message.errors) && message.errors.length > 0) {
+      logAgentEvent(
+        "runtime",
+        "sdk:error",
+        "SDK 返回错误",
+        {
+          errors: message.errors.join(" | "),
+        },
+        { level: "error" }
+      );
+    }
   }
 
-  console.log(`${profilePrefix}[${message.type}]`, stringifyContent(message));
+  private logAuthStatus(message: Extract<SDKMessage, { type: "auth_status" }>): void {
+    const output = Array.isArray(message.output) ? message.output.join("\n").trim() : "";
+    logAgentEvent(
+      "runtime",
+      "sdk:auth-status",
+      "SDK 认证状态",
+      {
+        isAuthenticating: message.isAuthenticating,
+        output: output ? truncateLogText(output, 500) : undefined,
+        error: message.error,
+      },
+      { verbose: true }
+    );
+  }
 }
 
 function isAbortLikeError(error: unknown) {
@@ -545,9 +955,17 @@ function startInterrupt(run: ActiveAgentRun, sessionId: string): void {
 
   void interruptPromise.catch((error) => {
     if (!isExpectedStopError(error)) {
-      console.warn(
-        `${getProfileLogPrefix(run.profileName)} Failed to interrupt agent for session ${sessionId}.`,
-        error
+      logAgentEvent(
+        "runtime",
+        "sdk:error",
+        "SDK 返回错误",
+        {
+          profile: run.profileName,
+          session: sessionId,
+          operation: "interrupt",
+          reason: error instanceof Error ? error.message : stringifyContent(error),
+        },
+        { level: "error" }
       );
     }
   });
@@ -602,14 +1020,49 @@ export async function runAgentWithProfile(
     throw new Error(`An agent is already running for session ${sessionId}.`);
   }
 
-  const logPrefix = getProfileLogPrefix(profile.name);
-  console.log(`${logPrefix} Starting query`);
-  console.log(`${logPrefix} Resume session: ${(profile.options as any).resume ?? "(new session)"}`);
-  console.log(`${logPrefix} Permission mode: ${(profile.options as any).permissionMode}`);
-  console.log(
-    `${logPrefix} Effective SDK model routing:`,
-    summarizeSdkModelEnv(profile.options.env)
-  );
+  const agentName = formatAgentName(profile.name);
+  const ownsLoop = profile.name === "memory" && !isAgentLoopActiveFor("memory");
+  const loopStartedAt = Date.now();
+  let loopStatus: "success" | "error" | "stopped" = "success";
+  const rawOptions = profile.options as Record<string, unknown>;
+  const resumeSessionId = typeof rawOptions.resume === "string" ? rawOptions.resume : undefined;
+
+  if (ownsLoop) {
+    logAgentLoopStart(agentName, {
+      query: "memory extraction",
+      session: sessionId,
+      source,
+      workspace: workspaceId,
+    });
+  }
+
+  logAgentEvent("pre", "session", "会话上下文已确认", {
+    resume: Boolean(resumeSessionId),
+    sdkSessionId: resumeSessionId,
+    cwd: typeof rawOptions.cwd === "string" ? rawOptions.cwd : undefined,
+  });
+  logAgentEvent("pre", "ready", "运行参数已准备", summarizePreparedOptions(profile.options));
+  if (isVerboseAgentLoopLog()) {
+    logAgentEvent(
+      "pre",
+      "ready:detail",
+      "运行参数详情",
+      {
+        options: summarizeQueryOptions(profile.options),
+      },
+      { verbose: true }
+    );
+    logAgentEvent(
+      "pre",
+      "prompt:detail",
+      "SDK prompt 内容",
+      {
+        chars: profile.prompt.length,
+        prompt: profile.prompt,
+      },
+      { verbose: true }
+    );
+  }
 
   await ensureZoraDir();
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -651,7 +1104,13 @@ export async function runAgentWithProfile(
       prompt: inputStream,
       options: profile.options as any,
     });
+    logAgentEvent("runtime", "sdk:query", "请求已提交给 SDK", {
+      prompt: "inputStream",
+      attachments: attachments?.length ?? 0,
+      includePartialMessages: rawOptions.includePartialMessages,
+    });
   } catch (error) {
+    loopStatus = "error";
     inputStream.fail(error);
     activeInputStreams.delete(sessionId);
     queryReadyPromises.delete(sessionId);
@@ -680,6 +1139,7 @@ export async function runAgentWithProfile(
   let missingSdkSessionError: MissingSdkSessionError | null = null;
   let latestSdkSessionId: string | undefined;
   const lateQueuedMessages: QueuedAgentMessage[] = [];
+  const sdkLogger = new SdkMessageConsoleLogger(onEvent);
 
   try {
     for await (const message of response) {
@@ -725,28 +1185,43 @@ export async function runAgentWithProfile(
             }
           }
 
-          console.warn(
-            `${logPrefix} Result arrived with ${pendingQueuedUuids.size} queued message(s) without replay ack; scheduling a follow-up run.`
-          );
+          logAgentEvent("runtime", "queue:replay", "队列消息需要补跑", {
+            pendingMessages: pendingQueuedUuids.size,
+            reason: "result_arrived_without_replay_ack",
+          });
           pendingQueuedUuids.clear();
         }
         shouldFinishAfterResult = true;
       }
 
-      logSdkMessage(message, profile.name, onEvent);
+      sdkLogger.log(message);
 
       if (shouldFinishAfterResult) {
         break;
       }
     }
-    console.log(`${logPrefix} Query finished`);
     if (!run.stopping && profile.name !== "memory") {
+      logAgentEvent("post", "memory", "已触发记忆处理检查", {
+        MemoryAgent: "check",
+        reason: "conversation_end",
+      });
       memoryAgent.onConversationEnd(sessionId, workspaceId).catch((err) => {
-        console.error(`${logPrefix} Memory extraction failed:`, err);
+        logAgentEvent(
+          "post",
+          "memory",
+          "已触发记忆处理检查",
+          {
+            status: "error",
+            reason: err instanceof Error ? err.message : stringifyContent(err),
+          },
+          { level: "error" }
+        );
       });
     }
     emitAgentStatus(run.stopping ? "stopped" : "finished", onEvent, source);
+    loopStatus = run.stopping ? "stopped" : "success";
   } catch (error) {
+    loopStatus = run.stopping ? "stopped" : "error";
     if (missingSdkSessionError) {
       throw missingSdkSessionError;
     }
@@ -773,6 +1248,14 @@ export async function runAgentWithProfile(
     if (activeAgentRuns.get(sessionId) === run) {
       activeAgentRuns.delete(sessionId);
     }
+    if (ownsLoop) {
+      logAgentLoopEnd(agentName, {
+        status: loopStatus,
+        totalDuration: formatDurationMs(Date.now() - loopStartedAt),
+        session: sessionId,
+        workspace: workspaceId,
+      });
+    }
   }
 
   return {
@@ -793,8 +1276,17 @@ export async function sendQueuedMessage(
   const messageUuid = uuid || randomUUID();
   const uuids = queuedMessageUuids.get(sessionId) ?? new Set<string>();
   if (uuids.has(messageUuid)) {
-    console.log(
-      `[agent] Duplicate queued message ignored: sessionId=${sessionId}, uuid=${messageUuid}`
+    logAgentEvent(
+      "runtime",
+      "queue:received",
+      "队列消息已确认",
+      {
+        session: sessionId,
+        uuid: messageUuid,
+        action: "duplicate_ignored",
+        text,
+      },
+      { verbose: true }
     );
     return messageUuid;
   }
@@ -853,8 +1345,18 @@ export async function sendQueuedMessage(
 
   try {
     inputStream.enqueue(sdkMessage);
-    console.log(
-      `[agent] Queue message enqueued: sessionId=${sessionId}, uuid=${messageUuid}, priority=next`
+    logAgentEvent(
+      "runtime",
+      "queue:received",
+      "队列消息已确认",
+      {
+        session: sessionId,
+        uuid: messageUuid,
+        action: "enqueued",
+        priority: "next",
+        text,
+      },
+      { verbose: true }
     );
     return messageUuid;
   } catch (error) {
@@ -880,9 +1382,17 @@ export async function stopAgentForSession(sessionId: string) {
   try {
     run.query.close();
   } catch (error) {
-    console.warn(
-      `${getProfileLogPrefix(run.profileName)} Failed to close agent for session ${sessionId}.`,
-      error
+    logAgentEvent(
+      "runtime",
+      "sdk:error",
+      "SDK 返回错误",
+      {
+        profile: run.profileName,
+        session: sessionId,
+        operation: "close",
+        reason: error instanceof Error ? error.message : stringifyContent(error),
+      },
+      { level: "error" }
     );
   }
 }

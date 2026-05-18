@@ -3,15 +3,12 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   stat,
-  unlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
+import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
-const ZORA_DIR_NAME = ".zora";
 const MEMORY_DIR_NAME = "memory";
 const DAILY_DIR_NAME = "daily";
 const MIGRATIONS_DIR_NAME = ".migrations";
@@ -43,14 +40,6 @@ function hasErrorCode(error: unknown, code: string) {
 
 function isEnoentError(error: unknown) {
   return hasErrorCode(error, "ENOENT");
-}
-
-function isRenameReplaceError(error: unknown) {
-  return (
-    hasErrorCode(error, "EEXIST") ||
-    hasErrorCode(error, "EPERM") ||
-    hasErrorCode(error, "ENOTEMPTY")
-  );
 }
 
 function assertSafeFileName(fileName: string) {
@@ -167,41 +156,8 @@ async function copyFileIfMissing(
   }
 }
 
-async function replaceFileAtomically(filePath: string, content: string) {
-  const tempPath = `${filePath}.tmp`;
-
-  await writeFile(tempPath, content, "utf8");
-
-  try {
-    await rename(tempPath, filePath);
-  } catch (error) {
-    if (isRenameReplaceError(error)) {
-      try {
-        await unlink(filePath);
-      } catch (unlinkError) {
-        if (!isEnoentError(unlinkError)) {
-          throw unlinkError;
-        }
-      }
-
-      await rename(tempPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tempPath);
-    } catch (cleanupError) {
-      if (!isEnoentError(cleanupError)) {
-        throw cleanupError;
-      }
-    }
-
-    throw error;
-  }
-}
-
 export function getZoraBaseDirPath() {
-  return path.join(homedir(), ZORA_DIR_NAME);
+  return ZORA_DIR;
 }
 
 export function getZoraMemoryDirPath() {

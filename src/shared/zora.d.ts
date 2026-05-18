@@ -169,6 +169,22 @@ export type AgentControlEvent =
       error: string;
     };
 
+export interface ClientLogEventInput {
+  area: string;
+  component: string;
+  event: string;
+  message: string;
+  level?: "info" | "warn" | "error";
+  fields?: Record<string, unknown>;
+}
+
+export interface SessionModelLogContext {
+  provider?: string;
+  providerType?: string;
+  model?: string;
+  selectionSource?: "selected" | "provider_default";
+}
+
 // ═══════════════════════════════════════════════════════════
 // HITL (Human-in-the-Loop) 类型
 // 用于 Main ↔ Renderer 双向通信的权限审批与用户提问机制
@@ -234,6 +250,7 @@ export type AgentStreamEvent = (
 export interface ZoraApi {
   getAppVersion: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
+  logClientEvent: (input: ClientLogEventInput) => Promise<void>;
   updater: {
     getStatus: () => Promise<UpdateStatus>;
     checkForUpdates: () => Promise<UpdateStatus>;
@@ -342,11 +359,14 @@ export interface ZoraApi {
     sessionId: string,
     providerId: string,
     modelId: string,
-    workspaceId?: string
+    workspaceId?: string,
+    logContext?: SessionModelLogContext
   ) => Promise<{ success: boolean }>;
   switchSessionModel: (
     sessionId: string,
-    modelId: string
+    modelId: string,
+    workspaceId?: string,
+    logContext?: SessionModelLogContext
   ) => Promise<{ success: boolean }>;
   listWorkspaces: () => Promise<WorkspaceMeta[]>;
   createWorkspace: (name: string, workspacePath: string) => Promise<WorkspaceMeta>;

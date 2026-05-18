@@ -3,11 +3,13 @@ import type {
   AgentRunInfo,
   AgentStreamEvent,
   AskUserResponse,
+  ClientLogEventInput,
   ConversationMessage,
   FileAttachment,
   FileTreeEntry,
   PermissionMode,
   PermissionResponse,
+  SessionModelLogContext,
   SessionForkResult,
   SessionMeta,
   SkillMeta,
@@ -54,6 +56,8 @@ import type {
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
   openExternal: (url: string) => ipcRenderer.invoke("app:open-external", url) as Promise<void>,
+  logClientEvent: (input: ClientLogEventInput) =>
+    ipcRenderer.invoke("diagnostic-log:client-event", input) as Promise<void>,
   updater: {
     getStatus: () => ipcRenderer.invoke("updater:get-status") as Promise<UpdateStatus>,
     checkForUpdates: () => ipcRenderer.invoke("updater:check") as Promise<UpdateStatus>,
@@ -263,19 +267,32 @@ const zoraApi: ZoraApi = {
     sessionId: string,
     providerId: string,
     modelId: string,
-    workspaceId?: string
+    workspaceId?: string,
+    logContext?: SessionModelLogContext
   ) =>
     ipcRenderer.invoke(
       "session:lock-model",
       sessionId,
       providerId,
       modelId,
-      workspaceId
+      workspaceId,
+      logContext
     ) as Promise<{
       success: boolean;
     }>,
-  switchSessionModel: (sessionId: string, modelId: string) =>
-    ipcRenderer.invoke("session:switch-model", sessionId, modelId) as Promise<{
+  switchSessionModel: (
+    sessionId: string,
+    modelId: string,
+    workspaceId?: string,
+    logContext?: SessionModelLogContext
+  ) =>
+    ipcRenderer.invoke(
+      "session:switch-model",
+      sessionId,
+      modelId,
+      workspaceId,
+      logContext
+    ) as Promise<{
       success: boolean;
     }>,
   listWorkspaces: () =>

@@ -27,6 +27,8 @@ import {
   getWorkspaceSessionFilesDir,
   listWorkspaces,
 } from "./workspace-store";
+import { getErrorMessage, logSystemEvent } from "./system-log";
+import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 export interface SessionMeta {
   id: string;
@@ -59,7 +61,6 @@ export interface CreateForkedSessionInput {
   workingDirectory?: string;
 }
 
-const ZORA_DIR = path.join(homedir(), ".zora");
 const OLD_SESSIONS_DIR = path.join(ZORA_DIR, "sessions");
 const HISTORY_IMAGE_BASE64_LIMIT = 20;
 const HISTORY_IMAGE_MAX_INLINE_BYTES = 5 * 1024 * 1024;
@@ -91,7 +92,12 @@ export async function migrateSessionsIfNeeded(): Promise<void> {
 
   try {
     await access(newDir);
-    console.log("[session-store] New sessions dir already exists, skipping migration.");
+    logSystemEvent(
+      "store",
+      "session",
+      "migration:skip",
+      "新版会话目录已存在，跳过旧目录迁移"
+    );
     return;
   } catch {
     // The workspace-aware directory does not exist yet, continue migrating.
@@ -99,50 +105,17 @@ export async function migrateSessionsIfNeeded(): Promise<void> {
 
   await mkdir(path.join(ZORA_DIR, "workspaces", "default"), { recursive: true });
   await fsRename(OLD_SESSIONS_DIR, newDir);
-  console.log(
-    "[session-store] Migrated sessions from ~/.zora/sessions/ to ~/.zora/workspaces/default/sessions/."
+  logSystemEvent(
+    "store",
+    "session",
+    "migration:done",
+    "旧版会话目录已迁移到默认工作区"
   );
 }
 
 async function ensureSessionsDir(workspaceId = "default"): Promise<void> {
   await migrateSessionsIfNeeded();
   await mkdir(getSessionsDir(workspaceId), { recursive: true });
-}
-
-async function replaceFileAtomically(
-  filePath: string,
-  content: string
-): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination files.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
 }
 
 function isEnoentError(error: unknown): boolean {
@@ -1047,9 +1020,18 @@ export async function saveAttachments(
         savedFileName,
       });
     } catch (error) {
-      console.error(
-        `[session-store] Failed to save attachment "${attachment.name}" for session ${sessionId}.`,
-        error
+      logSystemEvent(
+        "store",
+        "session",
+        "attachment:save:error",
+        "保存会话附件失败",
+        {
+          sessionId,
+          workspaceId,
+          attachment: attachment.name,
+          error: getErrorMessage(error),
+        },
+        { level: "error" }
       );
     }
   }

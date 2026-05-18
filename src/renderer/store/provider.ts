@@ -2,12 +2,24 @@ import { atom } from "jotai";
 import type { ProviderConfig } from "../../shared/types/provider";
 
 export const providersAtom = atom<ProviderConfig[]>([]);
+export const providersLoadedAtom = atom(false);
 
 export const activeProviderAtom = atom<ProviderConfig | null>((get) => {
-  return get(providersAtom).find((provider) => provider.isDefault) ?? null;
+  return (
+    get(providersAtom).find(
+      (provider) => provider.enabled && provider.isDefault
+    ) ??
+    get(providersAtom).find((provider) => provider.enabled) ??
+    null
+  );
 });
 
 export const loadProvidersAtom = atom(null, async (_get, set) => {
-  const providers = await window.zora.listProviders();
-  set(providersAtom, providers);
+  try {
+    const providers = await window.zora.listProviders();
+    set(providersAtom, providers);
+    return providers;
+  } finally {
+    set(providersLoadedAtom, true);
+  }
 });

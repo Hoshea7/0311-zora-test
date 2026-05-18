@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   mkdir,
   rename as fsRename,
@@ -7,7 +8,28 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 
-export const ZORA_DIR = path.join(homedir(), ".zora");
+function expandHomeDir(input: string): string {
+  if (input === "~") {
+    return homedir();
+  }
+
+  if (input.startsWith("~/")) {
+    return path.join(homedir(), input.slice(2));
+  }
+
+  return input;
+}
+
+function resolveZoraDir(): string {
+  const configuredHome = process.env.ZORA_HOME?.trim();
+  if (!configuredHome) {
+    return path.join(homedir(), ".zora");
+  }
+
+  return path.resolve(expandHomeDir(configuredHome));
+}
+
+export const ZORA_DIR = resolveZoraDir();
 
 export function isEnoentError(error: unknown): boolean {
   return (
@@ -19,11 +41,18 @@ export function isEnoentError(error: unknown): boolean {
 }
 
 export async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
+  await mkdir(path.dirname(filePath), { recursive: true });
+
+  const tmpPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`
+  );
   await writeFile(tmpPath, content, "utf8");
 
+  let replaced = false;
   try {
     await fsRename(tmpPath, filePath);
+    replaced = true;
   } catch (error: unknown) {
     const code =
       typeof error === "object" && error !== null && "code" in error
@@ -38,16 +67,19 @@ export async function replaceFileAtomically(filePath: string, content: string): 
       }
 
       await fsRename(tmpPath, filePath);
+      replaced = true;
       return;
     }
 
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
     throw error;
+  } finally {
+    if (!replaced) {
+      try {
+        await unlink(tmpPath);
+      } catch {
+        // Ignore temp cleanup failures.
+      }
+    }
   }
 }
 

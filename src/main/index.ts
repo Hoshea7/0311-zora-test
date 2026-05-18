@@ -93,6 +93,8 @@ import {
   updateScheduledTask,
 } from "./schedule-store";
 import { startScheduleRunner } from "./schedule-runner";
+import { flushDiagnosticLogWrites } from "./diagnostic-log";
+import { getErrorMessage, logSystemEvent, type SystemLogLevel } from "./system-log";
 import {
   GLOBAL_SKILLS_DIR,
   listSkills,
@@ -116,6 +118,8 @@ import {
   isInstallingUpdate,
 } from "./updater";
 import { normalizeExternalUrl } from "./external-url";
+import { isRecord } from "./utils/guards";
+import { normalizeOptionalString } from "./utils/validate";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEV_ELECTRON_PROFILE_DIR_NAME = "zora-dev";
@@ -140,7 +144,14 @@ async function openExternalUrl(url: unknown) {
 function configureExternalNavigation(window: BrowserWindow) {
   window.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url).catch((error) => {
-      console.warn(`[index] Failed to open external URL: ${url}`, error);
+      logSystemEvent(
+        "app",
+        "navigation",
+        "external:error",
+        "打开外部链接失败",
+        { url, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     });
 
     return { action: "deny" };
@@ -163,8 +174,95 @@ function resolveWorkspaceId(value: unknown): string {
   return value.trim();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function normalizeOptionalWorkspaceId(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  return resolveWorkspaceId(value);
+}
+
+function parseSystemLogLevel(value: unknown): SystemLogLevel {
+  return value === "warn" || value === "error" ? value : "info";
+}
+
+function resolveProviderSelectionLogFields(
+  providerId: string | undefined,
+  requestedModelId: string,
+  logContext: unknown
+): Record<string, unknown> {
+  const normalizedRequestedModelId = normalizeOptionalString(requestedModelId);
+  const context = isRecord(logContext) ? logContext : {};
+  const providerName = normalizeOptionalString(context.provider);
+  const providerType = normalizeOptionalString(context.providerType);
+  const modelName = normalizeOptionalString(context.model);
+  const contextSelectionSource = normalizeOptionalString(context.selectionSource);
+  const fallbackModel =
+    normalizedRequestedModelId ??
+    (providerId ? "(provider default)" : "(unknown)");
+  const selectionSource = normalizedRequestedModelId
+    ? "selected"
+    : "provider_default";
+
+  return {
+    provider: providerName ?? providerId ?? "(unknown)",
+    providerType,
+    model: modelName ?? fallbackModel,
+    selectionSource: contextSelectionSource ?? selectionSource,
+  };
+}
+
+function normalizeClientLogFields(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error("fields must be an object when provided.");
+  }
+
+  return value;
+}
+
+async function findSessionWorkspaceId(sessionId: string): Promise<string | null> {
+  const trimmedSessionId = sessionId.trim();
+  const workspaces = await listWorkspaces();
+
+  for (const workspace of workspaces) {
+    const session = await getSessionMeta(trimmedSessionId, workspace.id);
+    if (session) {
+      return workspace.id;
+    }
+  }
+
+  return null;
+}
+
+async function resolveExistingSessionWorkspaceId(
+  sessionId: string,
+  workspaceId?: string
+): Promise<{
+  workspaceId: string;
+  resolvedFrom: "requested" | "search";
+}> {
+  const trimmedSessionId = sessionId.trim();
+  const requestedWorkspaceId = workspaceId ?? "default";
+  const requestedSession = await getSessionMeta(
+    trimmedSessionId,
+    requestedWorkspaceId
+  );
+  if (requestedSession) {
+    return { workspaceId: requestedWorkspaceId, resolvedFrom: "requested" };
+  }
+
+  const foundWorkspaceId = await findSessionWorkspaceId(trimmedSessionId);
+  if (foundWorkspaceId) {
+    return { workspaceId: foundWorkspaceId, resolvedFrom: "search" };
+  }
+
+  throw Object.assign(new Error(`Session ${trimmedSessionId} not found.`), {
+    code: "SESSION_NOT_FOUND",
+  });
 }
 
 function assertRequiredString(value: unknown, fieldName: string): string {
@@ -824,7 +922,14 @@ function buildFileAttachment(filePath: string): FileAttachment | null {
 
     return attachment;
   } catch (error) {
-    console.warn(`[index] Failed to prepare attachment: ${filePath}`, error);
+    logSystemEvent(
+      "app",
+      "attachment",
+      "prepare:error",
+      "准备附件失败",
+      { path: filePath, error: getErrorMessage(error) },
+      { level: "warn" }
+    );
     return null;
   }
 }
@@ -862,12 +967,23 @@ app.whenReady().then(async () => {
   try {
     const migrationResult = await migrateLegacyMemoryIfNeeded();
     if (migrationResult.migrated.length > 0) {
-      console.info(
-        `[main] Migrated legacy memory files: ${migrationResult.migrated.join(", ")}`
+      logSystemEvent(
+        "app",
+        "memory",
+        "legacy:migrate",
+        "已迁移旧版记忆文件",
+        { files: migrationResult.migrated }
       );
     }
   } catch (error) {
-    console.error("[main] Legacy memory migration failed:", error);
+    logSystemEvent(
+      "app",
+      "memory",
+      "legacy:migrate:error",
+      "迁移旧版记忆文件失败",
+      { error: getErrorMessage(error) },
+      { level: "error" }
+    );
   }
   await seedBundledSkills();
   const mcpManager = setSharedMcpManager(new McpManager());
@@ -884,6 +1000,21 @@ app.whenReady().then(async () => {
     }
 
     await openExternalUrl(url);
+  });
+
+  ipcMain.handle("diagnostic-log:client-event", async (_event, input: unknown) => {
+    if (!isRecord(input)) {
+      throw new Error("A valid diagnostic log input is required.");
+    }
+
+    const area = assertRequiredString(input.area, "area").trim();
+    const component = assertRequiredString(input.component, "component").trim();
+    const event = assertRequiredString(input.event, "event").trim();
+    const message = assertRequiredString(input.message, "message").trim();
+    const level = parseSystemLogLevel(input.level);
+    const fields = normalizeClientLogFields(input.fields);
+
+    logSystemEvent(area, component, event, message, fields, { level });
   });
 
   ipcMain.handle("updater:get-status", () => {
@@ -1305,7 +1436,13 @@ app.whenReady().then(async () => {
         assertRequiredString(name, "workspace.name").trim(),
         assertRequiredString(workspacePath, "workspace.path").trim()
       );
-      console.log(`[index] Workspace created: ${workspace.id} (${workspace.path})`);
+      logSystemEvent(
+        "app",
+        "workspace",
+        "create",
+        "工作区已创建",
+        { workspaceId: workspace.id, path: workspace.path }
+      );
       return workspace;
     }
   );
@@ -1318,7 +1455,13 @@ app.whenReady().then(async () => {
     }
 
     await deleteWorkspace(targetWorkspaceId);
-    console.log(`[index] Workspace deleted: ${targetWorkspaceId}`);
+    logSystemEvent(
+      "app",
+      "workspace",
+      "delete",
+      "工作区已删除",
+      { workspaceId: targetWorkspaceId }
+    );
   });
 
   ipcMain.handle(
@@ -1329,7 +1472,13 @@ app.whenReady().then(async () => {
         targetWorkspaceId,
         assertRequiredString(name, "workspace.name").trim()
       );
-      console.log(`[index] Workspace renamed: ${targetWorkspaceId}`);
+      logSystemEvent(
+        "app",
+        "workspace",
+        "rename",
+        "工作区已重命名",
+        { workspaceId: targetWorkspaceId, name: workspace.name }
+      );
       return workspace;
     }
   );
@@ -1456,8 +1605,16 @@ app.whenReady().then(async () => {
         title: typeof title === "string" ? title : undefined,
       });
 
-      console.log(
-        `[index] Session forked: ${trimmedSessionId} -> ${result.session.id}`
+      logSystemEvent(
+        "app",
+        "session",
+        "fork",
+        "会话已 Fork",
+        {
+          sourceSessionId: trimmedSessionId,
+          sessionId: result.session.id,
+          workspaceId: targetWorkspaceId,
+        }
       );
       return result;
     }
@@ -1470,7 +1627,13 @@ app.whenReady().then(async () => {
 
     await deleteSession(sessionId, resolveWorkspaceId(workspaceId));
     clearSessionWhitelist(sessionId);
-    console.log(`[index] Session deleted: ${sessionId}`);
+    logSystemEvent(
+      "app",
+      "session",
+      "delete",
+      "会话已删除",
+      { sessionId }
+    );
   });
 
   ipcMain.handle(
@@ -1485,7 +1648,13 @@ app.whenReady().then(async () => {
 
       const nextTitle = title.trim();
       await renameSession(sessionId, nextTitle, resolveWorkspaceId(workspaceId));
-      console.log(`[index] Session renamed: ${sessionId} -> "${nextTitle}"`);
+      logSystemEvent(
+        "app",
+        "session",
+        "rename",
+        "会话已重命名",
+        { sessionId, title: nextTitle }
+      );
     }
   );
 
@@ -1507,7 +1676,8 @@ app.whenReady().then(async () => {
       sessionId: unknown,
       providerId: unknown,
       modelId: unknown,
-      workspaceId: unknown
+      workspaceId: unknown,
+      logContext: unknown
     ) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
@@ -1519,30 +1689,98 @@ app.whenReady().then(async () => {
         throw new Error("modelId must be a string.");
       }
 
-      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
-      const session = await getSessionMeta(sessionId, targetWorkspaceId);
-      if (!session) {
-        throw new Error(`Session ${sessionId} not found.`);
-      }
-
+      const targetSessionId = sessionId.trim();
+      const requestedWorkspaceId = normalizeOptionalWorkspaceId(workspaceId);
+      const targetProviderId = providerId.trim();
       const trimmedModelId = modelId.trim();
-      await updateSessionMeta(
-        sessionId,
-        {
-          providerId: providerId.trim(),
-          providerLocked: true,
-          selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
-        },
-        targetWorkspaceId
+      const providerSelectionLogFields = resolveProviderSelectionLogFields(
+        targetProviderId,
+        trimmedModelId,
+        logContext
       );
 
-      return { success: true };
+      logSystemEvent(
+        "ipc",
+        "session",
+        "lock-model:request",
+        "发送前锁定会话模型",
+        {
+          sessionId: targetSessionId,
+          requestedWorkspaceId: requestedWorkspaceId ?? "default",
+          ...providerSelectionLogFields,
+        }
+      );
+
+      try {
+        const resolved = await resolveExistingSessionWorkspaceId(
+          targetSessionId,
+          requestedWorkspaceId
+        );
+
+        await updateSessionMeta(
+          targetSessionId,
+          {
+            providerId: targetProviderId,
+            providerLocked: true,
+            selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
+          },
+          resolved.workspaceId
+        );
+
+        logSystemEvent(
+          "ipc",
+          "session",
+          "lock-model:success",
+          "会话模型已锁定",
+          {
+            sessionId: targetSessionId,
+            requestedWorkspaceId: requestedWorkspaceId ?? "default",
+            resolvedWorkspaceId: resolved.workspaceId,
+            resolvedFrom: resolved.resolvedFrom,
+            ...providerSelectionLogFields,
+          }
+        );
+
+        return { success: true };
+      } catch (error) {
+        const foundWorkspaceId = await findSessionWorkspaceId(targetSessionId).catch(
+          () => null
+        );
+        logSystemEvent(
+          "ipc",
+          "session",
+          "lock-model:error",
+          "会话模型锁定失败",
+          {
+            sessionId: targetSessionId,
+            requestedWorkspaceId: requestedWorkspaceId ?? "default",
+            foundInOtherWorkspace:
+              Boolean(foundWorkspaceId) &&
+              foundWorkspaceId !== (requestedWorkspaceId ?? "default"),
+            foundWorkspaceId,
+            code:
+              typeof error === "object" && error !== null && "code" in error
+                ? (error as { code?: string }).code
+                : undefined,
+            ...providerSelectionLogFields,
+            error: getErrorMessage(error),
+          },
+          { level: "error" }
+        );
+        throw error;
+      }
     }
   );
 
   ipcMain.handle(
     "session:switch-model",
-    async (_event, sessionId: unknown, modelId: unknown) => {
+    async (
+      _event,
+      sessionId: unknown,
+      modelId: unknown,
+      workspaceId: unknown,
+      logContext: unknown
+    ) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
       }
@@ -1550,31 +1788,94 @@ app.whenReady().then(async () => {
         throw new Error("modelId must be a string.");
       }
 
+      const targetSessionId = sessionId.trim();
+      const requestedWorkspaceId = normalizeOptionalWorkspaceId(workspaceId);
       const trimmedModelId = modelId.trim();
-      const workspaces = await listWorkspaces();
-      let targetWorkspaceId: string | null = null;
 
-      for (const workspace of workspaces) {
-        const sessions = await listSessions(workspace.id);
-        if (sessions.some((session) => session.id === sessionId)) {
-          targetWorkspaceId = workspace.id;
-          break;
-        }
+      try {
+        const resolved = await resolveExistingSessionWorkspaceId(
+          targetSessionId,
+          requestedWorkspaceId
+        );
+        const session = await getSessionMeta(targetSessionId, resolved.workspaceId);
+        const providerSelectionLogFields = resolveProviderSelectionLogFields(
+          session?.providerId,
+          trimmedModelId,
+          logContext
+        );
+
+        logSystemEvent(
+          "ipc",
+          "session",
+          "switch-model:request",
+          "发送前切换会话模型",
+          {
+            sessionId: targetSessionId,
+            requestedWorkspaceId: requestedWorkspaceId ?? "default",
+            resolvedWorkspaceId: resolved.workspaceId,
+            resolvedFrom: resolved.resolvedFrom,
+            ...providerSelectionLogFields,
+          }
+        );
+
+        await updateSessionMeta(
+          targetSessionId,
+          {
+            selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
+          },
+          resolved.workspaceId
+        );
+
+        logSystemEvent(
+          "ipc",
+          "session",
+          "switch-model:success",
+          "会话模型已切换",
+          {
+            sessionId: targetSessionId,
+            requestedWorkspaceId: requestedWorkspaceId ?? "default",
+            resolvedWorkspaceId: resolved.workspaceId,
+            resolvedFrom: resolved.resolvedFrom,
+            ...providerSelectionLogFields,
+          }
+        );
+
+        return { success: true };
+      } catch (error) {
+        const foundWorkspaceId = await findSessionWorkspaceId(targetSessionId).catch(
+          () => null
+        );
+        const foundSession = foundWorkspaceId
+          ? await getSessionMeta(targetSessionId, foundWorkspaceId).catch(() => null)
+          : null;
+        const providerSelectionLogFields = resolveProviderSelectionLogFields(
+          foundSession?.providerId,
+          trimmedModelId,
+          logContext
+        );
+        logSystemEvent(
+          "ipc",
+          "session",
+          "switch-model:error",
+          "会话模型切换失败",
+          {
+            sessionId: targetSessionId,
+            requestedWorkspaceId: requestedWorkspaceId ?? "default",
+            foundInOtherWorkspace:
+              Boolean(foundWorkspaceId) &&
+              foundWorkspaceId !== (requestedWorkspaceId ?? "default"),
+            foundWorkspaceId,
+            code:
+              typeof error === "object" && error !== null && "code" in error
+                ? (error as { code?: string }).code
+                : undefined,
+            ...providerSelectionLogFields,
+            error: getErrorMessage(error),
+          },
+          { level: "error" }
+        );
+        throw error;
       }
-
-      if (!targetWorkspaceId) {
-        throw new Error(`Session ${sessionId} not found.`);
-      }
-
-      await updateSessionMeta(
-        sessionId,
-        {
-          selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
-        },
-        targetWorkspaceId
-      );
-
-      return { success: true };
     }
   );
 
@@ -1631,10 +1932,6 @@ app.whenReady().then(async () => {
       if (isAgentRunningForSession(sessionId)) {
         throw new Error(`An agent is already running for session ${sessionId}.`);
       }
-
-      console.log(
-        `[index] Current mode: productivity, workspace: ${targetWorkspaceId}, session: ${sessionId}`
-      );
 
       await runPromptInSession({
         sessionId,
@@ -1780,8 +2077,16 @@ app.on("before-quit", async (event) => {
   try {
     await memoryAgent.flushAll();
   } catch (error) {
-    console.error("[main] Memory flush on quit failed:", error);
+    logSystemEvent(
+      "app",
+      "memory",
+      "flush:error",
+      "退出前刷新记忆失败",
+      { error: getErrorMessage(error) },
+      { level: "error" }
+    );
   } finally {
+    await flushDiagnosticLogWrites();
     app.exit();
   }
 });

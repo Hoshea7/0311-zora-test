@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { app } from "electron";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { MCP_BUILTINS } from "../shared/types/mcp";
 import type {
@@ -30,8 +29,9 @@ import {
   createBuiltinScheduleServer,
   ZORA_SCHEDULE_SERVER_NAME,
 } from "./builtin-mcp/schedule";
+import { logSystemEvent } from "./system-log";
 import { isRecord } from "./utils/guards";
-import { isEnoentError, replaceFileAtomically } from "./utils/fs";
+import { isEnoentError, replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 const MASKED_SECRET = "••••••";
 const DEFAULT_TIMEOUT_SECONDS = 30;
@@ -683,7 +683,7 @@ export class McpManager {
   private initializePromise: Promise<McpConfig> | null = null;
 
   constructor() {
-    this.configPath = path.join(app.getPath("home"), ".zora", "mcp.json");
+    this.configPath = path.join(ZORA_DIR, "mcp.json");
     this.configDir = path.dirname(this.configPath);
   }
 
@@ -1184,8 +1184,13 @@ export class McpManager {
       }
 
       if (name === ZORA_SCHEDULE_SERVER_NAME) {
-        console.warn(
-          `[mcp-manager] Ignoring user MCP server named "${ZORA_SCHEDULE_SERVER_NAME}" because it is reserved for Zora's built-in schedule tool.`
+        logSystemEvent(
+          "mcp",
+          "manager",
+          "reserved:skip",
+          "忽略与 Zora 内置工具重名的用户 MCP server",
+          { name: ZORA_SCHEDULE_SERVER_NAME },
+          { level: "warn" }
         );
         continue;
       }

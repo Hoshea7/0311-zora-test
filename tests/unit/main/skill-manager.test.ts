@@ -68,6 +68,7 @@ async function loadSkillManagerModule(homeDir: string) {
 }
 
 afterEach(() => {
+  delete process.env.ZORA_HOME;
   resetBundledSkillsConfig();
   vi.doUnmock("node:os");
   vi.resetModules();

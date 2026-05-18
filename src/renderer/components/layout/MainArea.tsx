@@ -30,6 +30,10 @@ import {
 } from "../../utils/provider-selection";
 import { generateSmartTitle } from "../../utils/title";
 import { getErrorMessage } from "../../utils/message";
+import {
+  logChatSubmitStart,
+  logCurrentSessionMissing,
+} from "../../utils/client-log";
 import { ChatHeader } from "../chat/ChatHeader";
 import { MessageList } from "../chat/MessageList";
 import { ChatInput } from "../chat/ChatInput";
@@ -75,6 +79,20 @@ export function MainArea() {
       return;
     }
 
+    const activeSession =
+      currentSessionId && currentSession ? currentSession : null;
+    const staleSessionId =
+      currentSessionId && !currentSession ? currentSessionId : null;
+
+    if (staleSessionId) {
+      logCurrentSessionMissing({
+        currentSessionId: staleSessionId,
+        currentWorkspaceId,
+        inputLength: text.length,
+        attachmentCount: currentAttachments.length,
+      });
+    }
+
     let effectiveDefaultModelSettings = defaultModelSettings;
     if (
       !effectiveDefaultModelSettings &&
@@ -94,7 +112,7 @@ export function MainArea() {
       isMissingLockedProvider,
     } = resolveCurrentProviderAndModel(
       providers,
-      currentSession,
+      activeSession,
       effectiveDefaultModelSettings,
       draftSelectedProviderId,
       draftSelectedModelId
@@ -107,7 +125,25 @@ export function MainArea() {
       return;
     }
 
-    let sessionId = currentSessionId;
+    logChatSubmitStart({
+      currentSessionId,
+      currentSessionExists: Boolean(activeSession),
+      currentWorkspaceId,
+      selectedProvider: selectedProvider?.name ?? null,
+      selectedProviderType: selectedProvider?.providerType ?? null,
+      selectedModel: selectedModelId ?? null,
+      selectionSource: activeSession?.providerLocked
+        ? "session"
+        : draftSelectedProviderId || draftSelectedModelId
+          ? "composer"
+          : selectedProvider
+            ? "default"
+            : "none",
+      attachmentCount: currentAttachments.length,
+      inputLength: text.length,
+    });
+
+    let sessionId = activeSession ? currentSessionId : null;
     if (!sessionId) {
       sessionId = await createSession(
         generateSmartTitle(text || currentAttachments[0]?.name || "新会话")
@@ -122,8 +158,18 @@ export function MainArea() {
       selectedProvider,
       selectedModelId
     );
+    const modelLogContext = selectedProvider
+      ? {
+          provider: selectedProvider.name,
+          providerType: selectedProvider.providerType,
+          model: selectedModelId,
+          selectionSource: nextSelectedModelOverride
+            ? ("selected" as const)
+            : ("provider_default" as const),
+        }
+      : undefined;
     const currentSelectedModelOverride =
-      normalizeOptionalModelId(currentSession?.selectedModelId) ?? "";
+      normalizeOptionalModelId(activeSession?.selectedModelId) ?? "";
 
     try {
       if (selectedProvider?.id) {
@@ -131,13 +177,19 @@ export function MainArea() {
           sessionId,
           selectedProvider.id,
           nextSelectedModelOverride,
-          currentWorkspaceId
+          currentWorkspaceId,
+          modelLogContext
         );
       } else if (
-        currentSessionId === null ||
+        activeSession === null ||
         currentSelectedModelOverride !== nextSelectedModelOverride
       ) {
-        await window.zora.switchSessionModel(sessionId, nextSelectedModelOverride);
+        await window.zora.switchSessionModel(
+          sessionId,
+          nextSelectedModelOverride,
+          currentWorkspaceId,
+          modelLogContext
+        );
       }
     } catch (error) {
       failTurn(sessionId, getErrorMessage(error));
@@ -147,9 +199,9 @@ export function MainArea() {
     updateSessionMetaInState({
       sessionId,
       updates: {
-        providerId: currentSession?.providerId ?? selectedProvider?.id,
+        providerId: activeSession?.providerId ?? selectedProvider?.id,
         providerLocked:
-          currentSession?.providerLocked === true || Boolean(selectedProvider),
+          activeSession?.providerLocked === true || Boolean(selectedProvider),
         selectedModelId: nextSelectedModelOverride || undefined,
       },
     });

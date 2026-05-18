@@ -2,6 +2,7 @@ import type { ProviderConfig } from "../../shared/types/provider";
 import { buildProviderSdkEnv, providerManager } from "../provider-manager";
 import { loadMemorySettings } from "../memory-settings";
 import { resolveDefaultModelTarget } from "../default-model-settings";
+import { logAgentEvent } from "../agent-loop-log";
 
 function normalizeOptionalModelId(value?: string | null): string | undefined {
   if (typeof value !== "string") {
@@ -64,8 +65,16 @@ export async function resolveSdkEnvForProfile(
   if (options?.providerId) {
     result = await providerManager.getProviderByIdWithKey(options.providerId);
     if (!result) {
-      console.warn(
-        `[${profileName}] Locked provider ${options.providerId} not found. Falling back.`
+      logAgentEvent(
+        "pre",
+        "model:fallback",
+        "模型配置回退",
+        {
+          profile: profileName,
+          providerId: options.providerId,
+          reason: "locked_provider_not_found",
+        },
+        { level: "warn" }
       );
     }
   }
@@ -78,8 +87,16 @@ export async function resolveSdkEnvForProfile(
           settings.memoryProviderId
         );
         if (result && !result.provider.enabled) {
-          console.warn(
-            `[memory] Configured provider ${settings.memoryProviderId} is disabled, falling back to default`
+          logAgentEvent(
+            "pre",
+            "model:fallback",
+            "模型配置回退",
+            {
+              profile: profileName,
+              providerId: settings.memoryProviderId,
+              reason: "memory_provider_disabled",
+            },
+            { level: "warn" }
           );
           result = null;
         }
@@ -88,15 +105,23 @@ export async function resolveSdkEnvForProfile(
             result.provider,
             settings.memoryModelId
           );
-          console.log(
-            `[memory] Using dedicated memory provider: ${result.provider.name}`
-          );
+          logAgentEvent("pre", "model", "模型已确认", {
+            profile: profileName,
+            provider: result.provider.name,
+          });
         }
       }
     } catch (err) {
-      console.warn(
-        "[memory] Failed to load memory settings, using default provider",
-        err
+      logAgentEvent(
+        "pre",
+        "model:fallback",
+        "模型配置回退",
+        {
+          profile: profileName,
+          reason: "memory_settings_failed",
+          error: err instanceof Error ? err.message : String(err),
+        },
+        { level: "warn" }
       );
     }
   }
@@ -117,9 +142,11 @@ export async function resolveSdkEnvForProfile(
   }
 
   if (!result) {
-    console.log(
-      `[${profileName}] No active provider configured. Falling back to process.env provider settings.`
-    );
+    logAgentEvent("pre", "model", "模型已确认", {
+      profile: profileName,
+      source: "process.env",
+      reason: "no_active_provider",
+    });
     return env;
   }
 
@@ -133,19 +160,27 @@ export async function resolveSdkEnvForProfile(
       : provider.modelId;
 
   if (requestedModelId && effectiveModelId !== requestedModelId) {
-    console.warn(
-      `[${profileName}] Requested model ${requestedModelId} is not configured on provider ${provider.name}; falling back to provider default.`
+    logAgentEvent(
+      "pre",
+      "model:fallback",
+      "模型配置回退",
+      {
+        profile: profileName,
+        provider: provider.name,
+        requestedModel: requestedModelId,
+        model: effectiveModelId,
+        reason: "requested_model_not_configured",
+      },
+      { level: "warn" }
     );
   }
 
-  console.log(`[${profileName}] Active provider:`, {
-    lockedProviderId: options?.providerId ?? "(default)",
-    selectedModelId: requestedModelId ?? "(provider default)",
-    providerId: provider.id,
-    name: provider.name,
+  logAgentEvent("pre", "model", "模型已确认", {
+    profile: profileName,
+    provider: provider.name,
     providerType: provider.providerType,
-    baseUrl: provider.baseUrl,
-    modelId: effectiveModelId ?? "(default model)",
+    model: effectiveModelId ?? "(default model)",
+    selectedModel: requestedModelId ?? "(provider default)",
   });
 
   env = buildProviderSdkEnv({

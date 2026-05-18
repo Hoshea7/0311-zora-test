@@ -206,6 +206,21 @@ describe("main default-model-settings", () => {
     });
   });
 
+  it("returns null when the fallback provider is disabled", async () => {
+    const { providerManagerMock, resolveDefaultModelTarget } =
+      await loadDefaultModelSettingsModule(createTempHome());
+
+    providerManagerMock.getDefaultProviderWithKey.mockResolvedValue({
+      provider: createProvider({
+        enabled: false,
+        isDefault: true,
+      }),
+      apiKey: "fallback-key",
+    });
+
+    await expect(resolveDefaultModelTarget()).resolves.toBeNull();
+  });
+
   it("returns null when neither a configured nor fallback provider is available", async () => {
     const homeDir = createTempHome();
     const settingsPath = path.join(homeDir, ".zora", "default-model-settings.json");

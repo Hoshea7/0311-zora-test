@@ -1,4 +1,5 @@
 import type { AgentStreamEvent } from "../../shared/zora";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 import { isRecord } from "../utils/guards";
 import type { FeishuGateway } from "./gateway";
 
@@ -113,7 +114,14 @@ export class FeishuMessageSender {
         JSON.stringify(buildThinkingCard())
       );
     } catch (error) {
-      console.error("[Feishu Sender] Failed to send thinking card, falling back:", error);
+      logSystemEvent(
+        "feishu",
+        "sender",
+        "thinking-card:error",
+        "发送飞书思考卡片失败，降级为普通回复",
+        { chatId, sessionId, error: getErrorMessage(error) },
+        { level: "error" }
+      );
     }
 
     const typingReactionId = await this.gateway.addTypingReaction(userMessageId).catch(() => null);
@@ -200,7 +208,14 @@ export class FeishuMessageSender {
         replyToMessageId = undefined;
       }
     } catch (error) {
-      console.error("[Feishu Sender] Final send error:", error);
+      logSystemEvent(
+        "feishu",
+        "sender",
+        "final:error",
+        "发送飞书最终回复失败",
+        { sessionId, error: getErrorMessage(error) },
+        { level: "error" }
+      );
 
       try {
         await this.sendText(
@@ -209,7 +224,14 @@ export class FeishuMessageSender {
           state.userMessageId
         );
       } catch (fallbackError) {
-        console.error("[Feishu Sender] Fallback text send failed:", fallbackError);
+        logSystemEvent(
+          "feishu",
+          "sender",
+          "fallback:error",
+          "飞书文本降级发送失败",
+          { sessionId, error: getErrorMessage(fallbackError) },
+          { level: "error" }
+        );
       }
     } finally {
       await this.gateway
@@ -260,7 +282,14 @@ export class FeishuMessageSender {
       }
       return;
     } catch (error) {
-      console.warn("[Feishu Sender] Post send failed, trying text:", error);
+      logSystemEvent(
+        "feishu",
+        "sender",
+        "post:error",
+        "飞书 post 消息发送失败，尝试 text",
+        { chatId, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
 
     try {
@@ -271,7 +300,14 @@ export class FeishuMessageSender {
       }
       return;
     } catch (error) {
-      console.warn("[Feishu Sender] Text reply failed, trying direct send:", error);
+      logSystemEvent(
+        "feishu",
+        "sender",
+        "text-reply:error",
+        "飞书 text 回复失败，尝试直接发送",
+        { chatId, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
 
     await this.gateway.sendMessage(chatId, "text", buildTextContent(text));

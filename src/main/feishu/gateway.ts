@@ -1,5 +1,6 @@
 import * as lark from "@larksuiteoapi/node-sdk";
 import type { FeishuConfig, FeishuConnectionTestResult } from "../../shared/types/feishu";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 import { isRecord } from "../utils/guards";
 import { normalizeRequiredString, normalizeOptionalString } from "../utils/validate";
 
@@ -242,12 +243,26 @@ export async function testFeishuConnection(
       const info = extractBotInfoFromPayload(payload);
       botName = info.botName;
     } catch (error) {
-      console.warn("[feishu:test] Failed to fetch bot info:", error);
+      logSystemEvent(
+        "feishu",
+        "gateway",
+        "bot-info:error",
+        "测试连接时读取 Bot 信息失败",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
 
     return { success: true, error: null, botName };
   } catch (error) {
-    console.error("[feishu:test] Connection test failed:", error);
+    logSystemEvent(
+      "feishu",
+      "gateway",
+      "test:error",
+      "飞书连接测试失败",
+      { error: getErrorMessage(error) },
+      { level: "error" }
+    );
     return { success: false, error: stringifyError(error), botName: null };
   }
 }
@@ -277,7 +292,14 @@ export class FeishuGateway {
       this.botOpenId = botInfo.botOpenId;
     } catch (error) {
       // Bot 资料只用于状态展示和群聊过滤，拿不到时不应阻塞长连接建立。
-      console.warn("[feishu:start] Failed to fetch bot info before websocket start:", error);
+      logSystemEvent(
+        "feishu",
+        "gateway",
+        "bot-info:error",
+        "启动长连接前读取 Bot 信息失败",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
 
     const eventDispatcher = new lark.EventDispatcher({
@@ -291,7 +313,14 @@ export class FeishuGateway {
         void Promise.resolve()
           .then(() => this.onMessage?.(data))
           .catch((error) => {
-            console.error("[FeishuGateway] Message handling error:", error);
+            logSystemEvent(
+              "feishu",
+              "gateway",
+              "message:error",
+              "处理飞书消息事件失败",
+              { error: getErrorMessage(error) },
+              { level: "error" }
+            );
           });
       },
     });
@@ -410,7 +439,14 @@ export class FeishuGateway {
 
       return true;
     } catch (error) {
-      console.error("[Feishu Gateway] Failed to patch message:", error);
+      logSystemEvent(
+        "feishu",
+        "gateway",
+        "message:patch:error",
+        "更新飞书消息失败",
+        { messageId, error: getErrorMessage(error) },
+        { level: "error" }
+      );
       return false;
     }
   }
@@ -438,7 +474,14 @@ export class FeishuGateway {
 
       return normalizeOptionalString(response.data?.reaction_id);
     } catch (error) {
-      console.warn("[Feishu Gateway] Typing reaction failed:", error);
+      logSystemEvent(
+        "feishu",
+        "gateway",
+        "typing:add:error",
+        "添加飞书打字指示器失败",
+        { messageId, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
       return null;
     }
   }
@@ -499,7 +542,14 @@ export class FeishuGateway {
         throw new Error(deleteError);
       }
     } catch (error) {
-      console.warn("[Feishu Gateway] Remove typing reaction failed:", error);
+      logSystemEvent(
+        "feishu",
+        "gateway",
+        "typing:remove:error",
+        "移除飞书打字指示器失败",
+        { messageId, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
   }
 

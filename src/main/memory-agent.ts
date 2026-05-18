@@ -7,10 +7,17 @@ import {
   getMemorySettingsSync,
   loadMemorySettings,
 } from "./memory-settings";
-import { getZoraMemoryDirPath, loadFile } from "./memory-store";
+import { loadFile } from "./memory-store";
 import { buildMemoryProfile } from "./query-profiles";
 import { getSDKRuntimeOptions } from "./sdk-runtime";
 import { listSessions, loadMessages } from "./session-store";
+import {
+  formatDurationMs,
+  logAgentEvent,
+  logAgentLoopEnd,
+  logAgentLoopStart,
+} from "./agent-loop-log";
+import { getErrorMessage } from "./system-log";
 
 const MEMORY_PROCESS_DEBOUNCE_MS = 10 * 60 * 1000;
 const BATCH_QUEUE_MAX_SIZE = 8;
@@ -24,8 +31,6 @@ const BATCH_ASSISTANT_MESSAGE_MAX_CHARS = 200;
 const BATCH_MESSAGE_LIMIT = 20;
 const BATCH_MESSAGE_HEAD = 4;
 const BATCH_MESSAGE_TAIL = 12;
-const MEMORY_AGENT_PREFIX = "[memory-agent]";
-
 type PendingSessionContext = {
   workspaceId: string;
   enqueuedAt: number;
@@ -93,10 +98,6 @@ function truncateText(value: string, maxChars: number) {
   }
 
   return `${trimmed.slice(0, maxChars)}...`;
-}
-
-function logMemoryAgent(message: string) {
-  console.log(`${MEMORY_AGENT_PREFIX} ${message}`);
 }
 
 function serializeMemoryMessage(
@@ -280,8 +281,12 @@ export class MemoryAgent {
     if (messages.length < 4) {
       this.clearDebounceTimer(sessionId);
       this.deletePendingContext(sessionId);
-      logMemoryAgent(
-        `Session ${sessionId} has ${messages.length} message(s), below threshold (4); not queuing.`
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆任务跳过",
+        { session: sessionId, workspace: workspaceId, reason: "below_threshold", messages: messages.length },
+        { agentType: "memory", verbose: true }
       );
       return;
     }
@@ -292,19 +297,33 @@ export class MemoryAgent {
       case "manual":
         this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
-        logMemoryAgent(
-          `Conversation ended for session ${sessionId} (manual mode: stored, waiting for explicit trigger; pending: ${this.pendingContexts.size}).`
+        logAgentEvent(
+          "pre",
+          "queued",
+          "记忆任务已暂存",
+          { session: sessionId, workspace: workspaceId, mode: "manual", pending: this.pendingContexts.size },
+          { agentType: "memory" }
         );
         return;
 
       case "batch":
         this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
-        logMemoryAgent(
-          `Batch: queued session ${sessionId} (pending: ${this.pendingContexts.size}).`
+        logAgentEvent(
+          "pre",
+          "queued",
+          "记忆任务已加入批处理队列",
+          { session: sessionId, workspace: workspaceId, mode: "batch", pending: this.pendingContexts.size },
+          { agentType: "memory" }
         );
         if (this.pendingContexts.size >= BATCH_QUEUE_MAX_SIZE) {
-          logMemoryAgent("Batch: queue full; triggering immediate batch processing.");
+          logAgentEvent(
+            "pre",
+            "batch:ready",
+            "记忆批处理队列已满",
+            { pending: this.pendingContexts.size },
+            { agentType: "memory" }
+          );
           this.clearBatchIdleTimer();
           void this.processPendingBatch();
         } else {
@@ -316,10 +335,12 @@ export class MemoryAgent {
       default:
         this.trackPendingSession(sessionId, workspaceId);
         this.clearDebounceTimer(sessionId);
-        logMemoryAgent(
-          this.processing.has(sessionId)
-            ? `Conversation ended for session ${sessionId}; queued a follow-up memory recheck after the current run.`
-            : `Conversation ended for session ${sessionId}; queued memory processing.`
+        logAgentEvent(
+          "pre",
+          "queued",
+          this.processing.has(sessionId) ? "记忆复查已排队" : "记忆任务已排队",
+          { session: sessionId, workspace: workspaceId, mode: "immediate" },
+          { agentType: "memory" }
         );
         this.enqueueProcess(sessionId, workspaceId);
         return;
@@ -339,23 +360,39 @@ export class MemoryAgent {
     this.trackPendingSession(sessionId, workspaceId);
     const hadExistingTimer = this.debounceTimers.has(sessionId);
     this.clearDebounceTimer(sessionId);
-    logMemoryAgent(
-      `${hadExistingTimer ? "Rescheduled" : "Scheduled"} session ${sessionId} for memory processing in ${Math.floor(MEMORY_PROCESS_DEBOUNCE_MS / 1000)}s.`
+    logAgentEvent(
+      "pre",
+      "queued",
+      hadExistingTimer ? "记忆任务已重新排队" : "记忆任务已排队",
+      {
+        session: sessionId,
+        workspace: workspaceId,
+        delay: `${Math.floor(MEMORY_PROCESS_DEBOUNCE_MS / 1000)}s`,
+      },
+      { agentType: "memory", verbose: true }
     );
 
     const timer = setTimeout(() => {
       this.debounceTimers.delete(sessionId);
 
       if (isAgentRunningForSession(sessionId)) {
-        logMemoryAgent(
-          `Session ${sessionId} is still running when debounce fired; delaying memory processing.`
+        logAgentEvent(
+          "pre",
+          "delay",
+          "会话仍在运行，延后记忆任务",
+          { session: sessionId, workspace: workspaceId },
+          { agentType: "memory", verbose: true }
         );
         this.scheduleProcessing(sessionId, workspaceId);
         return;
       }
 
-      logMemoryAgent(
-        `Debounce window elapsed for session ${sessionId}; queued memory processing.`
+      logAgentEvent(
+        "pre",
+        "queued",
+        "记忆任务延迟窗口结束",
+        { session: sessionId, workspace: workspaceId },
+        { agentType: "memory", verbose: true }
       );
       this.enqueueProcess(sessionId, workspaceId);
     }, MEMORY_PROCESS_DEBOUNCE_MS);
@@ -367,7 +404,13 @@ export class MemoryAgent {
     const settings = await loadMemorySettings();
 
     if (settings.mode === "manual") {
-      logMemoryAgent("Flush skipped: manual mode.");
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆 flush 跳过",
+        { reason: "manual_mode" },
+        { agentType: "memory", verbose: true }
+      );
       return;
     }
 
@@ -376,48 +419,73 @@ export class MemoryAgent {
 
     const pendingCount = this.pendingContexts.size;
     if (pendingCount === 0) {
-      logMemoryAgent("Flush: no pending sessions.");
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆 flush 跳过",
+        { reason: "no_pending_sessions" },
+        { agentType: "memory", verbose: true }
+      );
       return;
     }
 
-    logMemoryAgent(`Flush: processing ${pendingCount} pending session(s).`);
+    logAgentEvent(
+      "pre",
+      "flush",
+      "开始处理待执行记忆任务",
+      { pending: pendingCount },
+      { agentType: "memory" }
+    );
 
     if (settings.mode === "batch") {
       await this.processPendingBatch();
       await this.queue;
-      logMemoryAgent("Flush complete.");
       return;
     }
 
     for (const [sessionId, context] of this.pendingContexts) {
       if (this.processing.has(sessionId)) {
-        logMemoryAgent(`Flush: session ${sessionId} already processing; skipping.`);
+        logAgentEvent(
+          "pre",
+          "skip",
+          "记忆任务跳过",
+          { session: sessionId, reason: "already_processing" },
+          { agentType: "memory", verbose: true }
+        );
         continue;
       }
       this.enqueueProcess(sessionId, context.workspaceId);
     }
 
     await this.queue;
-    logMemoryAgent("Flush complete.");
   }
 
   async processNow(): Promise<{ total: number; processed: number }> {
-    logMemoryAgent("Manual processNow triggered.");
-
     this.clearBatchIdleTimer();
 
     this.clearAllDebounceTimers();
 
     const total = this.pendingContexts.size;
     if (total === 0) {
-      logMemoryAgent("processNow: no pending sessions.");
+      logAgentEvent(
+        "pre",
+        "skip",
+        "手动记忆处理跳过",
+        { reason: "no_pending_sessions" },
+        { agentType: "memory" }
+      );
       this.notifyPendingChanged();
       return { total: 0, processed: 0 };
     }
 
-    logMemoryAgent(`processNow: ${total} pending session(s).`);
+    logAgentEvent(
+      "pre",
+      "manual",
+      "手动触发记忆处理",
+      { pending: total },
+      { agentType: "memory" }
+    );
     const processed = await this.processPendingBatch();
-    logMemoryAgent(`processNow complete: ${processed}/${total} sessions processed.`);
     this.notifyPendingChanged();
 
     return { total, processed };
@@ -486,11 +554,21 @@ export class MemoryAgent {
 
   private resetBatchIdleTimer(idleMinutes: number): void {
     this.clearBatchIdleTimer();
-    logMemoryAgent(`Batch idle timer set: ${idleMinutes}m from now.`);
+    logAgentEvent(
+      "pre",
+      "batch:timer",
+      "记忆批处理等待窗口已设置",
+      { idleMinutes },
+      { agentType: "memory", verbose: true }
+    );
     this.batchIdleTimer = setTimeout(() => {
       this.batchIdleTimer = null;
-      logMemoryAgent(
-        `Batch idle timer fired after ${idleMinutes}m; processing ${this.pendingContexts.size} pending session(s).`
+      logAgentEvent(
+        "pre",
+        "batch:ready",
+        "记忆批处理等待窗口结束",
+        { idleMinutes, pending: this.pendingContexts.size },
+        { agentType: "memory" }
       );
       void this.processPendingBatch();
     }, idleMinutes * 60 * 1000);
@@ -523,13 +601,25 @@ export class MemoryAgent {
     const pending = this.getEligiblePendingSessions();
 
     if (pending.length === 0) {
-      logMemoryAgent("Batch: no eligible pending sessions.");
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆批处理跳过",
+        { reason: "no_eligible_sessions" },
+        { agentType: "memory", verbose: true }
+      );
       return 0;
     }
 
     if (pending.length === 1) {
       const { sessionId, context } = pending[0];
-      logMemoryAgent(`Batch: only 1 session (${sessionId}); using single-session processing.`);
+      logAgentEvent(
+        "pre",
+        "batch:single",
+        "记忆批处理转为单会话处理",
+        { session: sessionId, workspace: context.workspaceId },
+        { agentType: "memory", verbose: true }
+      );
       return (await this.process(sessionId, context.workspaceId)) ? 1 : 0;
     }
 
@@ -546,11 +636,13 @@ export class MemoryAgent {
     let totalProcessed = 0;
 
     for (const group of byWorkspace.values()) {
-      const startedAt = Date.now();
       const workspaceId = group[0].context.workspaceId;
-
-      logMemoryAgent(
-        `Batch: processing ${group.length} sessions for workspace=${workspaceId}.`
+      logAgentEvent(
+        "pre",
+        "batch:start",
+        "记忆批处理开始",
+        { workspace: workspaceId, sessions: group.length },
+        { agentType: "memory" }
       );
 
       const entries: Array<{
@@ -565,14 +657,26 @@ export class MemoryAgent {
           const messages = await loadMessages(sessionId, context.workspaceId);
 
           if (messages.length < 4) {
-            logMemoryAgent(`Batch: skip ${sessionId} — only ${messages.length} message(s).`);
+            logAgentEvent(
+              "pre",
+              "skip",
+              "记忆任务跳过",
+              { session: sessionId, workspace: context.workspaceId, reason: "below_threshold", messages: messages.length },
+              { agentType: "memory", verbose: true }
+            );
             this.deletePendingContext(sessionId);
             continue;
           }
 
           const lastProcessed = this.processedMessageCounts.get(sessionId);
           if (lastProcessed !== undefined && lastProcessed >= messages.length) {
-            logMemoryAgent(`Batch: skip ${sessionId} — unchanged (${messages.length} msgs).`);
+            logAgentEvent(
+              "pre",
+              "skip",
+              "记忆任务跳过",
+              { session: sessionId, workspace: context.workspaceId, reason: "unchanged", messages: messages.length },
+              { agentType: "memory", verbose: true }
+            );
             this.deletePendingContext(sessionId);
             continue;
           }
@@ -589,13 +693,25 @@ export class MemoryAgent {
             entry: { sessionTitle, messages, conversationTime },
           });
         } catch (error) {
-          console.error(`${MEMORY_AGENT_PREFIX} Batch: failed to load ${sessionId}:`, error);
+          logAgentEvent(
+            "post",
+            "error",
+            "记忆批处理读取会话失败",
+            { session: sessionId, workspace: context.workspaceId, reason: getErrorMessage(error) },
+            { agentType: "memory", level: "error" }
+          );
           this.deletePendingContext(sessionId);
         }
       }
 
       if (entries.length === 0) {
-        logMemoryAgent("Batch: no eligible sessions after filtering.");
+        logAgentEvent(
+          "pre",
+          "skip",
+          "记忆批处理跳过",
+          { workspace: workspaceId, reason: "empty_after_filter" },
+          { agentType: "memory", verbose: true }
+        );
         continue;
       }
 
@@ -605,47 +721,82 @@ export class MemoryAgent {
         if (!ctx) {
           continue;
         }
-        logMemoryAgent(`Batch: 1 session survived filtering (${sessionId}); using single-session.`);
+        logAgentEvent(
+          "pre",
+          "batch:single",
+          "记忆批处理转为单会话处理",
+          { session: sessionId, workspace: ctx.workspaceId },
+          { agentType: "memory", verbose: true }
+        );
         if (await this.process(sessionId, ctx.workspaceId)) {
           totalProcessed += 1;
         }
         continue;
       }
 
-      const memoryContent = await loadFile("MEMORY.md");
-      const userContent = await loadFile("USER.md");
-      logMemoryAgent(
-        `Batch: loaded memory state: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
-      );
-
-      const {
-        prompt,
-        totalTranscriptMessages,
-        keptTranscriptMessages,
-        omittedTranscriptMessages,
-      } = buildBatchMemoryPrompt(entries.map((item) => item.entry), memoryContent, userContent);
-
-      logMemoryAgent(
-        `Batch prompt built: sessions=${entries.length}, transcript=${keptTranscriptMessages}/${totalTranscriptMessages}, omitted=${omittedTranscriptMessages}, chars=${prompt.length}.`
-      );
-
       const batchSessionIds = entries.map((item) => item.sessionId);
       for (const sid of batchSessionIds) {
         this.processing.add(sid);
       }
 
-      try {
-        const memorySessionId = `__memory_batch_${Date.now()}__`;
-        const targetZoraDir = getZoraMemoryDirPath();
+      const startedAt = Date.now();
+      const memorySessionId = `__memory_batch_${Date.now()}__`;
+      let loopStatus: "success" | "error" = "success";
+      let processedCount = 0;
+      logAgentLoopStart("MemoryAgent", {
+        session: memorySessionId,
+        workspace: workspaceId,
+        source: "memory",
+      });
 
-        logMemoryAgent(
-          `Starting batch memory run ${memorySessionId} for ${batchSessionIds.length} sessions in ${targetZoraDir}.`
+      try {
+        const [memoryContent, userContent] = await Promise.all([
+          loadFile("MEMORY.md"),
+          loadFile("USER.md"),
+        ]);
+        logAgentEvent(
+          "pre",
+          "memory:load",
+          "记忆文件已加载",
+          {
+            memoryChars: memoryContent?.length ?? 0,
+            userChars: userContent?.length ?? 0,
+          }
+        );
+
+        const {
+          prompt,
+          totalTranscriptMessages,
+          keptTranscriptMessages,
+          omittedTranscriptMessages,
+        } = buildBatchMemoryPrompt(entries.map((item) => item.entry), memoryContent, userContent);
+
+        logAgentEvent(
+          "pre",
+          "prompt",
+          "记忆提示词已生成",
+          {
+            sessions: entries.length,
+            transcript: `${keptTranscriptMessages}/${totalTranscriptMessages}`,
+            omitted: omittedTranscriptMessages,
+            promptChars: prompt.length,
+          }
         );
 
         const profile = await buildMemoryProfile({
           sdkRuntime: getSDKRuntimeOptions(),
           prompt,
         });
+        logAgentEvent(
+          "pre",
+          "ready",
+          "记忆运行参数已准备",
+          {
+            cwd: profile.options.cwd,
+            maxTurns: profile.options.maxTurns,
+            promptChars: profile.prompt.length,
+          }
+        );
 
         await runAgentWithProfile(
           memorySessionId,
@@ -660,17 +811,29 @@ export class MemoryAgent {
           this.processedMessageCounts.set(sessionId, entry.messages.length);
         }
         totalProcessed += entries.length;
-
-        logMemoryAgent(
-          `Batch memory run complete for ${batchSessionIds.length} sessions in ${Date.now() - startedAt}ms.`
-        );
+        processedCount = entries.length;
       } catch (error) {
-        console.error(`${MEMORY_AGENT_PREFIX} Batch processing failed:`, error);
+        loopStatus = "error";
+        logAgentEvent(
+          "post",
+          "error",
+          "记忆批处理失败",
+          { reason: getErrorMessage(error) },
+          { level: "error" }
+        );
       } finally {
         for (const sid of batchSessionIds) {
           this.processing.delete(sid);
           this.deletePendingContext(sid);
         }
+        logAgentLoopEnd("MemoryAgent", {
+          status: loopStatus,
+          totalDuration: formatDurationMs(Date.now() - startedAt),
+          session: memorySessionId,
+          workspace: workspaceId,
+          sessions: batchSessionIds.length,
+          processed: processedCount,
+        });
       }
     }
 
@@ -687,9 +850,12 @@ export class MemoryAgent {
         await this.process(sessionId, workspaceId);
       })
       .catch((error) => {
-        console.error(
-          `${MEMORY_AGENT_PREFIX} Queue failure for session ${sessionId}:`,
-          error
+        logAgentEvent(
+          "post",
+          "error",
+          "记忆队列执行失败",
+          { session: sessionId, workspace: workspaceId, reason: getErrorMessage(error) },
+          { agentType: "memory", level: "error" }
         );
       });
   }
@@ -699,49 +865,88 @@ export class MemoryAgent {
     workspaceId = "default"
   ): Promise<boolean> {
     if (this.processing.has(sessionId)) {
-      logMemoryAgent(`Skip session ${sessionId}: processing already in progress.`);
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆任务跳过",
+        { session: sessionId, workspace: workspaceId, reason: "already_processing" },
+        { agentType: "memory", verbose: true }
+      );
       return Promise.resolve(false);
     }
 
     if (sessionId.startsWith("__memory_")) {
-      logMemoryAgent(`Skip nested memory session ${sessionId}.`);
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆任务跳过",
+        { session: sessionId, workspace: workspaceId, reason: "nested_memory_session" },
+        { agentType: "memory", verbose: true }
+      );
       return Promise.resolve(false);
     }
 
     return (async () => {
       const startedAt = Date.now();
+      let loopStatus: "success" | "skipped" | "error" = "success";
+      let processed = false;
+      let messageCount = 0;
       this.processing.add(sessionId);
-      logMemoryAgent(
-        `Begin processing session ${sessionId} (workspace=${workspaceId}).`
-      );
+      logAgentLoopStart("MemoryAgent", {
+        session: sessionId,
+        workspace: workspaceId,
+        source: "memory",
+      });
 
       try {
         const messages = await loadMessages(sessionId, workspaceId);
-        logMemoryAgent(
-          `Loaded ${messages.length} persisted message(s) for session ${sessionId}.`
+        messageCount = messages.length;
+        logAgentEvent(
+          "pre",
+          "load",
+          "会话记录已加载",
+          { session: sessionId, workspace: workspaceId, messages: messages.length }
         );
         if (messages.length < 4) {
-          logMemoryAgent(
-            `Skip session ${sessionId}: only ${messages.length} message(s), below threshold.`
+          loopStatus = "skipped";
+          logAgentEvent(
+            "pre",
+            "skip",
+            "记忆任务跳过",
+            { reason: "below_threshold", messages: messages.length },
+            { verbose: true }
           );
           return false;
         }
 
         const lastProcessedCount = this.processedMessageCounts.get(sessionId);
         if (lastProcessedCount !== undefined && lastProcessedCount >= messages.length) {
-          logMemoryAgent(
-            `Session ${sessionId} unchanged (${messages.length} message(s)); skipping.`
+          loopStatus = "skipped";
+          logAgentEvent(
+            "pre",
+            "skip",
+            "记忆任务跳过",
+            { reason: "unchanged", messages: messages.length },
+            { verbose: true }
           );
           return false;
         }
 
-        const sessions = await listSessions(workspaceId);
+        const [sessions, memoryContent, userContent] = await Promise.all([
+          listSessions(workspaceId),
+          loadFile("MEMORY.md"),
+          loadFile("USER.md"),
+        ]);
         const sessionTitle =
           sessions.find((session) => session.id === sessionId)?.title ?? "Untitled Session";
-        const memoryContent = await loadFile("MEMORY.md");
-        const userContent = await loadFile("USER.md");
-        logMemoryAgent(
-          `Loaded memory state for session ${sessionId}: MEMORY.md chars=${memoryContent?.length ?? 0}, USER.md chars=${userContent?.length ?? 0}.`
+        logAgentEvent(
+          "pre",
+          "memory:load",
+          "记忆文件已加载",
+          {
+            memoryChars: memoryContent?.length ?? 0,
+            userChars: userContent?.length ?? 0,
+          }
         );
         const {
           prompt,
@@ -750,28 +955,43 @@ export class MemoryAgent {
           omittedTranscriptMessages,
         } = buildMemoryPrompt(messages, sessionTitle, memoryContent, userContent);
         if (keptTranscriptMessages === 0) {
-          logMemoryAgent(
-            `Skip session ${sessionId}: no text transcript eligible for memory extraction.`
+          loopStatus = "skipped";
+          logAgentEvent(
+            "pre",
+            "skip",
+            "记忆任务跳过",
+            { reason: "empty_transcript" },
+            { verbose: true }
           );
           return false;
         }
 
-        logMemoryAgent(
-          `Built memory prompt for session ${sessionId}: transcript=${keptTranscriptMessages}/${totalTranscriptMessages}, omitted=${omittedTranscriptMessages}, chars=${prompt.length}, title="${sessionTitle}".`
+        logAgentEvent(
+          "pre",
+          "prompt",
+          "记忆提示词已生成",
+          {
+            transcript: `${keptTranscriptMessages}/${totalTranscriptMessages}`,
+            omitted: omittedTranscriptMessages,
+            promptChars: prompt.length,
+            title: truncateText(sessionTitle, 80),
+          }
         );
-        const targetZoraDir = getZoraMemoryDirPath();
         const memorySessionId = `__memory_${sessionId}__`;
-
-        logMemoryAgent(
-          `Starting memory run ${memorySessionId} for session ${sessionId} in ${targetZoraDir}.`
-        );
 
         const profile = await buildMemoryProfile({
           sdkRuntime: getSDKRuntimeOptions(),
           prompt,
         });
-        logMemoryAgent(
-          `Built memory profile for session ${sessionId}: cwd=${profile.options.cwd}, maxTurns=${profile.options.maxTurns}, promptChars=${profile.prompt.length}.`
+        logAgentEvent(
+          "pre",
+          "ready",
+          "记忆运行参数已准备",
+          {
+            cwd: profile.options.cwd,
+            maxTurns: profile.options.maxTurns,
+            promptChars: profile.prompt.length,
+          }
         );
 
         await runAgentWithProfile(
@@ -784,19 +1004,33 @@ export class MemoryAgent {
         );
         this.processedMessageCounts.set(sessionId, messages.length);
 
-        logMemoryAgent(
-          `Completed memory run for session ${sessionId} in ${Date.now() - startedAt}ms.`
-        );
+        processed = true;
         return true;
       } catch (error) {
-        console.error(
-          `${MEMORY_AGENT_PREFIX} Failed to process session ${sessionId}:`,
-          error
+        loopStatus = "error";
+        logAgentEvent(
+          "post",
+          "error",
+          "记忆任务失败",
+          {
+            session: sessionId,
+            workspace: workspaceId,
+            reason: getErrorMessage(error),
+          },
+          { level: "error" }
         );
         return false;
       } finally {
         this.processing.delete(sessionId);
         this.deletePendingContext(sessionId);
+        logAgentLoopEnd("MemoryAgent", {
+          status: loopStatus,
+          totalDuration: formatDurationMs(Date.now() - startedAt),
+          session: sessionId,
+          workspace: workspaceId,
+          messages: messageCount,
+          processed,
+        });
       }
     })();
   }

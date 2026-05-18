@@ -57,7 +57,7 @@ export function resolveActiveProvider(
   providers: ProviderConfig[]
 ): ProviderConfig | null {
   return (
-    providers.find((provider) => provider.isDefault) ??
+    providers.find((provider) => provider.enabled && provider.isDefault) ??
     providers.find((provider) => provider.enabled) ??
     null
   );

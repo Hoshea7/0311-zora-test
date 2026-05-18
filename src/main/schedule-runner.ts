@@ -12,6 +12,7 @@ import {
   onScheduledTasksStoreChanged,
   recordScheduledTaskRun,
 } from "./schedule-store";
+import { getErrorMessage, logSystemEvent, startSystemOperation } from "./system-log";
 
 const SCHEDULE_INITIAL_CHECK_DELAY_MS = 1_000;
 const SCHEDULE_STORE_CHANGE_DEBOUNCE_MS = 100;
@@ -91,9 +92,21 @@ async function runScheduledTask(
 ): Promise<void> {
   let success = false;
   const workspaceId = task.workspaceId;
+  const operation = startSystemOperation("schedule", "task", {
+    taskId: task.id,
+    workspaceId,
+  });
 
   try {
+    operation.log("pre", "start", "开始执行定时任务", {
+      title: task.title,
+      schedule: task.schedule.type,
+    });
+
     const session = await createSession(createScheduledSessionTitle(task), workspaceId);
+    operation.log("runtime", "session:create", "已创建定时任务会话", {
+      sessionId: session.id,
+    });
 
     await runPromptInSession({
       sessionId: session.id,
@@ -109,17 +122,28 @@ async function runScheduledTask(
 
     success = true;
   } catch (error) {
-    console.error(
-      `[schedule-runner] Scheduled task ${task.id} failed in workspace ${workspaceId}:`,
-      error
+    operation.log(
+      "runtime",
+      "run:error",
+      "定时任务执行失败",
+      { error: getErrorMessage(error) },
+      { level: "error" }
     );
   } finally {
     try {
       await recordTaskRun(task.id, workspaceId, { success });
+      operation.end(
+        success ? "success" : "failure",
+        "定时任务执行结束",
+        { success },
+        { level: success ? "info" : "warn" }
+      );
     } catch (error) {
-      console.error(
-        `[schedule-runner] Failed to record scheduled task ${task.id} result:`,
-        error
+      operation.end(
+        "failure",
+        "定时任务结果记录失败",
+        { success, error: getErrorMessage(error) },
+        { level: "error" }
       );
     }
   }
@@ -239,7 +263,14 @@ export function startScheduleRunner({
 
       await scheduleNextCheck(claimedTasks.length > 0 ? undefined : tasks, now);
     } catch (error) {
-      console.error("[schedule-runner] Failed to scan scheduled tasks:", error);
+      logSystemEvent(
+        "schedule",
+        "runner",
+        "scan:error",
+        "扫描定时任务失败，稍后重试",
+        { retryAfterMs: SCHEDULE_RETRY_DELAY_MS, error: getErrorMessage(error) },
+        { level: "error" }
+      );
       scheduleCheck(SCHEDULE_RETRY_DELAY_MS);
     } finally {
       checking = false;

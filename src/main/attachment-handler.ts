@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { FileAttachment } from "../shared/zora";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 
 type SupportedImageMediaType =
   | "image/jpeg"
@@ -127,9 +128,13 @@ export function attachmentsToContentBlocks(
         }
       }
     } catch (error) {
-      console.warn(
-        `[attachment-handler] Failed to read attachment "${attachment.name}".`,
-        error
+      logSystemEvent(
+        "app",
+        "attachment",
+        "read:error",
+        "读取附件失败",
+        { name: attachment.name, error: getErrorMessage(error) },
+        { level: "warn" }
       );
     }
   }

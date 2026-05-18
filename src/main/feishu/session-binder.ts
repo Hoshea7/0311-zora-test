@@ -8,6 +8,7 @@ import { isRecord } from "../utils/guards";
 import { ZORA_DIR, ensureZoraDir, replaceFileAtomically, isEnoentError } from "../utils/fs";
 import { normalizeOptionalString } from "../utils/validate";
 import { createSession } from "../session-store";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 import { getWorkspacePath } from "../workspace-store";
 import { loadFeishuConfig } from "./config";
 
@@ -45,8 +46,13 @@ async function resolveWorkspaceId(): Promise<string> {
     await getWorkspacePath(configuredWorkspaceId);
     return configuredWorkspaceId;
   } catch {
-    console.warn(
-      `[feishu:binder] Workspace ${configuredWorkspaceId} does not exist, falling back to default.`
+    logSystemEvent(
+      "feishu",
+      "binder",
+      "workspace:fallback",
+      "配置的飞书默认工作区不可用，回退到默认工作区",
+      { workspaceId: configuredWorkspaceId },
+      { level: "warn" }
     );
     return "default";
   }
@@ -88,7 +94,14 @@ export class FeishuSessionBinder {
         return;
       }
 
-      console.warn("[feishu:binder] Failed to load bindings, starting from empty state.", error);
+      logSystemEvent(
+        "feishu",
+        "binder",
+        "bindings:load:error",
+        "读取飞书会话绑定失败，使用空状态",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
   }
 

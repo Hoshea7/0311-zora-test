@@ -1,12 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readFile,
-  rename as fsRename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -21,10 +14,11 @@ import type {
   RoleTestDetail,
 } from "../shared/types/provider";
 import { getPackagedSafeWorkingDirectory, getSDKRuntimeOptions } from "./sdk-runtime";
+import { getErrorMessage, logSystemEvent, startSystemOperation } from "./system-log";
+import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 import { readSecret, storeSecret } from "./utils/secret-storage";
 
 const MASKED_API_KEY = "••••••";
-const ZORA_DIR = path.join(homedir(), ".zora");
 const PROVIDERS_FILE = path.join(ZORA_DIR, "providers.json");
 const TEST_CONNECTION_TIMEOUT_MS = 30_000;
 const OFFICIAL_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
@@ -42,39 +36,6 @@ type JsonRecord = Record<string, unknown>;
 
 const PROVIDER_TEST_PROMPT =
   "This is a provider connectivity check. Reply with exactly OK. Do not use tools, browse, or ask follow-up questions.";
-
-async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination file.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
-}
 
 function normalizeRequiredString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -223,11 +184,7 @@ function extractProviderTestTextDelta(message: SDKMessage): string {
 }
 
 function stringifyError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return typeof error === "string" ? error : String(error);
+  return getErrorMessage(error);
 }
 
 function mergeRoleModels(
@@ -316,7 +273,13 @@ export class ProviderManager {
       return false;
     }
 
-    console.log(`[provider:test] Cancelling test run: ${normalizedTestRunId}`);
+    logSystemEvent(
+      "provider",
+      "test",
+      "cancel",
+      "取消模型连接测试",
+      { testRunId: normalizedTestRunId }
+    );
     abortController.abort();
     return true;
   }
@@ -389,12 +352,17 @@ export class ProviderManager {
       });
     });
 
-    console.log(
-      "[provider:test-roles] Unique model results:",
-      uniqueModelIds.map((uniqueModelId) => {
-        const result = resultsByModelId.get(uniqueModelId);
-        return `${uniqueModelId} => ${result?.success ? "success" : `failure (${result?.message ?? "未知错误"})`}`;
-      })
+    logSystemEvent(
+      "provider",
+      "test-roles",
+      "models:result",
+      "角色模型连接测试完成",
+      {
+        models: uniqueModelIds.map((uniqueModelId) => {
+          const result = resultsByModelId.get(uniqueModelId);
+          return `${uniqueModelId}:${result?.success ? "success" : "failure"}`;
+        }),
+      }
     );
 
     return resultsByModelId;
@@ -442,7 +410,6 @@ export class ProviderManager {
   }
 
   private async writeProviders(providers: ProviderConfig[]): Promise<void> {
-    await mkdir(ZORA_DIR, { recursive: true });
     const sanitized = providers.map((provider) => stripLegacyProviderFields(provider));
     await replaceFileAtomically(PROVIDERS_FILE, `${JSON.stringify(sanitized, null, 2)}\n`);
   }
@@ -682,7 +649,13 @@ export class ProviderManager {
       };
     }
 
-    console.log("[provider:test-default] Testing:", activeProvider.name, activeProvider.baseUrl);
+    logSystemEvent(
+      "provider",
+      "test",
+      "default",
+      "测试默认模型连接",
+      { provider: activeProvider.name, baseUrl: activeProvider.baseUrl }
+    );
 
     return this.performTestConnection(
       activeProvider.baseUrl,
@@ -736,9 +709,25 @@ export class ProviderManager {
       abortController,
     };
 
-    console.log(`[provider:test][${testTargetLabel}] Starting connection test.`, {
+    const operation = startSystemOperation("provider", "test", {
+      model: testTargetLabel,
+    });
+    const finish = (
+      result: ProviderTestResult,
+      status: "success" | "failure" | "stopped",
+      fields?: Record<string, unknown>
+    ): ProviderTestResult => {
+      operation.end(
+        status,
+        "模型连接测试结束",
+        { message: result.message, ...fields },
+        { level: status === "failure" ? "warn" : "info" }
+      );
+      return result;
+    };
+
+    operation.log("pre", "start", "开始测试模型连接", {
       baseUrl: normalizedBaseUrl,
-      modelId: testTargetLabel,
       prompt,
     });
 
@@ -748,7 +737,7 @@ export class ProviderManager {
       options: queryOptions,
     });
     const handleExternalAbort = () => {
-      console.log(`[provider:test][${testTargetLabel}] Received external abort signal.`);
+      operation.log("runtime", "abort", "收到外部停止信号");
       abortController.abort();
       response.close();
     };
@@ -766,8 +755,12 @@ export class ProviderManager {
 
     const timeoutId = setTimeout(() => {
       timedOut = true;
-      console.warn(
-        `[provider:test] Timed out after ${TEST_CONNECTION_TIMEOUT_MS}ms. Aborting query.`
+      operation.log(
+        "runtime",
+        "timeout",
+        "模型连接测试超时，停止 SDK 请求",
+        { timeoutMs: TEST_CONNECTION_TIMEOUT_MS },
+        { level: "warn" }
       );
       abortController.abort();
       response?.close();
@@ -793,22 +786,25 @@ export class ProviderManager {
 
         if (resultErrorMessage) {
           if (sawExpectedReply && isRecoverableProviderTestResultError(message)) {
-            console.warn(
-              `[provider:test][${testTargetLabel}] Ignoring recoverable terminal SDK result after expected OK reply:`,
-              resultErrorMessage
+            operation.log(
+              "runtime",
+              "sdk:recoverable-result",
+              "已收到 OK，忽略可恢复的 SDK 终态错误",
+              { reason: resultErrorMessage },
+              { level: "warn" }
             );
             sawSuccessResult = true;
             continue;
           }
 
-          console.warn(
-            `[provider:test][${testTargetLabel}] Test failed from SDK result:`,
-            resultErrorMessage
+          return finish(
+            {
+              success: false,
+              message: resultErrorMessage,
+            },
+            "failure",
+            { reason: "sdk-result" }
           );
-          return {
-            success: false,
-            message: resultErrorMessage,
-          };
         }
 
         if (
@@ -822,63 +818,72 @@ export class ProviderManager {
 
       if (sawExpectedReply || sawSuccessResult) {
         if (!sawSuccessResult) {
-          console.log(
-            `[provider:test][${testTargetLabel}] Treating explicit OK reply as a successful connectivity check without final result.`
+          operation.log(
+            "runtime",
+            "reply:ok",
+            "已收到 OK 回复，按连接成功处理"
           );
         }
 
-        console.log(`[provider:test][${testTargetLabel}] Test succeeded.`);
-        return {
+        return finish({
           success: true,
           message: "连接成功",
-        };
+        }, "success");
       }
 
       if (!sawSuccessResult) {
-        console.warn(
-          `[provider:test][${testTargetLabel}] Stream completed without a success result message.`
+        return finish(
+          {
+            success: false,
+            message: "未收到测试结果，请检查 Provider 配置后重试。",
+          },
+          "failure",
+          { reason: "missing-result" }
         );
-        return {
-          success: false,
-          message: "未收到测试结果，请检查 Provider 配置后重试。",
-        };
       }
 
-      console.log(`[provider:test][${testTargetLabel}] Test completed successfully.`);
-      return {
+      return finish({
         success: true,
         message: "连接成功",
-      };
+      }, "success");
     } catch (error) {
-      console.error(`[provider:test][${testTargetLabel}] Query threw an error:`, error);
+      operation.log(
+        "runtime",
+        "sdk:error",
+        "SDK 请求异常",
+        { error: getErrorMessage(error) },
+        { level: "error" }
+      );
 
       if (abortSignal?.aborted && !timedOut) {
-        console.log(`[provider:test][${testTargetLabel}] Test stopped by user.`);
-        return {
+        return finish({
           success: false,
           message: "测试已停止",
-        };
+        }, "stopped");
       }
 
       if (sawSuccessResult) {
-        console.warn(
-          `[provider:test][${testTargetLabel}] Treating thrown error after explicit success result as success.`
+        operation.log(
+          "runtime",
+          "sdk:error:ignored",
+          "已收到成功结果，忽略后续 SDK 异常",
+          { error: getErrorMessage(error) },
+          { level: "warn" }
         );
-        console.log(`[provider:test][${testTargetLabel}] Test succeeded.`);
-        return {
+        return finish({
           success: true,
           message: "连接成功",
-        };
+        }, "success");
       }
 
-      console.warn(
-        `[provider:test][${testTargetLabel}] Test failed from thrown error:`,
-        timedOut ? "连接超时，请检查网络或 Provider 配置。" : stringifyError(error)
+      return finish(
+        {
+          success: false,
+          message: timedOut ? "连接超时，请检查网络或 Provider 配置。" : stringifyError(error),
+        },
+        "failure",
+        { reason: timedOut ? "timeout" : getErrorMessage(error) }
       );
-      return {
-        success: false,
-        message: timedOut ? "连接超时，请检查网络或 Provider 配置。" : stringifyError(error),
-      };
     } finally {
       if (abortSignal) {
         abortSignal.removeEventListener("abort", handleExternalAbort);
@@ -969,9 +974,15 @@ export class ProviderManager {
 
     const uniqueModelIds = Array.from(new Set(entries.map((entry) => entry.modelId)));
 
-    console.log(
-      `[provider:test-roles] Testing ${uniqueModelIds.length} unique model(s):`,
-      entries.map((entry) => `${entry.label} → ${entry.modelId}`)
+    logSystemEvent(
+      "provider",
+      "test-roles",
+      "start",
+      "开始测试角色模型连接",
+      {
+        models: entries.map((entry) => `${entry.label}:${entry.modelId}`),
+        uniqueModels: uniqueModelIds.length,
+      }
     );
 
     const resultsByModelId = await this.testUniqueModels(
@@ -987,8 +998,13 @@ export class ProviderManager {
       .length;
     const successCount = uniqueModelIds.length - failCount;
 
-    console.log(
-      `[provider:test-roles] Completed role-model test: ${successCount} succeeded, ${failCount} failed.`
+    logSystemEvent(
+      "provider",
+      "test-roles",
+      "summary",
+      "角色模型连接测试结束",
+      { success: successCount, failure: failCount },
+      { level: failCount > 0 ? "warn" : "info" }
     );
 
     return {

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { FeishuGateway } from "./gateway";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 import { isRecord } from "../utils/guards";
 import { ZORA_DIR, ensureZoraDir, isEnoentError, replaceFileAtomically } from "../utils/fs";
 import { handleCommand } from "./commands";
@@ -209,7 +210,14 @@ export class FeishuMessageHandler {
       }
     } catch (error: unknown) {
       if (!isEnoentError(error)) {
-        console.warn("[Feishu] Failed to load dedup store, starting from empty state.", error);
+        logSystemEvent(
+          "feishu",
+          "message",
+          "dedup:load:error",
+          "读取消息去重状态失败，使用空状态",
+          { error: getErrorMessage(error) },
+          { level: "warn" }
+        );
       }
       return;
     }
@@ -217,7 +225,14 @@ export class FeishuMessageHandler {
     if (shouldRewrite) {
       this.dirty = true;
       await this.persistDedup().catch((error) => {
-        console.warn("[Feishu] Failed to rewrite dedup store during init.", error);
+        logSystemEvent(
+          "feishu",
+          "message",
+          "dedup:rewrite:error",
+          "初始化时重写消息去重状态失败",
+          { error: getErrorMessage(error) },
+          { level: "warn" }
+        );
       });
     }
   }
@@ -229,7 +244,14 @@ export class FeishuMessageHandler {
     }
 
     await this.persistDedup().catch((error) => {
-      console.warn("[Feishu] Failed to flush dedup store during shutdown.", error);
+      logSystemEvent(
+        "feishu",
+        "message",
+        "dedup:flush:error",
+        "关闭前刷新消息去重状态失败",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     });
   }
 
@@ -261,7 +283,14 @@ export class FeishuMessageHandler {
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
       void this.persistDedup().catch((error) => {
-        console.warn("[Feishu] Failed to persist dedup store.", error);
+        logSystemEvent(
+          "feishu",
+          "message",
+          "dedup:persist:error",
+          "持久化消息去重状态失败",
+          { error: getErrorMessage(error) },
+          { level: "warn" }
+        );
       });
     }, PERSIST_DEBOUNCE_MS);
 
@@ -332,7 +361,14 @@ export class FeishuMessageHandler {
     }
 
     if (this.recentMessageIds.has(messageId) || this.processedMessages.has(messageId)) {
-      console.log("[Feishu] 消息去重（跳过）:", messageId);
+      logSystemEvent(
+        "feishu",
+        "message",
+        "dedup:skip",
+        "跳过重复消息",
+        { messageId },
+        { verbose: true }
+      );
       return;
     }
 
@@ -375,14 +411,20 @@ export class FeishuMessageHandler {
           : "[text]";
     }
 
-    console.log("[Feishu] 收到消息:", {
-      chatId,
-      chatType: normalizedChatType,
-      senderId,
-      messageType,
-      text,
-      messageId,
-    });
+    logSystemEvent(
+      "feishu",
+      "message",
+      "received",
+      "收到飞书消息",
+      {
+        chatId,
+        chatType: normalizedChatType,
+        senderId,
+        messageType,
+        text,
+        messageId,
+      }
+    );
 
     if (messageType !== "text" || text.trim().length === 0) {
       return;
@@ -390,7 +432,14 @@ export class FeishuMessageHandler {
 
     if (text.startsWith("/")) {
       if (!this.gateway || !this.binder) {
-        console.warn("[Feishu] Command dependencies are not configured, treating as plain text.");
+        logSystemEvent(
+          "feishu",
+          "message",
+          "command:disabled",
+          "命令依赖未配置，按普通文本处理",
+          undefined,
+          { level: "warn" }
+        );
       } else {
         const handled = await handleCommand(text, {
           chatId,
@@ -407,7 +456,14 @@ export class FeishuMessageHandler {
     }
 
     if (!this.triggerAgent) {
-      console.warn("[Feishu] triggerAgent is not configured, skipping message.");
+      logSystemEvent(
+        "feishu",
+        "message",
+        "agent:missing",
+        "未配置 triggerAgent，跳过飞书消息",
+        { messageId },
+        { level: "warn" }
+      );
       return;
     }
 

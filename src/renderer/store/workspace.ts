@@ -7,6 +7,11 @@ import {
   sessionMessagesAtom,
   setSessionMessagesAtom,
 } from "./chat";
+import {
+  logSessionStateSynced,
+  logSessionStateSyncError,
+} from "../utils/client-log";
+import { getErrorMessage } from "../utils/message";
 
 const CURRENT_WORKSPACE_STORAGE_KEY = "zora:currentWorkspaceId";
 const PINNED_WORKSPACES_STORAGE_KEY = "zora:pinnedWorkspaceIds";
@@ -819,6 +824,10 @@ export const deleteSessionAtom = atom(
   null,
   (get, set, sessionId: string, workspaceId?: string) => {
     const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
+    const wasCurrentSession =
+      get(currentWorkspaceIdAtom) === targetWorkspaceId &&
+      get(currentSessionIdAtom) === sessionId;
+    const wasPinned = get(pinnedSessionIdsAtom).has(sessionId);
 
     set(workspaceSessionsAtom, (current) => ({
       ...current,
@@ -840,17 +849,27 @@ export const deleteSessionAtom = atom(
     set(clearSessionMessagesAtom, sessionId);
     set(clearDraftStateForSessionAtom, sessionId);
 
-    if (
-      get(currentWorkspaceIdAtom) === targetWorkspaceId &&
-      get(currentSessionIdAtom) === sessionId
-    ) {
+    if (wasCurrentSession) {
       set(currentSessionIdAtom, null);
       set(messagesAtom, []);
       set(clearDraftStateForSessionAtom, DRAFT_SESSION_ID);
     }
 
+    logSessionStateSynced({
+      action: "delete",
+      sessionId,
+      workspaceId: targetWorkspaceId,
+      wasCurrentSession,
+      wasPinned,
+    });
+
     window.zora.deleteSession(sessionId, targetWorkspaceId).catch((error) => {
-      console.error("[workspace] Failed to delete session from disk:", error);
+      logSessionStateSyncError({
+        action: "delete",
+        sessionId,
+        workspaceId: targetWorkspaceId,
+        error: getErrorMessage(error),
+      });
     });
   }
 );

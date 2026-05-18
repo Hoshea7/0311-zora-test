@@ -18,6 +18,7 @@ import type {
 } from "../shared/types/skill";
 import { GLOBAL_SKILLS_DIR, hasErrorCode, parseSkillFrontmatter, pathExists } from "./skill-manager";
 import { updateRegistryEntry } from "./skill-registry";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 
 // ─── 外部工具配置 ───
 
@@ -86,7 +87,14 @@ async function getInstalledSkillInfo(): Promise<{
     }
   } catch (error) {
     if (!hasErrorCode(error, "ENOENT")) {
-      console.warn("[skill-discovery] Failed to read skills dir:", error);
+      logSystemEvent(
+        "skill",
+        "discovery",
+        "installed:read:error",
+        "读取已安装技能目录失败",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
   }
 
@@ -138,9 +146,13 @@ async function scanSkillsInDir(
       });
     } catch (error) {
       if (!hasErrorCode(error, "ENOENT")) {
-        console.warn(
-          `[skill-discovery] Error reading skill at ${skillDir}:`,
-          error
+        logSystemEvent(
+          "skill",
+          "discovery",
+          "skill:read:error",
+          "读取外部技能失败",
+          { path: skillDir, error: getErrorMessage(error) },
+          { level: "warn" }
         );
       }
     }
@@ -269,9 +281,14 @@ export async function importSkill(
       },
       installedAt: Date.now(),
     });
-  } catch {
-    console.warn(
-      `[skill-discovery] Registry update failed for ${targetDirName}`
+  } catch (error) {
+    logSystemEvent(
+      "skill",
+      "discovery",
+      "registry:update:error",
+      "导入技能后更新注册表失败",
+      { skill: targetDirName, error: getErrorMessage(error) },
+      { level: "warn" }
     );
   }
 

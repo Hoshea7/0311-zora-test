@@ -12,6 +12,7 @@ import {
 import { getAgentRunInfo } from "../agent";
 import { memoryAgent } from "../memory-agent";
 import { runProductivitySession } from "../productivity-runner";
+import { getErrorMessage, logSystemEvent } from "../system-log";
 import {
   appendMessageRecord,
   getSessionMeta,
@@ -246,8 +247,19 @@ export class FeishuBridge {
       });
       await this.sender.onAgentEnd(binding.sessionId, "success");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("[Feishu] Agent error:", error);
+      const errorMessage = getErrorMessage(error);
+      logSystemEvent(
+        "feishu",
+        "bridge",
+        "agent:error",
+        "飞书触发 Agent 失败",
+        {
+          sessionId: binding.sessionId,
+          workspaceId: binding.workspaceId,
+          error: errorMessage,
+        },
+        { level: "error" }
+      );
       this.sender.markError(binding.sessionId, `❌ 出错了: ${errorMessage}`);
       await this.sender.onAgentEnd(binding.sessionId, "error");
     } finally {

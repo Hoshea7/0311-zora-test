@@ -1,5 +1,4 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import {
   DEFAULT_DEFAULT_MODEL_SETTINGS,
@@ -7,23 +6,13 @@ import {
 } from "../shared/types/default-model";
 import type { ProviderConfig } from "../shared/types/provider";
 import { providerManager } from "./provider-manager";
+import { ZORA_DIR } from "./utils/fs";
+import { isRecord } from "./utils/guards";
+import { normalizeOptionalString } from "./utils/validate";
 
-const SETTINGS_PATH = path.join(homedir(), ".zora", "default-model-settings.json");
+const SETTINGS_PATH = path.join(ZORA_DIR, "default-model-settings.json");
 
 let cached: DefaultModelSettings | null = null;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function normalizeOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
 
 function normalizeDefaultModelSettings(value: unknown): DefaultModelSettings {
   if (!isRecord(value)) {
@@ -104,7 +93,7 @@ export async function resolveDefaultModelTarget(): Promise<{
   }
 
   const fallback = await providerManager.getDefaultProviderWithKey();
-  return fallback
+  return fallback?.provider.enabled
     ? {
         ...fallback,
         selectedModelId: undefined,

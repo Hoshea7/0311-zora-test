@@ -4,17 +4,15 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename as fsRename,
   rm,
-  unlink,
-  writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { WorkspaceMeta } from "../shared/zora";
+import { getErrorMessage, logSystemEvent } from "./system-log";
+import { isEnoentError, replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 export const DEFAULT_WORKSPACE_ID = "default";
-const ZORA_DIR = path.join(homedir(), ".zora");
 const WORKSPACES_FILE = path.join(ZORA_DIR, "workspaces.json");
 const WORKSPACE_DATA_ROOT = path.join(ZORA_DIR, "workspaces");
 const WORKSPACE_SIDECAR_FILE = "workspace.json";
@@ -49,19 +47,6 @@ function isWorkspaceMeta(value: unknown): value is WorkspaceMeta {
     typeof (value as WorkspaceMeta).createdAt === "string" &&
     typeof (value as WorkspaceMeta).updatedAt === "string"
   );
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === code
-  );
-}
-
-function isEnoentError(error: unknown): boolean {
-  return hasErrorCode(error, "ENOENT");
 }
 
 function timestampForFileName(): string {
@@ -100,51 +85,29 @@ async function ensureZoraDir(): Promise<void> {
   await mkdir(getWorkspaceFilesDir(DEFAULT_WORKSPACE_ID), { recursive: true });
 }
 
-async function replaceFileAtomically(
-  filePath: string,
-  content: string
-): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination files.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
-}
-
 async function backupWorkspaceFile(reason: string): Promise<void> {
   const backupPath = `${WORKSPACES_FILE}.${reason}-${timestampForFileName()}.bak`;
 
   try {
     await copyFile(WORKSPACES_FILE, backupPath);
-    console.warn(`[workspace-store] Backed up workspaces.json to ${backupPath}.`);
+    logSystemEvent(
+      "store",
+      "workspace",
+      "backup",
+      "已备份 workspace 索引",
+      { reason, path: backupPath },
+      { level: "warn" }
+    );
   } catch (error) {
     if (!isEnoentError(error)) {
-      console.warn("[workspace-store] Failed to back up workspaces.json.", error);
+      logSystemEvent(
+        "store",
+        "workspace",
+        "backup:error",
+        "备份 workspace 索引失败",
+        { reason, error: getErrorMessage(error) },
+        { level: "warn" }
+      );
     }
   }
 }
@@ -156,8 +119,13 @@ async function readWorkspaceFile(): Promise<WorkspaceFileReadResult> {
 
     if (!Array.isArray(parsed)) {
       await backupWorkspaceFile("invalid");
-      console.warn(
-        "[workspace-store] workspaces.json is not an array; recovering from workspace data dirs."
+      logSystemEvent(
+        "store",
+        "workspace",
+        "index:recover",
+        "workspace 索引格式异常，尝试从数据目录恢复",
+        { reason: "not-array" },
+        { level: "warn" }
       );
       return { workspaces: [], shouldRewrite: true };
     }
@@ -167,8 +135,13 @@ async function readWorkspaceFile(): Promise<WorkspaceFileReadResult> {
 
     if (shouldRewrite) {
       await backupWorkspaceFile("invalid-entries");
-      console.warn(
-        `[workspace-store] Dropped ${parsed.length - validWorkspaces.length} invalid workspace record(s).`
+      logSystemEvent(
+        "store",
+        "workspace",
+        "index:repair",
+        "已过滤无效 workspace 记录",
+        { dropped: parsed.length - validWorkspaces.length },
+        { level: "warn" }
       );
     }
 
@@ -180,9 +153,13 @@ async function readWorkspaceFile(): Promise<WorkspaceFileReadResult> {
 
     if (error instanceof SyntaxError) {
       await backupWorkspaceFile("corrupt");
-      console.warn(
-        "[workspace-store] workspaces.json is invalid JSON; recovering from workspace data dirs.",
-        error
+      logSystemEvent(
+        "store",
+        "workspace",
+        "index:recover",
+        "workspace 索引 JSON 损坏，尝试从数据目录恢复",
+        { error: getErrorMessage(error) },
+        { level: "warn" }
       );
       return { workspaces: [], shouldRewrite: true };
     }
@@ -236,7 +213,14 @@ async function persistWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<vo
 
   for (const result of results) {
     if (result.status === "rejected") {
-      console.warn("[workspace-store] Failed to persist workspace sidecar.", result.reason);
+      logSystemEvent(
+        "store",
+        "workspace",
+        "sidecar:persist:error",
+        "写入 workspace sidecar 失败",
+        { error: getErrorMessage(result.reason) },
+        { level: "warn" }
+      );
     }
   }
 }
@@ -251,9 +235,13 @@ async function readWorkspaceSidecar(workspaceId: string): Promise<WorkspaceMeta 
       return null;
     }
 
-    console.warn(
-      `[workspace-store] Failed to read workspace sidecar for ${workspaceId}.`,
-      error
+    logSystemEvent(
+      "store",
+      "workspace",
+      "sidecar:read:error",
+      "读取 workspace sidecar 失败",
+      { workspaceId, error: getErrorMessage(error) },
+      { level: "warn" }
     );
     return null;
   }
@@ -291,9 +279,13 @@ async function recoverWorkspaceFromSessionIndex(
       return null;
     }
 
-    console.warn(
-      `[workspace-store] Failed to recover workspace ${workspaceId} from session index.`,
-      error
+    logSystemEvent(
+      "store",
+      "workspace",
+      "recover:error",
+      "从会话索引恢复 workspace 失败",
+      { workspaceId, error: getErrorMessage(error) },
+      { level: "warn" }
     );
     return null;
   }
@@ -328,8 +320,13 @@ async function recoverWorkspacesFromDataDirs(
       continue;
     }
 
-    console.warn(
-      `[workspace-store] Recovered workspace ${workspace.id} (${workspace.name}) from data dir.`
+    logSystemEvent(
+      "store",
+      "workspace",
+      "recover",
+      "已从数据目录恢复 workspace",
+      { workspaceId: workspace.id, name: workspace.name },
+      { level: "warn" }
     );
     recovered.push(workspace);
     existingIds.add(workspace.id);

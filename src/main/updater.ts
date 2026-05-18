@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { ProgressInfo, UpdateInfo } from "builder-util-runtime";
 import type { UpdateInstallMode, UpdateStatus } from "../shared/types/updater";
+import { getErrorMessage, logSystemEvent } from "./system-log";
 
 const UPDATER_STATUS_CHANNEL = "updater:status";
 const STARTUP_CHECK_DELAY_MS = 15_000;
@@ -178,10 +179,35 @@ function configureAutoUpdaterEvents(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = installMode === "automatic";
   autoUpdater.logger = {
-    info: (...args: unknown[]) => console.log("[updater]", ...args),
-    warn: (...args: unknown[]) => console.warn("[updater]", ...args),
-    error: (...args: unknown[]) => console.error("[updater]", ...args),
-    debug: (...args: unknown[]) => console.debug("[updater:debug]", ...args),
+    info: (...args: unknown[]) =>
+      logSystemEvent("updater", "electron", "info", "自动更新日志", { detail: args }),
+    warn: (...args: unknown[]) =>
+      logSystemEvent(
+        "updater",
+        "electron",
+        "warn",
+        "自动更新警告",
+        { detail: args },
+        { level: "warn" }
+      ),
+    error: (...args: unknown[]) =>
+      logSystemEvent(
+        "updater",
+        "electron",
+        "error",
+        "自动更新错误",
+        { detail: args },
+        { level: "error" }
+      ),
+    debug: (...args: unknown[]) =>
+      logSystemEvent(
+        "updater",
+        "electron",
+        "debug",
+        "自动更新调试日志",
+        { detail: args },
+        { verbose: true }
+      ),
   };
 
   autoUpdater.on("checking-for-update", () => {
@@ -265,7 +291,14 @@ function configureAutoUpdaterEvents(): void {
 
   autoUpdater.on("error", (error) => {
     if (installingUpdate) {
-      console.error("[updater] Install flow failed:", error);
+      logSystemEvent(
+        "updater",
+        "install",
+        "error",
+        "安装更新失败",
+        { error: getErrorMessage(error) },
+        { level: "error" }
+      );
       setUpdateErrorState("安装更新失败，请稍后重试。", error);
       return;
     }

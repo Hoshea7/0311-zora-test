@@ -1,12 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import {
   DEFAULT_MEMORY_SETTINGS,
   type MemorySettings,
 } from "../shared/types/memory";
+import { ZORA_DIR } from "./utils/fs";
 
-const SETTINGS_PATH = path.join(homedir(), ".zora", "memory-settings.json");
+const SETTINGS_PATH = path.join(ZORA_DIR, "memory-settings.json");
 const VALID_BATCH_IDLE_MINUTES = new Set([1, 10, 20, 30, 60, 120]);
 
 let cached: MemorySettings | null = null;

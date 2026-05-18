@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import type { FileAttachment } from "../../types";
 import {
@@ -9,7 +10,11 @@ import {
   isRunningAtom,
   removeDraftAttachmentAtom,
 } from "../../store/chat";
-import { activeProviderAtom, providersAtom } from "../../store/provider";
+import {
+  activeProviderAtom,
+  providersAtom,
+  providersLoadedAtom,
+} from "../../store/provider";
 import {
   currentSessionAtom,
   draftSelectedProviderIdAtom,
@@ -176,6 +181,7 @@ export function ChatInput({
   const attachments = useAtomValue(draftAttachmentsAtom);
   const activeProvider = useAtomValue(activeProviderAtom);
   const providers = useAtomValue(providersAtom);
+  const providersLoaded = useAtomValue(providersLoadedAtom);
   const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
   const currentSession = useAtomValue(currentSessionAtom);
   const draftSelectedProviderId = useAtomValue(draftSelectedProviderIdAtom);
@@ -192,6 +198,7 @@ export function ChatInput({
   const [isDragging, setIsDragging] = useState(false);
   const [isTextareaScrolling, setIsTextareaScrolling] = useState(false);
   const [dropNotice, setDropNotice] = useState<string | null>(null);
+  const [isModelConfigDialogOpen, setIsModelConfigDialogOpen] = useState(false);
   const enabledProviders = providers.filter((provider) => provider.enabled);
   const hasAttachmentCapacity = attachments.length < MAX_ATTACHMENTS;
   const isFeishuRunning = isRunning && currentRunSource === "feishu";
@@ -215,18 +222,26 @@ export function ChatInput({
     : displayProvider
       ? `${resolvedModelId ?? "默认模型"}`
       : "配置模型";
+  const hasPromptContent = draft.trim().length > 0 || attachments.length > 0;
+  const requiresModelConfig =
+    providersLoaded && !isMissingLockedProvider && !hasEnabledProviders;
   const canSubmit =
-    (draft.trim().length > 0 || attachments.length > 0) &&
-    !isMissingLockedProvider;
+    hasPromptContent &&
+    !isMissingLockedProvider &&
+    providersLoaded &&
+    !requiresModelConfig;
   const canQueueMessage =
     draft.trim().length > 0 && !isMissingLockedProvider && !isFeishuRunning;
   const showQueueButton = isRunning && canQueueMessage;
-  const sendButtonDisabled = isRunning ? !canQueueMessage : !canSubmit;
   const sendButtonTitle = isRunning
     ? "发送追加消息"
     : isMissingLockedProvider
       ? "此会话绑定的 Provider 已被删除，请创建新会话"
-      : "发送";
+      : requiresModelConfig
+        ? "请先配置模型"
+        : !providersLoaded
+          ? "正在加载模型配置"
+          : "发送";
   const shouldShowModelSelector =
     !isMissingLockedProvider && (hasEnabledProviders || isLocked);
   const isHeroVariant = variant === "hero";
@@ -282,6 +297,10 @@ export function ChatInput({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
+      if (!isRunning && hasPromptContent && requiresModelConfig) {
+        setIsModelConfigDialogOpen(true);
+        return;
+      }
       if (!isRunning && canSubmit) {
         onSubmit();
       } else if (isRunning && canQueueMessage) {
@@ -465,9 +484,95 @@ export function ChatInput({
   };
 
   const openProviderSettings = () => {
+    setIsModelConfigDialogOpen(false);
     setSettingsTab("provider");
     setSettingsOpen(true);
   };
+
+  const handlePrimaryAction = () => {
+    if (!isRunning && hasPromptContent && requiresModelConfig) {
+      setIsModelConfigDialogOpen(true);
+      return;
+    }
+
+    if (isRunning) {
+      onQueueMessage();
+      return;
+    }
+
+    onSubmit();
+  };
+
+  useEffect(() => {
+    if (!isModelConfigDialogOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsModelConfigDialogOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isModelConfigDialogOpen]);
+
+  const modelConfigDialog =
+    isModelConfigDialogOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[160] flex items-center justify-center bg-stone-950/18 p-4 backdrop-blur-[2px]"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setIsModelConfigDialogOpen(false);
+              }
+            }}
+          >
+            <div
+              className="w-full max-w-[360px] rounded-[22px] bg-white px-6 py-5 text-left shadow-2xl shadow-stone-950/18 ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-150"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="model-config-required-title"
+            >
+              <h3
+                id="model-config-required-title"
+                className="text-[17px] font-semibold tracking-tight text-stone-900"
+              >
+                当前未配置模型
+              </h3>
+              <p className="mt-2 text-[13px] leading-6 text-stone-500">
+                请先添加一个可用模型，配置完成后就可以继续发送消息。
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setIsModelConfigDialogOpen(false)}
+                  className="h-9 px-4 text-[13px]"
+                >
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={openProviderSettings}
+                  className="h-9 px-4 text-[13px]"
+                >
+                  配置模型
+                </Button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <div className="relative">
@@ -655,8 +760,12 @@ export function ChatInput({
             ) : (
               <Button
                 variant="primary"
-                onClick={isRunning ? onQueueMessage : onSubmit}
-                disabled={sendButtonDisabled}
+                onClick={handlePrimaryAction}
+                disabled={
+                  isRunning
+                    ? !canQueueMessage
+                    : !hasPromptContent || isMissingLockedProvider || !providersLoaded
+                }
                 className="w-8 h-8 p-0 rounded-full shadow-sm flex items-center justify-center cursor-pointer"
                 title={sendButtonTitle}
               >
@@ -668,6 +777,8 @@ export function ChatInput({
           </div>
         </div>
       </div>
+
+      {modelConfigDialog}
     </div>
   );
 }
