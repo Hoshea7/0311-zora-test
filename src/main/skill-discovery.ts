@@ -5,7 +5,7 @@
  * 支持以 symlink 或 copy 方式导入到 ~/.zora/skills/。
  */
 
-import { cp, mkdir, readFile, readdir, readlink, symlink } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, readlink, realpath, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type {
@@ -58,6 +58,14 @@ const EXTERNAL_TOOLS: ExternalToolConfig[] = [
 
 // ─── 核心函数 ───
 
+async function resolveRealPathIfPossible(filePath: string): Promise<string> {
+  try {
+    return await realpath(filePath);
+  } catch {
+    return resolve(filePath);
+  }
+}
+
 /**
  * 收集已安装的 skill 目录名和 symlink 目标路径，
  * 用于判断外部 skill 是否已存在于 Zora。
@@ -72,13 +80,17 @@ async function getInstalledSkillInfo(): Promise<{
   try {
     const entries = await readdir(GLOBAL_SKILLS_DIR, { withFileTypes: true });
     for (const entry of entries) {
+      const installedPath = join(GLOBAL_SKILLS_DIR, entry.name);
+
       if (entry.isDirectory() || entry.isSymbolicLink()) {
         dirNames.add(entry.name);
       }
       if (entry.isSymbolicLink()) {
         try {
-          const target = await readlink(join(GLOBAL_SKILLS_DIR, entry.name));
-          symlinkTargets.add(resolve(GLOBAL_SKILLS_DIR, target));
+          const target = await readlink(installedPath);
+          const resolvedTarget = resolve(GLOBAL_SKILLS_DIR, target);
+          symlinkTargets.add(resolvedTarget);
+          symlinkTargets.add(await resolveRealPathIfPossible(installedPath));
         } catch {
           /* 忽略 */
         }
@@ -112,7 +124,7 @@ async function scanSkillsInDir(
   }
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
 
     const skillDir = join(dir, entry.name);
     const skillFilePath = join(skillDir, "SKILL.md");
@@ -123,9 +135,11 @@ async function scanSkillsInDir(
       if (!parsed) continue;
 
       const resolvedPath = resolve(skillDir);
+      const realSourcePath = await resolveRealPathIfPossible(skillDir);
       const alreadyInZora =
         installed.dirNames.has(entry.name) ||
-        installed.symlinkTargets.has(resolvedPath);
+        installed.symlinkTargets.has(resolvedPath) ||
+        installed.symlinkTargets.has(realSourcePath);
 
       skills.push({
         name: parsed.name,
@@ -248,7 +262,7 @@ export async function importSkill(
     if (method === "symlink") {
       await symlink(resolve(sourcePath), targetPath, "dir");
     } else {
-      await cp(resolve(sourcePath), targetPath, { recursive: true });
+      await cp(resolve(sourcePath), targetPath, { recursive: true, dereference: true });
     }
   } catch (error) {
     return {
