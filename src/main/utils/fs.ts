@@ -30,17 +30,52 @@ function resolveZoraDir(): string {
 }
 
 export const ZORA_DIR = resolveZoraDir();
+const fileWriteQueues = new Map<string, Promise<unknown>>();
 
-export function isEnoentError(error: unknown): boolean {
+export function hasErrorCode(error: unknown, code: string): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
+    (error as { code?: string }).code === code
   );
 }
 
-export async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
+export function isEnoentError(error: unknown): boolean {
+  return hasErrorCode(error, "ENOENT");
+}
+
+function isRenameReplaceError(error: unknown): boolean {
+  return (
+    hasErrorCode(error, "EEXIST") ||
+    hasErrorCode(error, "EPERM") ||
+    hasErrorCode(error, "ENOTEMPTY")
+  );
+}
+
+async function runQueuedFileWrite<T>(
+  filePath: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const queueKey = path.resolve(filePath);
+  const previous = fileWriteQueues.get(queueKey) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+
+  fileWriteQueues.set(queueKey, next);
+
+  try {
+    return await next;
+  } finally {
+    if (fileWriteQueues.get(queueKey) === next) {
+      fileWriteQueues.delete(queueKey);
+    }
+  }
+}
+
+async function writeFileAtomicallyNow(
+  filePath: string,
+  content: string
+): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
 
   const tmpPath = path.join(
@@ -54,16 +89,13 @@ export async function replaceFileAtomically(filePath: string, content: string): 
     await fsRename(tmpPath, filePath);
     replaced = true;
   } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
+    if (isRenameReplaceError(error)) {
       try {
         await unlink(filePath);
-      } catch {
-        // Ignore missing destination file.
+      } catch (unlinkError) {
+        if (!isEnoentError(unlinkError)) {
+          throw unlinkError;
+        }
       }
 
       await fsRename(tmpPath, filePath);
@@ -76,11 +108,17 @@ export async function replaceFileAtomically(filePath: string, content: string): 
     if (!replaced) {
       try {
         await unlink(tmpPath);
-      } catch {
-        // Ignore temp cleanup failures.
+      } catch (cleanupError) {
+        if (!isEnoentError(cleanupError)) {
+          throw cleanupError;
+        }
       }
     }
   }
+}
+
+export async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
+  await runQueuedFileWrite(filePath, () => writeFileAtomicallyNow(filePath, content));
 }
 
 export async function ensureZoraDir(): Promise<void> {

@@ -1,1 +1,1 @@
-reference： @/Users/bytedance/Desktop/code/learn/0311-zora/AGENT.md
+Reference: ./AGENTS.md

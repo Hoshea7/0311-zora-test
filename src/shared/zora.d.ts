@@ -76,6 +76,7 @@ export interface SessionMeta {
   title: string;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string;
   sdkSessionId?: string;
   providerId?: string;
   providerLocked?: boolean;
@@ -84,17 +85,35 @@ export interface SessionMeta {
   branch?: SessionBranchMeta;
 }
 
+export interface ArchivedSessionEntry {
+  session: SessionMeta;
+  workspaceId: string;
+  workspaceName: string;
+  workspacePath: string;
+}
+
 export interface SessionBranchMeta {
   sourceSessionId: string;
   sourceSdkSessionId: string;
   forkedAt: string;
-  forkMode: "full";
+  forkMode: "full" | "message";
+  forkedFromMessageId?: string;
   inheritedMessageCount: number;
 }
 
 export interface SessionForkResult {
   session: SessionMeta;
   messages: ConversationMessage[];
+}
+
+export interface SessionForkRequest {
+  sourceSessionId: string;
+  title?: string;
+  upToMessageId?: string;
+}
+
+export interface ForkSessionInput extends SessionForkRequest {
+  workspaceId?: string;
 }
 
 export interface WorkspaceMeta {
@@ -346,13 +365,12 @@ export interface ZoraApi {
   uninstallSkill: (dirName: string) => Promise<void>;
   listExternalTools: () => Promise<ExternalToolConfig[]>;
   listSessions: (workspaceId?: string) => Promise<SessionMeta[]>;
+  listArchivedSessions: () => Promise<ArchivedSessionEntry[]>;
   loadMessages: (sessionId: string, workspaceId?: string) => Promise<ConversationMessage[]>;
   createSession: (title: string, workspaceId?: string) => Promise<SessionMeta>;
-  forkSession: (
-    sourceSessionId: string,
-    workspaceId?: string,
-    title?: string
-  ) => Promise<SessionForkResult>;
+  forkSession: (input: ForkSessionInput) => Promise<SessionForkResult>;
+  archiveSession: (sessionId: string, workspaceId?: string) => Promise<SessionMeta | null>;
+  restoreSession: (sessionId: string, workspaceId?: string) => Promise<SessionMeta | null>;
   deleteSession: (sessionId: string, workspaceId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string, workspaceId?: string) => Promise<void>;
   lockSessionModel: (

@@ -100,6 +100,26 @@ describe("main workspace-store", () => {
     }
   });
 
+  it("repairs missing sidecar metadata on a clean workspace list", async () => {
+    const homeDir = createTempHome();
+    const { createWorkspace, listWorkspaces } = await loadWorkspaceStoreModule(homeDir);
+    const workspace = await createWorkspace("Project A", path.join(homeDir, "project-a"));
+    const sidecarPath = getZoraPath(
+      homeDir,
+      "workspaces",
+      workspace.id,
+      "workspace.json"
+    );
+
+    rmSync(sidecarPath, { force: true });
+    expect(existsSync(sidecarPath)).toBe(false);
+
+    await listWorkspaces();
+
+    expect(existsSync(sidecarPath)).toBe(true);
+    expect(JSON.parse(readFileSync(sidecarPath, "utf8"))).toEqual(workspace);
+  });
+
   it("recovers a workspace from sidecar metadata when the main index is missing", async () => {
     const homeDir = createTempHome();
     const workspace: WorkspaceMeta = {

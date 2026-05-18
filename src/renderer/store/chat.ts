@@ -9,6 +9,7 @@ import type { AgentRunSource } from "../../shared/zora";
 import { createId, isRecord, stringifyUnknown } from "../utils/message";
 import { normalizeThinkingContent } from "../utils/thinking";
 import { currentSessionIdAtom } from "./workspace";
+import { DRAFT_SESSION_ID } from "./session-constants";
 
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
@@ -23,7 +24,7 @@ const EMPTY_DRAFT = "";
 const EMPTY_ATTACHMENTS: FileAttachment[] = [];
 
 function resolveActiveSessionKey(get: Getter): string {
-  return get(currentSessionIdAtom) ?? "__draft__";
+  return get(currentSessionIdAtom) ?? DRAFT_SESSION_ID;
 }
 
 function applyScopedValueUpdate<T>(
@@ -251,6 +252,10 @@ export const setSessionRunningAtom = atom<null, [string, boolean, AgentRunSource
   null,
   (get, set, sessionId: string, isRunning: boolean, source?: AgentRunSource) => {
     set(runningSessionsAtom, (current) => {
+      if (current.has(sessionId) === isRunning) {
+        return current;
+      }
+
       const next = new Set(current);
       if (isRunning) {
         next.add(sessionId);
@@ -539,12 +544,32 @@ function failRunningTools(turn: AssistantTurn, completedAt: number, fallbackResu
       : turn;
 }
 
+function getAssistantSnapshotMessage(sdkMessage: unknown): Record<string, unknown> | null {
+  if (!isRecord(sdkMessage)) {
+    return null;
+  }
+
+  if (sdkMessage.type === "assistant" && isRecord(sdkMessage.message)) {
+    return sdkMessage.message;
+  }
+
+  return sdkMessage;
+}
+
+function getAssistantSnapshotUuid(sdkMessage: unknown): string | undefined {
+  return isRecord(sdkMessage) && typeof sdkMessage.uuid === "string"
+    ? sdkMessage.uuid
+    : undefined;
+}
+
 function getAssistantSnapshotBlocks(sdkMessage: unknown): Record<string, unknown>[] {
-  if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
+  const message = getAssistantSnapshotMessage(sdkMessage);
+
+  if (!message || !Array.isArray(message.content)) {
     return [];
   }
 
-  return sdkMessage.content.filter(isRecord);
+  return message.content.filter(isRecord);
 }
 
 function getSnapshotText(blocks: Record<string, unknown>[]): string {
@@ -703,10 +728,18 @@ export const applyAssistantSnapshotAtom = atom<null, [string, unknown], void>(
     }
 
     const timestamp = Date.now();
+    const messageUuid = getAssistantSnapshotUuid(sdkMessage);
     set(setSessionMessagesAtom, sessionId, (current) =>
-      updateOrCreateActiveTurn(current, (turn) =>
-        mergeAssistantSnapshotIntoTurn(turn, blocks, timestamp)
-      )
+      updateOrCreateActiveTurn(current, (turn) => {
+        const nextTurn = mergeAssistantSnapshotIntoTurn(turn, blocks, timestamp);
+
+        return messageUuid && nextTurn.id !== messageUuid
+          ? {
+              ...nextTurn,
+              id: messageUuid,
+            }
+          : nextTurn;
+      })
     );
   }
 );

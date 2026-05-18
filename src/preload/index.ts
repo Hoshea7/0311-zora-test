@@ -2,11 +2,13 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AgentRunInfo,
   AgentStreamEvent,
+  ArchivedSessionEntry,
   AskUserResponse,
   ClientLogEventInput,
   ConversationMessage,
   FileAttachment,
   FileTreeEntry,
+  ForkSessionInput,
   PermissionMode,
   PermissionResponse,
   SessionModelLogContext,
@@ -52,6 +54,7 @@ import type {
   ScheduledTask,
   ScheduledTaskUpdateInput,
 } from "../shared/types/schedule";
+import { SESSION_IPC } from "../shared/types/ipc";
 
 const zoraApi: ZoraApi = {
   getAppVersion: () => ipcRenderer.invoke("app:get-version") as Promise<string>,
@@ -247,22 +250,23 @@ const zoraApi: ZoraApi = {
       ExternalToolConfig[]
     >,
   listSessions: (workspaceId?: string) =>
-    ipcRenderer.invoke("session:list", workspaceId) as Promise<SessionMeta[]>,
+    ipcRenderer.invoke(SESSION_IPC.LIST, workspaceId) as Promise<SessionMeta[]>,
+  listArchivedSessions: () =>
+    ipcRenderer.invoke(SESSION_IPC.LIST_ARCHIVED) as Promise<ArchivedSessionEntry[]>,
   loadMessages: (sessionId: string, workspaceId?: string) =>
-    ipcRenderer.invoke("session:load-messages", sessionId, workspaceId) as Promise<ConversationMessage[]>,
+    ipcRenderer.invoke(SESSION_IPC.LOAD_MESSAGES, sessionId, workspaceId) as Promise<ConversationMessage[]>,
   createSession: (title: string, workspaceId?: string) =>
-    ipcRenderer.invoke("session:create", title, workspaceId) as Promise<SessionMeta>,
-  forkSession: (sourceSessionId: string, workspaceId?: string, title?: string) =>
-    ipcRenderer.invoke(
-      "session:fork",
-      sourceSessionId,
-      workspaceId,
-      title
-    ) as Promise<SessionForkResult>,
+    ipcRenderer.invoke(SESSION_IPC.CREATE, title, workspaceId) as Promise<SessionMeta>,
+  forkSession: (input: ForkSessionInput) =>
+    ipcRenderer.invoke(SESSION_IPC.FORK, input) as Promise<SessionForkResult>,
+  archiveSession: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke(SESSION_IPC.ARCHIVE, sessionId, workspaceId) as Promise<SessionMeta | null>,
+  restoreSession: (sessionId: string, workspaceId?: string) =>
+    ipcRenderer.invoke(SESSION_IPC.RESTORE, sessionId, workspaceId) as Promise<SessionMeta | null>,
   deleteSession: (sessionId: string, workspaceId?: string) =>
-    ipcRenderer.invoke("session:delete", sessionId, workspaceId) as Promise<void>,
+    ipcRenderer.invoke(SESSION_IPC.DELETE, sessionId, workspaceId) as Promise<void>,
   renameSession: (sessionId: string, title: string, workspaceId?: string) =>
-    ipcRenderer.invoke("session:rename", sessionId, title, workspaceId) as Promise<void>,
+    ipcRenderer.invoke(SESSION_IPC.RENAME, sessionId, title, workspaceId) as Promise<void>,
   lockSessionModel: (
     sessionId: string,
     providerId: string,
@@ -271,7 +275,7 @@ const zoraApi: ZoraApi = {
     logContext?: SessionModelLogContext
   ) =>
     ipcRenderer.invoke(
-      "session:lock-model",
+      SESSION_IPC.LOCK_MODEL,
       sessionId,
       providerId,
       modelId,
@@ -287,7 +291,7 @@ const zoraApi: ZoraApi = {
     logContext?: SessionModelLogContext
   ) =>
     ipcRenderer.invoke(
-      "session:switch-model",
+      SESSION_IPC.SWITCH_MODEL,
       sessionId,
       modelId,
       workspaceId,

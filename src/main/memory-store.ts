@@ -7,7 +7,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
+import {
+  hasErrorCode,
+  isEnoentError,
+  replaceFileAtomically,
+  ZORA_DIR,
+} from "./utils/fs";
 
 const MEMORY_DIR_NAME = "memory";
 const DAILY_DIR_NAME = "daily";
@@ -33,15 +38,6 @@ export interface LegacyMemoryMigrationResult {
 }
 
 let defaultLegacyMemoryMigrationPromise: Promise<LegacyMemoryMigrationResult> | null = null;
-
-function hasErrorCode(error: unknown, code: string) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
-}
-
-function isEnoentError(error: unknown) {
-  return hasErrorCode(error, "ENOENT");
-}
-
 function assertSafeFileName(fileName: string) {
   if (fileName.trim().length === 0 || path.basename(fileName) !== fileName) {
     throw new Error(`Invalid zora file name: ${fileName}`);

@@ -14,12 +14,14 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import type {
+  ArchivedSessionEntry,
   AssistantAction,
   AssistantTurn,
   ConversationMessage,
   FileAttachment,
   ProcessStep,
   SessionBranchMeta,
+  SessionForkRequest,
 } from "../shared/zora";
 import { extractScheduleDetailLinkFromToolResultValue } from "../shared/schedule-link";
 import {
@@ -28,13 +30,15 @@ import {
   listWorkspaces,
 } from "./workspace-store";
 import { getErrorMessage, logSystemEvent } from "./system-log";
-import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
+import { isRecord } from "./utils/guards";
+import { isEnoentError, replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 export interface SessionMeta {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string;
   sdkSessionId?: string;
   providerId?: string;
   providerLocked?: boolean;
@@ -52,13 +56,16 @@ export interface SavedAttachmentMeta {
   savedFileName: string;
 }
 
-export interface CreateForkedSessionInput {
+export interface CreateForkedSessionInput extends SessionForkRequest {
   id?: string;
-  sourceSessionId: string;
   sourceSdkSessionId: string;
   sdkSessionId: string;
-  title?: string;
   workingDirectory?: string;
+}
+
+export interface ListSessionsOptions {
+  includeArchived?: boolean;
+  archivedOnly?: boolean;
 }
 
 const OLD_SESSIONS_DIR = path.join(ZORA_DIR, "sessions");
@@ -73,7 +80,45 @@ function getIndexFile(workspaceId = "default"): string {
   return path.join(getSessionsDir(workspaceId), "index.json");
 }
 
+const sessionWriteQueues = new Map<string, Promise<void>>();
 let migrationDone = false;
+
+function getSessionWriteQueueKey(sessionId: string, workspaceId: string): string {
+  return `${workspaceId}\0${sessionId}`;
+}
+
+async function runQueuedSessionWrite(
+  sessionId: string,
+  workspaceId: string,
+  task: () => Promise<void>
+): Promise<void> {
+  const queueKey = getSessionWriteQueueKey(sessionId, workspaceId);
+  const previous = sessionWriteQueues.get(queueKey) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+
+  sessionWriteQueues.set(queueKey, next);
+
+  try {
+    await next;
+  } finally {
+    if (sessionWriteQueues.get(queueKey) === next) {
+      sessionWriteQueues.delete(queueKey);
+    }
+  }
+}
+
+export async function flushSessionWrites(
+  sessionId: string,
+  workspaceId = DEFAULT_WORKSPACE_ID
+): Promise<void> {
+  const queueKey = getSessionWriteQueueKey(sessionId, workspaceId);
+  let pending = sessionWriteQueues.get(queueKey);
+
+  while (pending) {
+    await pending;
+    pending = sessionWriteQueues.get(queueKey);
+  }
+}
 
 export async function migrateSessionsIfNeeded(): Promise<void> {
   if (migrationDone) {
@@ -118,15 +163,6 @@ async function ensureSessionsDir(workspaceId = "default"): Promise<void> {
   await mkdir(getSessionsDir(workspaceId), { recursive: true });
 }
 
-function isEnoentError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
-
 async function readIndex(workspaceId = "default"): Promise<SessionMeta[]> {
   await migrateSessionsIfNeeded();
 
@@ -153,6 +189,25 @@ function normalizePersistedPath(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined;
+}
+
+function isArchivedSession(session: SessionMeta): boolean {
+  return typeof session.archivedAt === "string" && session.archivedAt.length > 0;
+}
+
+function filterSessionsByArchiveState(
+  sessions: SessionMeta[],
+  options: ListSessionsOptions = {}
+): SessionMeta[] {
+  if (options.includeArchived) {
+    return sessions;
+  }
+
+  if (options.archivedOnly) {
+    return sessions.filter(isArchivedSession);
+  }
+
+  return sessions.filter((session) => !isArchivedSession(session));
 }
 
 async function getWorkspaceForSession(workspaceId: string) {
@@ -250,6 +305,12 @@ async function hydrateSessionWorkingDirectories(
 ): Promise<SessionMeta[]> {
   let didChange = false;
   const hydrated: SessionMeta[] = [];
+  const needsLegacyWorkingDirectory = sessions.some(
+    (session) => !normalizePersistedPath(session.workingDirectory)
+  );
+  const legacyWorkingDirectory = needsLegacyWorkingDirectory
+    ? await resolveLegacySessionWorkingDirectory(workspaceId)
+    : undefined;
 
   for (const session of sessions) {
     const workingDirectory = normalizePersistedPath(session.workingDirectory);
@@ -264,9 +325,6 @@ async function hydrateSessionWorkingDirectories(
       continue;
     }
 
-    const legacyWorkingDirectory = await resolveLegacySessionWorkingDirectory(
-      workspaceId
-    );
     hydrated.push({
       ...session,
       workingDirectory: legacyWorkingDirectory,
@@ -330,12 +388,12 @@ export async function getSessionWorkingDirectory(
 export async function copySessionWorkingDirectory(
   sourceSessionId: string,
   targetSessionId: string,
-  workspaceId = DEFAULT_WORKSPACE_ID
+  workspaceId = DEFAULT_WORKSPACE_ID,
+  sourceWorkingDirectoryInput?: string
 ): Promise<void> {
-  const sourceWorkingDirectory = await getSessionWorkingDirectory(
-    sourceSessionId,
-    workspaceId
-  );
+  const sourceWorkingDirectory =
+    sourceWorkingDirectoryInput ??
+    (await getSessionWorkingDirectory(sourceSessionId, workspaceId));
   const targetWorkingDirectory = getWorkspaceSessionFilesDir(
     workspaceId,
     targetSessionId
@@ -365,9 +423,39 @@ export async function copySessionWorkingDirectory(
   }
 }
 
-export async function listSessions(workspaceId = "default"): Promise<SessionMeta[]> {
+export async function listSessions(
+  workspaceId = "default",
+  options: ListSessionsOptions = {}
+): Promise<SessionMeta[]> {
   await ensureSessionsDir(workspaceId);
-  return hydrateSessionWorkingDirectories(await readIndex(workspaceId), workspaceId);
+  const hydrated = await hydrateSessionWorkingDirectories(
+    await readIndex(workspaceId),
+    workspaceId
+  );
+  return filterSessionsByArchiveState(hydrated, options);
+}
+
+export async function listArchivedSessions(): Promise<ArchivedSessionEntry[]> {
+  const workspaces = await listWorkspaces();
+  const entries = await Promise.all(
+    workspaces.map(async (workspace) => {
+      const sessions = await listSessions(workspace.id, { archivedOnly: true });
+      return sessions.map((session) => ({
+        session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        workspacePath: workspace.path,
+      }));
+    })
+  );
+
+  return entries
+    .flat()
+    .sort((left, right) => {
+      const leftTime = left.session.archivedAt ?? left.session.updatedAt;
+      const rightTime = right.session.archivedAt ?? right.session.updatedAt;
+      return new Date(rightTime).getTime() - new Date(leftTime).getTime();
+    });
 }
 
 export async function createSession(
@@ -399,27 +487,133 @@ export async function createSession(
 async function copySessionTranscript(
   sourceSessionId: string,
   targetSessionId: string,
-  workspaceId = "default"
-): Promise<void> {
+  workspaceId = "default",
+  upToMessageId?: string
+): Promise<{
+  inheritedMessageCount: number;
+  copiedAttachmentFileNames?: Set<string>;
+}> {
+  const forkPointMessageId = upToMessageId?.trim() || undefined;
+  const sourcePath = getJsonlPath(sourceSessionId, workspaceId);
+  let content: string;
+
   try {
-    await copyFile(
-      getJsonlPath(sourceSessionId, workspaceId),
-      getJsonlPath(targetSessionId, workspaceId)
-    );
+    content = await readFile(sourcePath, "utf8");
   } catch (error) {
     if (isEnoentError(error)) {
-      return;
+      return {
+        inheritedMessageCount: 0,
+        copiedAttachmentFileNames: forkPointMessageId ? new Set() : undefined,
+      };
     }
 
     throw error;
   }
+
+  const copiedLines: string[] = [];
+  const copiedAttachmentFileNames = forkPointMessageId ? new Set<string>() : undefined;
+  let foundForkPoint = !forkPointMessageId;
+  let inheritedMessageCount = 0;
+  let lastConversationKind: "assistant" | "user" | null = null;
+
+  for (const line of content.split("\n")) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    copiedLines.push(line);
+
+    try {
+      const record = JSON.parse(line) as MessageRecord | {
+        kind: "assistant_block";
+        message: unknown;
+      };
+
+      if (record.kind === "user") {
+        inheritedMessageCount += 1;
+        lastConversationKind = "user";
+        collectSavedAttachmentFileNames(
+          record.message.attachments,
+          copiedAttachmentFileNames
+        );
+        continue;
+      }
+
+      if (record.kind === "assistant_turn") {
+        const turn = normalizeTurn(record.turn);
+        if (turn) {
+          if (lastConversationKind !== "assistant") {
+            inheritedMessageCount += 1;
+          }
+          lastConversationKind = "assistant";
+
+          if (turn.id === forkPointMessageId) {
+            foundForkPoint = true;
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (record.kind === "assistant_block" && restoreLegacyAssistantBlock(record.message)) {
+        inheritedMessageCount += 1;
+        lastConversationKind = "assistant";
+      }
+    } catch {
+      // Preserve malformed historical lines in the copied transcript.
+    }
+  }
+
+  if (!foundForkPoint) {
+    throw new Error(`Fork message ${forkPointMessageId} not found in source transcript.`);
+  }
+
+  await writeFile(
+    getJsonlPath(targetSessionId, workspaceId),
+    copiedLines.length > 0 ? `${copiedLines.join("\n")}\n` : "",
+    "utf8"
+  );
+
+  return {
+    inheritedMessageCount,
+    copiedAttachmentFileNames,
+  };
 }
 
 async function copySessionAttachments(
   sourceSessionId: string,
   targetSessionId: string,
-  workspaceId = "default"
+  workspaceId = "default",
+  savedFileNames?: Set<string>
 ): Promise<void> {
+  if (savedFileNames) {
+    if (savedFileNames.size === 0) {
+      return;
+    }
+
+    const sourceDir = getAttachmentsDir(sourceSessionId, workspaceId);
+    const targetDir = getAttachmentsDir(targetSessionId, workspaceId);
+    await mkdir(targetDir, { recursive: true });
+
+    await Promise.all(
+      [...savedFileNames].map(async (savedFileName) => {
+        try {
+          await copyFile(
+            path.join(sourceDir, savedFileName),
+            path.join(targetDir, savedFileName)
+          );
+        } catch (error) {
+          if (isEnoentError(error)) {
+            return;
+          }
+
+          throw error;
+        }
+      })
+    );
+    return;
+  }
+
   try {
     await cp(
       getAttachmentsDir(sourceSessionId, workspaceId),
@@ -450,6 +644,26 @@ async function removeSessionArtifacts(
   ]);
 }
 
+function collectSavedAttachmentFileNames(
+  attachments: unknown,
+  fileNames?: Set<string>
+): void {
+  if (!fileNames || !Array.isArray(attachments)) {
+    return;
+  }
+
+  for (const attachment of attachments) {
+    if (!isRecord(attachment) || typeof attachment.savedFileName !== "string") {
+      continue;
+    }
+
+    const savedFileName = attachment.savedFileName.trim();
+    if (savedFileName && path.basename(savedFileName) === savedFileName) {
+      fileNames.add(savedFileName);
+    }
+  }
+}
+
 export async function createForkedSession(
   input: CreateForkedSessionInput,
   workspaceId = "default"
@@ -463,41 +677,54 @@ export async function createForkedSession(
     throw new Error(`Source session ${input.sourceSessionId} not found.`);
   }
 
-  const sourceMessages = await loadMessages(input.sourceSessionId, workspaceId);
+  await flushSessionWrites(input.sourceSessionId, workspaceId);
+
   const now = new Date().toISOString();
-  const title = input.title?.trim() || `${source.title} 的分支`;
+  const title = input.title?.trim() || source.title;
+  const upToMessageId = input.upToMessageId?.trim() || undefined;
   const sessionId = input.id ?? randomUUID();
   const workingDirectory =
     normalizePersistedPath(input.workingDirectory) ??
     (await createSessionWorkingDirectory(sessionId, workspaceId));
   await mkdir(workingDirectory, { recursive: true });
-  const meta: SessionMeta = {
-    id: sessionId,
-    title,
-    createdAt: now,
-    updatedAt: now,
-    sdkSessionId: input.sdkSessionId,
-    providerLocked: false,
-    workingDirectory,
-    branch: {
-      sourceSessionId: source.id,
-      sourceSdkSessionId: input.sourceSdkSessionId,
-      forkedAt: now,
-      forkMode: "full",
-      inheritedMessageCount: sourceMessages.length,
-    },
-  };
 
   try {
-    await copySessionTranscript(source.id, meta.id, workspaceId);
-    await copySessionAttachments(source.id, meta.id, workspaceId);
+    const transcriptCopy = await copySessionTranscript(
+      source.id,
+      sessionId,
+      workspaceId,
+      upToMessageId
+    );
+    const meta: SessionMeta = {
+      id: sessionId,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      sdkSessionId: input.sdkSessionId,
+      providerLocked: false,
+      workingDirectory,
+      branch: {
+        sourceSessionId: source.id,
+        sourceSdkSessionId: input.sourceSdkSessionId,
+        forkedAt: now,
+        forkMode: upToMessageId ? "message" : "full",
+        forkedFromMessageId: upToMessageId,
+        inheritedMessageCount: transcriptCopy.inheritedMessageCount,
+      },
+    };
+    await copySessionAttachments(
+      source.id,
+      meta.id,
+      workspaceId,
+      transcriptCopy.copiedAttachmentFileNames
+    );
     await writeIndex([meta, ...sessions], workspaceId);
+
+    return meta;
   } catch (error) {
-    await removeSessionArtifacts(meta.id, workspaceId, meta.workingDirectory);
+    await removeSessionArtifacts(sessionId, workspaceId, workingDirectory);
     throw error;
   }
-
-  return meta;
 }
 
 export async function deleteSession(
@@ -514,6 +741,52 @@ export async function deleteSession(
   await removeSessionArtifacts(sessionId, workspaceId, session?.workingDirectory);
 }
 
+async function setSessionArchiveState(
+  sessionId: string,
+  archivedAt: string | undefined,
+  workspaceId = "default"
+): Promise<SessionMeta | null> {
+  await ensureSessionsDir(workspaceId);
+
+  const sessions = await readIndex(workspaceId);
+  const index = sessions.findIndex((session) => session.id === sessionId);
+
+  if (index === -1) {
+    return null;
+  }
+
+  const nextSession: SessionMeta = {
+    ...sessions[index],
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (archivedAt) {
+    nextSession.archivedAt = archivedAt;
+  } else {
+    delete nextSession.archivedAt;
+  }
+
+  sessions[index] = nextSession;
+
+  await writeIndex(sessions, workspaceId);
+  const hydrated = await hydrateSessionWorkingDirectories(sessions, workspaceId);
+  return hydrated.find((session) => session.id === sessionId) ?? sessions[index];
+}
+
+export async function archiveSession(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<SessionMeta | null> {
+  return setSessionArchiveState(sessionId, new Date().toISOString(), workspaceId);
+}
+
+export async function restoreSession(
+  sessionId: string,
+  workspaceId = "default"
+): Promise<SessionMeta | null> {
+  return setSessionArchiveState(sessionId, undefined, workspaceId);
+}
+
 export async function updateSessionMeta(
   sessionId: string,
   updates: Partial<
@@ -525,6 +798,7 @@ export async function updateSessionMeta(
       | "providerLocked"
       | "selectedModelId"
       | "workingDirectory"
+      | "archivedAt"
     >
   >,
   workspaceId = "default"
@@ -629,10 +903,6 @@ function getAttachmentPath(
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function stringifyPersistedValue(value: unknown): string {
@@ -754,15 +1024,31 @@ function mergeAssistantTurns(
   existingTurn: AssistantTurn,
   nextTurn: AssistantTurn
 ): AssistantTurn {
-  return {
-    ...existingTurn,
+  const actions = mergeAssistantActions(existingTurn.actions, nextTurn.actions);
+  const error = nextTurn.error ?? existingTurn.error;
+  const {
+    actions: _existingActions,
+    error: _existingError,
+    ...existingBaseTurn
+  } = existingTurn;
+  const mergedTurn: AssistantTurn = {
+    ...existingBaseTurn,
+    id: nextTurn.id,
     processSteps: [...existingTurn.processSteps, ...nextTurn.processSteps],
     bodySegments: [...existingTurn.bodySegments, ...nextTurn.bodySegments],
-    actions: mergeAssistantActions(existingTurn.actions, nextTurn.actions),
     status: "done",
-    error: nextTurn.error ?? existingTurn.error,
     completedAt: nextTurn.completedAt ?? existingTurn.completedAt,
   };
+
+  if (actions) {
+    mergedTurn.actions = actions;
+  }
+
+  if (error) {
+    mergedTurn.error = error;
+  }
+
+  return mergedTurn;
 }
 
 function normalizeTurn(rawTurn: unknown): AssistantTurn | null {
@@ -1044,11 +1330,17 @@ export async function appendMessageRecord(
   record: MessageRecord,
   workspaceId = "default"
 ): Promise<void> {
-  await ensureSessionsDir(workspaceId);
-  await appendFile(
-    getJsonlPath(sessionId, workspaceId),
-    `${JSON.stringify(record)}\n`,
-    "utf8"
+  await runQueuedSessionWrite(
+    sessionId,
+    workspaceId,
+    async () => {
+      await ensureSessionsDir(workspaceId);
+      await appendFile(
+        getJsonlPath(sessionId, workspaceId),
+        `${JSON.stringify(record)}\n`,
+        "utf8"
+      );
+    }
   );
 }
 
@@ -1125,12 +1417,6 @@ export async function loadMessages(
               workspaceId
             );
 
-            try {
-              await access(filePath);
-            } catch {
-              continue;
-            }
-
             const restoredAttachment: FileAttachment = {
               id: meta.id,
               name: meta.name,
@@ -1150,7 +1436,11 @@ export async function loadMessages(
                   await readFile(filePath)
                 ).toString("base64");
                 restoredInlineImageCount += 1;
-              } catch {
+              } catch (error) {
+                if (isEnoentError(error)) {
+                  continue;
+                }
+
                 // Ignore image preview load failures and keep the placeholder state.
               }
             }
@@ -1209,14 +1499,25 @@ export function persistAssistantMessage(
   sessionId: string,
   sdkMessage: unknown,
   workspaceId = "default"
-): void {
-  if (!isRecord(sdkMessage) || !Array.isArray(sdkMessage.content)) {
-    return;
+): Promise<void> {
+  const assistantMessage =
+    isRecord(sdkMessage) &&
+    sdkMessage.type === "assistant" &&
+    isRecord(sdkMessage.message)
+      ? sdkMessage.message
+      : sdkMessage;
+  const messageUuid =
+    isRecord(sdkMessage) && typeof sdkMessage.uuid === "string"
+      ? sdkMessage.uuid
+      : undefined;
+
+  if (!isRecord(assistantMessage) || !Array.isArray(assistantMessage.content)) {
+    return Promise.resolve();
   }
 
   const startedAt = Date.now();
   const turn: AssistantTurn = {
-    id: makeId("turn"),
+    id: messageUuid ?? makeId("turn"),
     processSteps: [],
     bodySegments: [],
     status: "done",
@@ -1224,7 +1525,7 @@ export function persistAssistantMessage(
     completedAt: startedAt,
   };
 
-  for (const block of sdkMessage.content) {
+  for (const block of assistantMessage.content) {
     if (!isRecord(block)) {
       continue;
     }
@@ -1265,10 +1566,10 @@ export function persistAssistantMessage(
   }
 
   if (turn.processSteps.length === 0 && turn.bodySegments.length === 0) {
-    return;
+    return Promise.resolve();
   }
 
-  void appendMessageRecord(
+  return appendMessageRecord(
     sessionId,
     {
       kind: "assistant_turn",
@@ -1282,15 +1583,17 @@ export function persistToolResults(
   sessionId: string,
   sdkMessage: unknown,
   workspaceId = "default"
-): void {
+): Promise<void> {
   if (typeof sdkMessage !== "object" || sdkMessage === null) {
-    return;
+    return Promise.resolve();
   }
 
   const content = (sdkMessage as Record<string, unknown>).content;
   if (!Array.isArray(content)) {
-    return;
+    return Promise.resolve();
   }
+
+  const writes: Promise<void>[] = [];
 
   for (const block of content) {
     if (typeof block !== "object" || block === null) {
@@ -1304,17 +1607,21 @@ export function persistToolResults(
 
     const assistantActions = extractAssistantActionsFromToolResult(item.content);
 
-    void appendMessageRecord(sessionId, {
-      kind: "tool_result",
-      toolUseId: item.tool_use_id,
-      result:
-        typeof item.content === "string"
-          ? item.content
-          : JSON.stringify(item.content ?? ""),
-      isError: item.is_error === true,
-      completedAt: Date.now(),
-      assistantActions:
-        assistantActions.length > 0 ? assistantActions : undefined,
-    }, workspaceId);
+    writes.push(
+      appendMessageRecord(sessionId, {
+        kind: "tool_result",
+        toolUseId: item.tool_use_id,
+        result:
+          typeof item.content === "string"
+            ? item.content
+            : JSON.stringify(item.content ?? ""),
+        isError: item.is_error === true,
+        completedAt: Date.now(),
+        assistantActions:
+          assistantActions.length > 0 ? assistantActions : undefined,
+      }, workspaceId)
+    );
   }
+
+  return Promise.all(writes).then(() => undefined);
 }

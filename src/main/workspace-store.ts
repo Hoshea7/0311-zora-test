@@ -225,6 +225,30 @@ async function persistWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<vo
   }
 }
 
+function isSameWorkspaceMeta(left: WorkspaceMeta | null, right: WorkspaceMeta): boolean {
+  return left !== null && JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function repairMissingWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<void> {
+  const results = await Promise.allSettled(
+    workspaces.map(async (workspace) => {
+      const sidecar = await readWorkspaceSidecar(workspace.id);
+
+      if (isSameWorkspaceMeta(sidecar, workspace)) {
+        return;
+      }
+
+      await persistWorkspaceSidecar(workspace);
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("[workspace-store] Failed to repair workspace sidecar.", result.reason);
+    }
+  }
+}
+
 async function readWorkspaceSidecar(workspaceId: string): Promise<WorkspaceMeta | null> {
   try {
     const raw = await readFile(getWorkspaceSidecarPath(workspaceId), "utf8");
@@ -350,7 +374,7 @@ export async function listWorkspaces(): Promise<WorkspaceMeta[]> {
   ) {
     await writeWorkspaceFile(normalized);
   } else {
-    await persistWorkspaceSidecars(normalized);
+    await repairMissingWorkspaceSidecars(normalized);
   }
 
   return normalized;

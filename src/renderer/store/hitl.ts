@@ -5,6 +5,7 @@ import type {
   PermissionMode,
 } from "../../shared/zora";
 import { currentSessionIdAtom } from "./workspace";
+import { DRAFT_SESSION_ID } from "./session-constants";
 
 type SessionId = string;
 type SessionScopedQueues<T> = Record<SessionId, T[]>;
@@ -12,7 +13,7 @@ type SessionScopedPermissionRequest = PermissionRequest & { sessionId: SessionId
 type SessionScopedAskUserRequest = AskUserRequest & { sessionId: SessionId };
 
 function resolveActiveHitlSessionId(get: Getter): SessionId {
-  return get(currentSessionIdAtom) ?? "__draft__";
+  return get(currentSessionIdAtom) ?? DRAFT_SESSION_ID;
 }
 
 function appendSessionScopedRequest<T extends { sessionId: SessionId }>(

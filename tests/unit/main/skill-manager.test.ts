@@ -2,6 +2,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,5 +93,32 @@ describe("seedBundledSkills", () => {
 
     expect(seededDirNames).toContain("docx");
     expect(seededDirNames).not.toContain(bootstrapDirName);
+  });
+});
+
+describe("listSkills", () => {
+  it("includes skills installed as directory symlinks", async () => {
+    const homeDir = createTempHome();
+    const externalSkillDir = path.join(homeDir, "external", "linked-helper");
+    const zoraSkillsDir = path.join(homeDir, ".zora", "skills");
+
+    writeSkillFile(
+      externalSkillDir,
+      ["---", "name: linked-helper", "description: Linked helper", "---", "", "# Linked", ""].join("\n")
+    );
+    mkdirSync(zoraSkillsDir, { recursive: true });
+    symlinkSync(externalSkillDir, path.join(zoraSkillsDir, "linked-helper"), "dir");
+
+    const { listSkills } = await loadSkillManagerModule(homeDir);
+
+    const skills = await listSkills();
+
+    expect(skills).toEqual([
+      expect.objectContaining({
+        dirName: "linked-helper",
+        name: "linked-helper",
+        description: "Linked helper",
+      }),
+    ]);
   });
 });

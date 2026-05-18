@@ -1200,6 +1200,10 @@ export async function runAgentWithProfile(
         break;
       }
     }
+
+    if (missingSdkSessionError) {
+      throw missingSdkSessionError;
+    }
     if (!run.stopping && profile.name !== "memory") {
       logAgentEvent("post", "memory", "已触发记忆处理检查", {
         MemoryAgent: "check",

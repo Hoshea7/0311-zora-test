@@ -119,11 +119,25 @@ export async function runPromptInSession({
 
       const message = payload as Record<string, unknown>;
       if (message.type === "assistant" && "message" in message) {
-        persistAssistantMessage(sessionId, message.message, workspaceId);
+        void persistAssistantMessage(sessionId, message, workspaceId).catch(
+          (error) => {
+            console.error(
+              `[session-runner] Failed to persist assistant message for session ${sessionId}:`,
+              error
+            );
+          }
+        );
       }
 
       if (message.type === "user" && "message" in message) {
-        persistToolResults(sessionId, message.message, workspaceId);
+        void persistToolResults(sessionId, message.message, workspaceId).catch(
+          (error) => {
+            console.error(
+              `[session-runner] Failed to persist tool results for session ${sessionId}:`,
+              error
+            );
+          }
+        );
       }
     },
     workspaceId,

@@ -9,9 +9,9 @@ import {
 import { activeMainViewAtom, isSettingsOpenAtom } from "../../store/ui";
 import {
   DEFAULT_WORKSPACE_ID,
+  archiveSessionAtom,
   currentSessionIdAtom,
   currentWorkspaceIdAtom,
-  deleteSessionAtom,
   deleteWorkspaceAtom,
   pinnedWorkspaceIdsAtom,
   pinnedSessionIdsAtom,
@@ -26,6 +26,7 @@ import {
 import { cn } from "../../utils/cn";
 import { getErrorMessage } from "../../utils/message";
 import type { Session, Workspace } from "../../types";
+import { ArchiveIcon, TrashIcon } from "../ui/Icons";
 
 type SessionStatus = "needs-input" | "running" | "current" | "idle";
 
@@ -193,25 +194,6 @@ function RenameIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
         strokeWidth={1.9}
         d="M4.5 19.5h15M6.25 15.75l.7-3.5 8.3-8.3a1.77 1.77 0 012.5 0l.3.3a1.77 1.77 0 010 2.5l-8.3 8.3-3.5.7z"
-      />
-    </svg>
-  );
-}
-
-function TrashIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M5.75 7.25h12.5M9.75 7.25V5.5c0-.7.55-1.25 1.25-1.25h2c.7 0 1.25.55 1.25 1.25v1.75m2.5 0l-.7 10.2a2 2 0 01-2 1.86h-4.1a2 2 0 01-2-1.86l-.7-10.2"
       />
     </svg>
   );
@@ -439,13 +421,19 @@ function SessionRow({
   isPinned: boolean;
   onSwitch: (workspaceId: string, sessionId: string) => void;
 }) {
-  const deleteSession = useSetAtom(deleteSessionAtom);
+  const archiveSession = useSetAtom(archiveSessionAtom);
   const renameSession = useSetAtom(renameSessionAtom);
   const togglePinSession = useSetAtom(togglePinSessionAtom);
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const archiveDisabledReason =
+    status === "running"
+      ? "会话运行中，结束后再归档"
+      : status === "needs-input"
+        ? "会话待确认，处理后再归档"
+        : undefined;
 
   const handleRenameSubmit = () => {
     const trimmed = renameValue.trim();
@@ -462,12 +450,15 @@ function SessionRow({
     setRenameValue("");
   };
 
-  const handleDelete = () => {
-    setMenuOpen(false);
-
-    if (window.confirm(`确定删除会话「${session.title}」？此操作不可撤销。`)) {
-      deleteSession(session.id, workspaceId);
+  const handleArchive = () => {
+    if (archiveDisabledReason) {
+      return;
     }
+
+    setMenuOpen(false);
+    void archiveSession(session.id, workspaceId).catch((error) => {
+      window.alert(getErrorMessage(error) || "归档会话失败，请稍后再试。");
+    });
   };
 
   return (
@@ -614,11 +605,18 @@ function SessionRow({
                     <span>重命名</span>
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
-                    className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-red-700 transition-colors focus:bg-red-50 focus:outline-none data-[highlighted]:bg-red-50"
-                    onSelect={handleDelete}
+                    disabled={Boolean(archiveDisabledReason)}
+                    title={archiveDisabledReason}
+                    className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] text-stone-700 transition-colors focus:bg-stone-900/[0.04] focus:outline-none data-[disabled]:cursor-not-allowed data-[disabled]:bg-transparent data-[disabled]:text-stone-300 data-[highlighted]:bg-stone-900/[0.04]"
+                    onSelect={handleArchive}
                   >
-                    <TrashIcon className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                    <span>删除</span>
+                    <ArchiveIcon
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        archiveDisabledReason ? "text-stone-300" : "text-stone-500"
+                      )}
+                    />
+                    <span>归档</span>
                   </DropdownMenu.Item>
                 </div>
               </DropdownMenu.Content>
@@ -697,13 +695,17 @@ export function SessionList({
         return [];
       }
 
+      const sessionsForWorkspaceStatus = group.sessions.filter(
+        (session) => !pinnedSessionIds.has(session.id)
+      );
+
       return [
         {
           workspace: group.workspace,
           sessions: workspaceMatches ? group.sessions : sessions,
           loaded: group.loaded,
           status: getWorkspaceStatus(
-            group.sessions,
+            sessionsForWorkspaceStatus,
             currentSessionIdForStatus,
             runningSessions,
             pendingPermissionsBySession,
@@ -718,6 +720,7 @@ export function SessionList({
     normalizedSearchQuery,
     pendingAskUsersBySession,
     pendingPermissionsBySession,
+    pinnedSessionIds,
     runningSessions,
   ]);
 

@@ -17,3 +17,45 @@ export function normalizeBoolean(value: unknown, fieldName: string): boolean {
 
   return value;
 }
+
+export function assertRequiredString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+
+  return value.trim();
+}
+
+export function assertRequiredBoolean(value: unknown, fieldName: string): boolean {
+  return normalizeBoolean(value, fieldName);
+}
+
+export function assertOptionalString(
+  value: unknown,
+  fieldName: string
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName} must be a string when provided.`);
+  }
+
+  return value;
+}
+
+export function assertOptionalBoolean(
+  value: unknown,
+  fieldName: string
+): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean when provided.`);
+  }
+
+  return value;
+}

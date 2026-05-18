@@ -25,6 +25,7 @@ import type {
   ScheduledTaskStatus,
   ScheduledTaskUpdateInput,
 } from "../shared/types/schedule";
+import { SESSION_IPC } from "../shared/types/ipc";
 import {
   isValidScheduleTime,
   isValidScheduleWeekdays,
@@ -69,13 +70,16 @@ import { McpManager, setSharedMcpManager } from "./mcp-manager";
 import { listDirectory, startFileWatcher, stopFileWatcher } from "./file-tree";
 import {
   appendMessageRecord,
+  archiveSession,
   createSession,
   deleteSession,
   getSessionMeta,
+  listArchivedSessions,
   listSessions,
   loadMessages,
   migrateSessionsIfNeeded,
   renameSession,
+  restoreSession,
   updateSessionMeta,
 } from "./session-store";
 import {
@@ -119,7 +123,13 @@ import {
 } from "./updater";
 import { normalizeExternalUrl } from "./external-url";
 import { isRecord } from "./utils/guards";
-import { normalizeOptionalString } from "./utils/validate";
+import {
+  assertOptionalBoolean,
+  assertOptionalString,
+  assertRequiredBoolean,
+  assertRequiredString,
+  normalizeOptionalString,
+} from "./utils/validate";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEV_ELECTRON_PROFILE_DIR_NAME = "zora-dev";
@@ -265,44 +275,34 @@ async function resolveExistingSessionWorkspaceId(
   });
 }
 
-function assertRequiredString(value: unknown, fieldName: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${fieldName} must be a non-empty string.`);
-  }
-
-  return value;
+function hasWorkspaceIdInput(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== "";
 }
 
-function assertRequiredBoolean(value: unknown, fieldName: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean.`);
+async function resolveSessionWorkspaceId(
+  sessionId: string,
+  workspaceId: unknown
+): Promise<string> {
+  if (hasWorkspaceIdInput(workspaceId)) {
+    return resolveWorkspaceId(workspaceId);
   }
 
-  return value;
-}
+  const workspaces = await listWorkspaces();
+  const matches = await Promise.all(
+    workspaces.map(async (workspace) => {
+      const session = await getSessionMeta(sessionId, workspace.id);
+      return session ? workspace.id : null;
+    })
+  );
+  const resolvedWorkspaceId = matches.find(
+    (candidate): candidate is string => typeof candidate === "string"
+  );
 
-function assertOptionalString(value: unknown, fieldName: string): string | undefined {
-  if (value === undefined) {
-    return undefined;
+  if (!resolvedWorkspaceId) {
+    throw new Error(`Session ${sessionId} not found.`);
   }
 
-  if (typeof value !== "string") {
-    throw new Error(`${fieldName} must be a string when provided.`);
-  }
-
-  return value;
-}
-
-function assertOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean when provided.`);
-  }
-
-  return value;
+  return resolvedWorkspaceId;
 }
 
 const ROLE_MODEL_KEYS = [
@@ -1568,11 +1568,15 @@ app.whenReady().then(async () => {
     stopFileWatcher();
   });
 
-  ipcMain.handle("session:list", async (_event, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.LIST, async (_event, workspaceId: unknown) => {
     return listSessions(resolveWorkspaceId(workspaceId));
   });
 
-  ipcMain.handle("session:create", async (_event, title: string, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.LIST_ARCHIVED, async () => {
+    return listArchivedSessions();
+  });
+
+  ipcMain.handle(SESSION_IPC.CREATE, async (_event, title: string, workspaceId: unknown) => {
     if (typeof title !== "string" || title.trim().length === 0) {
       throw new Error("Session title is required.");
     }
@@ -1581,19 +1585,17 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    "session:fork",
-    async (
-      _event,
-      sourceSessionId: unknown,
-      workspaceId: unknown,
-      title: unknown
-    ) => {
-      if (typeof sourceSessionId !== "string" || sourceSessionId.trim().length === 0) {
-        throw new Error("A valid sourceSessionId is required.");
+    SESSION_IPC.FORK,
+    async (_event, input: unknown) => {
+      if (!isRecord(input)) {
+        throw new Error("Fork input is required.");
       }
 
-      const targetWorkspaceId = resolveWorkspaceId(workspaceId);
-      const trimmedSessionId = sourceSessionId.trim();
+      const targetWorkspaceId = resolveWorkspaceId(input.workspaceId);
+      const trimmedSessionId = assertRequiredString(
+        input.sourceSessionId,
+        "sourceSessionId"
+      ).trim();
 
       if (isAgentRunningForSession(trimmedSessionId)) {
         throw new Error("当前会话正在运行，结束后再 Fork。");
@@ -1602,7 +1604,11 @@ app.whenReady().then(async () => {
       const result = await forkSessionFromSource({
         sourceSessionId: trimmedSessionId,
         workspaceId: targetWorkspaceId,
-        title: typeof title === "string" ? title : undefined,
+        title: typeof input.title === "string" ? input.title : undefined,
+        upToMessageId:
+          typeof input.upToMessageId === "string"
+            ? input.upToMessageId
+            : undefined,
       });
 
       logSystemEvent(
@@ -1620,24 +1626,72 @@ app.whenReady().then(async () => {
     }
   );
 
-  ipcMain.handle("session:delete", async (_event, sessionId: unknown, workspaceId: unknown) => {
-    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
-      throw new Error("A valid sessionId is required.");
+  ipcMain.handle(SESSION_IPC.DELETE, async (_event, sessionId: unknown, workspaceId: unknown) => {
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    if (isAgentRunningForSession(targetSessionId)) {
+      throw new Error("当前会话正在运行，结束后再删除。");
     }
 
-    await deleteSession(sessionId, resolveWorkspaceId(workspaceId));
-    clearSessionWhitelist(sessionId);
+    const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+    await deleteSession(targetSessionId, targetWorkspaceId);
+    clearSessionWhitelist(targetSessionId);
     logSystemEvent(
       "app",
       "session",
       "delete",
       "会话已删除",
-      { sessionId }
+      { sessionId: targetSessionId, workspaceId: targetWorkspaceId }
     );
   });
 
+  ipcMain.handle(SESSION_IPC.ARCHIVE, async (_event, sessionId: unknown, workspaceId: unknown) => {
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    if (isAgentRunningForSession(targetSessionId)) {
+      throw new Error("当前会话正在运行，结束后再归档。");
+    }
+
+    const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+    const archived = await archiveSession(
+      targetSessionId,
+      targetWorkspaceId
+    );
+
+    if (!archived) {
+      throw new Error(`Session ${targetSessionId} not found.`);
+    }
+
+    logSystemEvent(
+      "app",
+      "session",
+      "archive",
+      "会话已归档",
+      { sessionId: targetSessionId, workspaceId: targetWorkspaceId }
+    );
+    return archived;
+  });
+
+  ipcMain.handle(SESSION_IPC.RESTORE, async (_event, sessionId: unknown, workspaceId: unknown) => {
+    const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
+
+    const targetWorkspaceId = resolveWorkspaceId(workspaceId);
+    const restored = await restoreSession(
+      targetSessionId,
+      targetWorkspaceId
+    );
+    logSystemEvent(
+      "app",
+      "session",
+      "restore",
+      "归档会话已恢复",
+      { sessionId: targetSessionId, workspaceId: targetWorkspaceId }
+    );
+    return restored;
+  });
+
   ipcMain.handle(
-    "session:rename",
+    SESSION_IPC.RENAME,
     async (_event, sessionId: unknown, title: unknown, workspaceId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
@@ -1659,7 +1713,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:load-messages",
+    SESSION_IPC.LOAD_MESSAGES,
     async (_event, sessionId: string, workspaceId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
         throw new Error("Session ID is required.");
@@ -1670,7 +1724,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:lock-model",
+    SESSION_IPC.LOCK_MODEL,
     async (
       _event,
       sessionId: unknown,
@@ -1773,7 +1827,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:switch-model",
+    SESSION_IPC.SWITCH_MODEL,
     async (
       _event,
       sessionId: unknown,

@@ -2,6 +2,17 @@ import { atom } from "jotai";
 
 export type MainView = "chat" | "schedule" | "settings";
 
+export const SETTINGS_TAB_IDS = [
+  "provider",
+  "feishu",
+  "skills",
+  "memory",
+  "mcp",
+  "archived",
+  "about",
+] as const;
+export type SettingsTab = (typeof SETTINGS_TAB_IDS)[number];
+
 const SIDEBAR_WIDTH_STORAGE_KEY = "zora:sidebarWidth";
 
 export const SIDEBAR_COLLAPSED_WIDTH = 72;
@@ -73,6 +84,4 @@ export const isSettingsOpenAtom = atom(
 /**
  * 设置面板当前 Tab
  */
-export const settingsTabAtom = atom<
-  "provider" | "feishu" | "skills" | "memory" | "mcp" | "about"
->("provider");
+export const settingsTabAtom = atom<SettingsTab>("provider");
