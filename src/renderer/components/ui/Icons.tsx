@@ -63,3 +63,40 @@ export function ForkIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.9}
+        d="M18.35 7.05A7.2 7.2 0 007.7 5.1"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.9}
+        d="M18.55 3.95v3.2h-3.2"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.9}
+        d="M5.65 16.95a7.2 7.2 0 0010.65 1.95"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.9}
+        d="M5.45 20.05v-3.2h3.2"
+      />
+    </svg>
+  );
+}

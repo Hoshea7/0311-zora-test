@@ -507,6 +507,7 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
   const lastSeenVersionRef = useRef(version);
+  const watcherRefreshTimerRef = useRef<number | null>(null);
   const visibleEntries = showHiddenFiles
     ? entries
     : entries.filter((entry) => !isHiddenEntry(entry));
@@ -517,7 +518,14 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
     }
 
     const unsubscribe = window.zora.filetree.onChanged(() => {
-      setVersion((current) => current + 1);
+      if (watcherRefreshTimerRef.current !== null) {
+        window.clearTimeout(watcherRefreshTimerRef.current);
+      }
+
+      watcherRefreshTimerRef.current = window.setTimeout(() => {
+        watcherRefreshTimerRef.current = null;
+        setVersion((current) => current + 1);
+      }, 150);
     });
 
     void window.zora.filetree.watch(workspacePath).catch((error) => {
@@ -525,6 +533,11 @@ export function FileTreePanel({ isOpen }: { isOpen: boolean }) {
     });
 
     return () => {
+      if (watcherRefreshTimerRef.current !== null) {
+        window.clearTimeout(watcherRefreshTimerRef.current);
+        watcherRefreshTimerRef.current = null;
+      }
+
       unsubscribe();
       void window.zora.filetree.unwatch().catch((error) => {
         console.error("[filetree] Failed to stop watcher:", error);

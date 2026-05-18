@@ -58,7 +58,11 @@ function AssistantForkButton({
     setIsForking(true);
 
     try {
-      await forkSession(currentSessionId, currentWorkspaceId, forkPointMessageId);
+      await forkSession({
+        sourceSessionId: currentSessionId,
+        workspaceId: currentWorkspaceId,
+        upToMessageId: forkPointMessageId,
+      });
       setSettingsOpen(false);
     } catch (error) {
       window.alert(getErrorMessage(error) || "Fork 会话失败，请稍后再试。");

@@ -1,11 +1,11 @@
 import { useSetAtom } from "jotai";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArchivedSessionEntry } from "../../../shared/zora";
 import { DEFAULT_WORKSPACE_ID, restoreSessionAtom } from "../../store/workspace";
 import { ARCHIVED_SESSIONS_CHANGED_EVENT } from "../../utils/archived-sessions-event";
 import { cn } from "../../utils/cn";
 import { getErrorMessage } from "../../utils/message";
-import { TrashIcon } from "../ui/Icons";
+import { RefreshIcon, TrashIcon } from "../ui/Icons";
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "short",
@@ -27,45 +27,9 @@ function formatDate(value?: string): string {
   return dateFormatter.format(date);
 }
 
-function RefreshIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M18.35 7.05A7.2 7.2 0 007.7 5.1"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M18.55 3.95v3.2h-3.2"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M5.65 16.95a7.2 7.2 0 0010.65 1.95"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.9}
-        d="M5.45 20.05v-3.2h3.2"
-      />
-    </svg>
-  );
-}
-
 export function ArchivedSessionsSettings() {
   const restoreSession = useSetAtom(restoreSessionAtom);
+  const loadRequestIdRef = useRef(0);
   const [entries, setEntries] = useState<ArchivedSessionEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,22 +41,31 @@ export function ArchivedSessionsSettings() {
 
   const archivedCount = entries.length;
 
-  const loadEntries = async () => {
+  const loadEntries = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     setIsLoading(true);
     setError(null);
 
     try {
-      setEntries(await window.zora.listArchivedSessions());
+      const nextEntries = await window.zora.listArchivedSessions();
+      if (loadRequestIdRef.current === requestId) {
+        setEntries(nextEntries);
+      }
     } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      if (loadRequestIdRef.current === requestId) {
+        setError(getErrorMessage(loadError));
+      }
     } finally {
-      setIsLoading(false);
+      if (loadRequestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadEntries();
-  }, []);
+  }, [loadEntries]);
 
   useEffect(() => {
     const handleArchivedSessionsChanged = () => {
@@ -110,7 +83,7 @@ export function ArchivedSessionsSettings() {
         handleArchivedSessionsChanged
       );
     };
-  }, []);
+  }, [loadEntries]);
 
   const handleRestore = async (entry: ArchivedSessionEntry) => {
     setRestoringId(entry.session.id);

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { ConversationMessage, SessionForkResult } from "../shared/zora";
+import type {
+  ConversationMessage,
+  SessionForkRequest,
+  SessionForkResult,
+} from "../shared/zora";
 import { normalizeOptionalString } from "./utils/validate";
 import {
   copySessionWorkingDirectory,
@@ -15,11 +19,8 @@ import {
   loadMessages,
 } from "./session-store";
 
-export interface ForkSessionFromSourceInput {
-  sourceSessionId: string;
+export interface ForkSessionFromSourceInput extends SessionForkRequest {
   workspaceId: string;
-  title?: string;
-  upToMessageId?: string;
 }
 
 function hashProjectPath(value: string): string {

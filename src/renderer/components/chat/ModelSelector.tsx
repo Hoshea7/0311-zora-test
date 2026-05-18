@@ -4,6 +4,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { providersAtom } from "../../store/provider";
 import {
   currentSessionAtom,
+  currentWorkspaceIdAtom,
   draftSelectedProviderIdAtom,
   draftSelectedModelIdAtom,
   setDraftSelectedProviderIdAtom,
@@ -48,6 +49,7 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
   const providers = useAtomValue(providersAtom);
   const defaultModelSettings = useAtomValue(defaultModelSettingsAtom);
   const currentSession = useAtomValue(currentSessionAtom);
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const draftSelectedProviderId = useAtomValue(draftSelectedProviderIdAtom);
   const draftSelectedModelId = useAtomValue(draftSelectedModelIdAtom);
   const setDraftSelectedProviderId = useSetAtom(setDraftSelectedProviderIdAtom);
@@ -102,7 +104,11 @@ export function ModelSelector({ trigger }: ModelSelectorProps) {
     try {
       if (currentSession?.providerLocked && currentSession.id) {
         const nextModelOverride = resolveSelectedModelOverride(provider, resolvedModelId);
-        await window.zora.switchSessionModel(currentSession.id, nextModelOverride);
+        await window.zora.switchSessionModel(
+          currentSession.id,
+          nextModelOverride,
+          currentWorkspaceId
+        );
         updateSessionMetaInState({
           sessionId: currentSession.id,
           updates: {

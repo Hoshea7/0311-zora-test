@@ -106,11 +106,14 @@ export interface SessionForkResult {
   messages: ConversationMessage[];
 }
 
-export interface ForkSessionInput {
+export interface SessionForkRequest {
   sourceSessionId: string;
-  workspaceId?: string;
   title?: string;
   upToMessageId?: string;
+}
+
+export interface ForkSessionInput extends SessionForkRequest {
+  workspaceId?: string;
 }
 
 export interface WorkspaceMeta {
@@ -361,7 +364,8 @@ export interface ZoraApi {
   ) => Promise<{ success: boolean }>;
   switchSessionModel: (
     sessionId: string,
-    modelId: string
+    modelId: string,
+    workspaceId?: string
   ) => Promise<{ success: boolean }>;
   listWorkspaces: () => Promise<WorkspaceMeta[]>;
   createWorkspace: (name: string, workspacePath: string) => Promise<WorkspaceMeta>;

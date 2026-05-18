@@ -70,6 +70,56 @@ describe("main workspace-store", () => {
     );
   });
 
+  it("handles concurrent workspace listing without sidecar write races", async () => {
+    const homeDir = createTempHome();
+    const { createWorkspace, listWorkspaces } = await loadWorkspaceStoreModule(homeDir);
+    const workspaceA = await createWorkspace("Project A", path.join(homeDir, "project-a"));
+    const workspaceB = await createWorkspace("Project B", path.join(homeDir, "project-b"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 30 }, () => listWorkspaces())
+      );
+
+      expect(results).toHaveLength(30);
+      expect(results.every((workspaces) => workspaces.length === 3)).toBe(true);
+      expect(
+        warnSpy.mock.calls.filter(([message]) =>
+          String(message).includes("Failed to persist workspace sidecar")
+        )
+      ).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    for (const workspaceId of ["default", workspaceA.id, workspaceB.id]) {
+      expect(
+        existsSync(getZoraPath(homeDir, "workspaces", workspaceId, "workspace.json"))
+      ).toBe(true);
+    }
+  });
+
+  it("repairs missing sidecar metadata on a clean workspace list", async () => {
+    const homeDir = createTempHome();
+    const { createWorkspace, listWorkspaces } = await loadWorkspaceStoreModule(homeDir);
+    const workspace = await createWorkspace("Project A", path.join(homeDir, "project-a"));
+    const sidecarPath = getZoraPath(
+      homeDir,
+      "workspaces",
+      workspace.id,
+      "workspace.json"
+    );
+
+    rmSync(sidecarPath, { force: true });
+    expect(existsSync(sidecarPath)).toBe(false);
+
+    await listWorkspaces();
+
+    expect(existsSync(sidecarPath)).toBe(true);
+    expect(JSON.parse(readFileSync(sidecarPath, "utf8"))).toEqual(workspace);
+  });
+
   it("recovers a workspace from sidecar metadata when the main index is missing", async () => {
     const homeDir = createTempHome();
     const workspace: WorkspaceMeta = {

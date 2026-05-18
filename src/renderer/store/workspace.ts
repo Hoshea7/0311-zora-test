@@ -8,12 +8,12 @@ import {
   setSessionMessagesAtom,
 } from "./chat";
 import { emitArchivedSessionsChanged } from "../utils/archived-sessions-event";
+import { DRAFT_SESSION_ID } from "./session-constants";
 
 const CURRENT_WORKSPACE_STORAGE_KEY = "zora:currentWorkspaceId";
 const PINNED_WORKSPACES_STORAGE_KEY = "zora:pinnedWorkspaceIds";
 const PINNED_SESSIONS_STORAGE_KEY = "zora:pinnedSessionIds";
 export const DEFAULT_WORKSPACE_ID = "default";
-const DRAFT_SESSION_ID = "__draft__";
 const sessionLoadRequestIds = new Map<string, number>();
 
 function readStoredWorkspaceId(): string {
@@ -755,15 +755,17 @@ export const forkSessionAtom = atom(
   async (
     get,
     set,
-    sourceSessionId: string,
-    workspaceId?: string,
-    upToMessageId?: string
+    input: {
+      sourceSessionId: string;
+      workspaceId?: string;
+      upToMessageId?: string;
+    }
   ) => {
-    const targetWorkspaceId = workspaceId ?? get(currentWorkspaceIdAtom);
+    const targetWorkspaceId = input.workspaceId ?? get(currentWorkspaceIdAtom);
     const result = await window.zora.forkSession({
-      sourceSessionId,
+      sourceSessionId: input.sourceSessionId,
       workspaceId: targetWorkspaceId,
-      upToMessageId,
+      upToMessageId: input.upToMessageId,
     });
 
     const currentWorkspaceSessions =

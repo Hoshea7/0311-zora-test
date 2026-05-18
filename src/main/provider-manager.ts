@@ -2,11 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   mkdir,
   readFile,
-  rename as fsRename,
-  unlink,
-  writeFile,
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -21,10 +17,10 @@ import type {
   RoleTestDetail,
 } from "../shared/types/provider";
 import { getPackagedSafeWorkingDirectory, getSDKRuntimeOptions } from "./sdk-runtime";
+import { replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 import { readSecret, storeSecret } from "./utils/secret-storage";
 
 const MASKED_API_KEY = "••••••";
-const ZORA_DIR = path.join(homedir(), ".zora");
 const PROVIDERS_FILE = path.join(ZORA_DIR, "providers.json");
 const TEST_CONNECTION_TIMEOUT_MS = 30_000;
 const OFFICIAL_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
@@ -42,39 +38,6 @@ type JsonRecord = Record<string, unknown>;
 
 const PROVIDER_TEST_PROMPT =
   "This is a provider connectivity check. Reply with exactly OK. Do not use tools, browse, or ask follow-up questions.";
-
-async function replaceFileAtomically(filePath: string, content: string): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination file.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
-}
 
 function normalizeRequiredString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {

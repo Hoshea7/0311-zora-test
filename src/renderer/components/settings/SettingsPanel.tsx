@@ -6,7 +6,11 @@ import { MemorySettings } from "./MemorySettings";
 import { McpSettings } from "./McpSettings";
 import { ProviderSettings } from "./ProviderSettings";
 import { SkillManagerPanel } from "./SkillManagerPanel";
-import { isSettingsOpenAtom, settingsTabAtom } from "../../store/ui";
+import {
+  isSettingsOpenAtom,
+  settingsTabAtom,
+  type SettingsTab,
+} from "../../store/ui";
 import { cn } from "../../utils/cn";
 
 const tabs = [
@@ -88,7 +92,11 @@ const tabs = [
       </svg>
     ),
   },
-] as const;
+] as const satisfies readonly {
+  id: SettingsTab;
+  label: string;
+  icon: JSX.Element;
+}[];
 
 export function SettingsPanel() {
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);

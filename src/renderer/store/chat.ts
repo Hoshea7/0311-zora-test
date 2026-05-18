@@ -9,6 +9,7 @@ import type { AgentRunSource } from "../../shared/zora";
 import { createId, isRecord, stringifyUnknown } from "../utils/message";
 import { normalizeThinkingContent } from "../utils/thinking";
 import { currentSessionIdAtom } from "./workspace";
+import { DRAFT_SESSION_ID } from "./session-constants";
 
 // 基础状态 atoms
 export const isAgentIdleAtom = atom(false);
@@ -23,7 +24,7 @@ const EMPTY_DRAFT = "";
 const EMPTY_ATTACHMENTS: FileAttachment[] = [];
 
 function resolveActiveSessionKey(get: Getter): string {
-  return get(currentSessionIdAtom) ?? "__draft__";
+  return get(currentSessionIdAtom) ?? DRAFT_SESSION_ID;
 }
 
 function applyScopedValueUpdate<T>(
@@ -251,6 +252,10 @@ export const setSessionRunningAtom = atom<null, [string, boolean, AgentRunSource
   null,
   (get, set, sessionId: string, isRunning: boolean, source?: AgentRunSource) => {
     set(runningSessionsAtom, (current) => {
+      if (current.has(sessionId) === isRunning) {
+        return current;
+      }
+
       const next = new Set(current);
       if (isRunning) {
         next.add(sessionId);

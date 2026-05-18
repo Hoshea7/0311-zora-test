@@ -25,6 +25,7 @@ import type {
   ScheduledTaskStatus,
   ScheduledTaskUpdateInput,
 } from "../shared/types/schedule";
+import { SESSION_IPC } from "../shared/types/ipc";
 import {
   isValidScheduleTime,
   isValidScheduleWeekdays,
@@ -119,6 +120,13 @@ import {
   isInstallingUpdate,
 } from "./updater";
 import { normalizeExternalUrl } from "./external-url";
+import { isRecord } from "./utils/guards";
+import {
+  assertOptionalBoolean,
+  assertOptionalString,
+  assertRequiredBoolean,
+  assertRequiredString,
+} from "./utils/validate";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEV_ELECTRON_PROFILE_DIR_NAME = "zora-dev";
@@ -166,48 +174,34 @@ function resolveWorkspaceId(value: unknown): string {
   return value.trim();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function hasWorkspaceIdInput(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== "";
 }
 
-function assertRequiredString(value: unknown, fieldName: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${fieldName} must be a non-empty string.`);
+async function resolveSessionWorkspaceId(
+  sessionId: string,
+  workspaceId: unknown
+): Promise<string> {
+  if (hasWorkspaceIdInput(workspaceId)) {
+    return resolveWorkspaceId(workspaceId);
   }
 
-  return value;
-}
+  const workspaces = await listWorkspaces();
+  const matches = await Promise.all(
+    workspaces.map(async (workspace) => {
+      const session = await getSessionMeta(sessionId, workspace.id);
+      return session ? workspace.id : null;
+    })
+  );
+  const resolvedWorkspaceId = matches.find(
+    (candidate): candidate is string => typeof candidate === "string"
+  );
 
-function assertRequiredBoolean(value: unknown, fieldName: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean.`);
+  if (!resolvedWorkspaceId) {
+    throw new Error(`Session ${sessionId} not found.`);
   }
 
-  return value;
-}
-
-function assertOptionalString(value: unknown, fieldName: string): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "string") {
-    throw new Error(`${fieldName} must be a string when provided.`);
-  }
-
-  return value;
-}
-
-function assertOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== "boolean") {
-    throw new Error(`${fieldName} must be a boolean when provided.`);
-  }
-
-  return value;
+  return resolvedWorkspaceId;
 }
 
 const ROLE_MODEL_KEYS = [
@@ -1422,15 +1416,15 @@ app.whenReady().then(async () => {
     stopFileWatcher();
   });
 
-  ipcMain.handle("session:list", async (_event, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.LIST, async (_event, workspaceId: unknown) => {
     return listSessions(resolveWorkspaceId(workspaceId));
   });
 
-  ipcMain.handle("session:list-archived", async () => {
+  ipcMain.handle(SESSION_IPC.LIST_ARCHIVED, async () => {
     return listArchivedSessions();
   });
 
-  ipcMain.handle("session:create", async (_event, title: string, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.CREATE, async (_event, title: string, workspaceId: unknown) => {
     if (typeof title !== "string" || title.trim().length === 0) {
       throw new Error("Session title is required.");
     }
@@ -1439,7 +1433,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    "session:fork",
+    SESSION_IPC.FORK,
     async (_event, input: unknown) => {
       if (!isRecord(input)) {
         throw new Error("Fork input is required.");
@@ -1472,7 +1466,7 @@ app.whenReady().then(async () => {
     }
   );
 
-  ipcMain.handle("session:delete", async (_event, sessionId: unknown, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.DELETE, async (_event, sessionId: unknown, workspaceId: unknown) => {
     const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
 
     if (isAgentRunningForSession(targetSessionId)) {
@@ -1484,7 +1478,7 @@ app.whenReady().then(async () => {
     console.log(`[index] Session deleted: ${targetSessionId}`);
   });
 
-  ipcMain.handle("session:archive", async (_event, sessionId: unknown, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.ARCHIVE, async (_event, sessionId: unknown, workspaceId: unknown) => {
     const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
 
     if (isAgentRunningForSession(targetSessionId)) {
@@ -1504,7 +1498,7 @@ app.whenReady().then(async () => {
     return archived;
   });
 
-  ipcMain.handle("session:restore", async (_event, sessionId: unknown, workspaceId: unknown) => {
+  ipcMain.handle(SESSION_IPC.RESTORE, async (_event, sessionId: unknown, workspaceId: unknown) => {
     const targetSessionId = assertRequiredString(sessionId, "sessionId").trim();
 
     const restored = await restoreSession(
@@ -1516,7 +1510,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    "session:rename",
+    SESSION_IPC.RENAME,
     async (_event, sessionId: unknown, title: unknown, workspaceId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
@@ -1532,7 +1526,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:load-messages",
+    SESSION_IPC.LOAD_MESSAGES,
     async (_event, sessionId: string, workspaceId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
         throw new Error("Session ID is required.");
@@ -1543,7 +1537,7 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:lock-model",
+    SESSION_IPC.LOCK_MODEL,
     async (
       _event,
       sessionId: unknown,
@@ -1583,8 +1577,8 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
-    "session:switch-model",
-    async (_event, sessionId: unknown, modelId: unknown) => {
+    SESSION_IPC.SWITCH_MODEL,
+    async (_event, sessionId: unknown, modelId: unknown, workspaceId: unknown) => {
       if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
         throw new Error("A valid sessionId is required.");
       }
@@ -1592,24 +1586,20 @@ app.whenReady().then(async () => {
         throw new Error("modelId must be a string.");
       }
 
+      const targetSessionId = sessionId.trim();
       const trimmedModelId = modelId.trim();
-      const workspaces = await listWorkspaces();
-      let targetWorkspaceId: string | null = null;
+      const targetWorkspaceId = await resolveSessionWorkspaceId(
+        targetSessionId,
+        workspaceId
+      );
+      const session = await getSessionMeta(targetSessionId, targetWorkspaceId);
 
-      for (const workspace of workspaces) {
-        const sessions = await listSessions(workspace.id);
-        if (sessions.some((session) => session.id === sessionId)) {
-          targetWorkspaceId = workspace.id;
-          break;
-        }
-      }
-
-      if (!targetWorkspaceId) {
-        throw new Error(`Session ${sessionId} not found.`);
+      if (!session) {
+        throw new Error(`Session ${targetSessionId} not found.`);
       }
 
       await updateSessionMeta(
-        sessionId,
+        targetSessionId,
         {
           selectedModelId: trimmedModelId.length > 0 ? trimmedModelId : undefined,
         },

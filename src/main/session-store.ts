@@ -21,6 +21,7 @@ import type {
   FileAttachment,
   ProcessStep,
   SessionBranchMeta,
+  SessionForkRequest,
 } from "../shared/zora";
 import { extractScheduleDetailLinkFromToolResultValue } from "../shared/schedule-link";
 import {
@@ -28,6 +29,8 @@ import {
   getWorkspaceSessionFilesDir,
   listWorkspaces,
 } from "./workspace-store";
+import { isRecord } from "./utils/guards";
+import { isEnoentError, replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 export interface SessionMeta {
   id: string;
@@ -52,14 +55,11 @@ export interface SavedAttachmentMeta {
   savedFileName: string;
 }
 
-export interface CreateForkedSessionInput {
+export interface CreateForkedSessionInput extends SessionForkRequest {
   id?: string;
-  sourceSessionId: string;
   sourceSdkSessionId: string;
   sdkSessionId: string;
-  title?: string;
   workingDirectory?: string;
-  upToMessageId?: string;
 }
 
 export interface ListSessionsOptions {
@@ -67,7 +67,6 @@ export interface ListSessionsOptions {
   archivedOnly?: boolean;
 }
 
-const ZORA_DIR = path.join(homedir(), ".zora");
 const OLD_SESSIONS_DIR = path.join(ZORA_DIR, "sessions");
 const HISTORY_IMAGE_BASE64_LIMIT = 20;
 const HISTORY_IMAGE_MAX_INLINE_BYTES = 5 * 1024 * 1024;
@@ -153,51 +152,6 @@ export async function migrateSessionsIfNeeded(): Promise<void> {
 async function ensureSessionsDir(workspaceId = "default"): Promise<void> {
   await migrateSessionsIfNeeded();
   await mkdir(getSessionsDir(workspaceId), { recursive: true });
-}
-
-async function replaceFileAtomically(
-  filePath: string,
-  content: string
-): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination files.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
-}
-
-function isEnoentError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
 }
 
 async function readIndex(workspaceId = "default"): Promise<SessionMeta[]> {
@@ -942,10 +896,6 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function stringifyPersistedValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -1449,12 +1399,6 @@ export async function loadMessages(
               workspaceId
             );
 
-            try {
-              await access(filePath);
-            } catch {
-              continue;
-            }
-
             const restoredAttachment: FileAttachment = {
               id: meta.id,
               name: meta.name,
@@ -1474,7 +1418,11 @@ export async function loadMessages(
                   await readFile(filePath)
                 ).toString("base64");
                 restoredInlineImageCount += 1;
-              } catch {
+              } catch (error) {
+                if (isEnoentError(error)) {
+                  continue;
+                }
+
                 // Ignore image preview load failures and keep the placeholder state.
               }
             }

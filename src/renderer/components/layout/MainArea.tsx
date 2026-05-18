@@ -137,7 +137,11 @@ export function MainArea() {
         currentSessionId === null ||
         currentSelectedModelOverride !== nextSelectedModelOverride
       ) {
-        await window.zora.switchSessionModel(sessionId, nextSelectedModelOverride);
+        await window.zora.switchSessionModel(
+          sessionId,
+          nextSelectedModelOverride,
+          currentWorkspaceId
+        );
       }
     } catch (error) {
       failTurn(sessionId, getErrorMessage(error));

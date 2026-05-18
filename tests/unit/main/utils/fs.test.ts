@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -78,6 +79,55 @@ describe("main utils/fs", () => {
 
     expect(readFileSync(filePath, "utf8")).toBe("hello world");
     expect(existsSync(`${filePath}.tmp`)).toBe(false);
+  });
+
+  it("uses unique temp files for concurrent writes to the same target", async () => {
+    const homeDir = createTempHome();
+    const { replaceFileAtomically } = await loadFsModule({ homeDir });
+    const filePath = path.join(homeDir, "note.txt");
+
+    await Promise.all(
+      Array.from({ length: 30 }, (_, index) =>
+        replaceFileAtomically(filePath, `content ${index}`)
+      )
+    );
+
+    expect(readFileSync(filePath, "utf8")).toMatch(/^content \d+$/);
+    expect(readdirSync(homeDir).filter((fileName) => fileName.endsWith(".tmp"))).toEqual(
+      []
+    );
+  });
+
+  it("serializes concurrent writes to the same target", async () => {
+    const homeDir = createTempHome();
+    const filePath = path.join(homeDir, "note.txt");
+    let activeWriteCount = 0;
+    let maxActiveWriteCount = 0;
+    const { replaceFileAtomically } = await loadFsModule({
+      homeDir,
+      fsPromisesOverride: (actual) => ({
+        writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+          activeWriteCount += 1;
+          maxActiveWriteCount = Math.max(maxActiveWriteCount, activeWriteCount);
+
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 2));
+            return actual.writeFile(...args);
+          } finally {
+            activeWriteCount -= 1;
+          }
+        },
+      }),
+    });
+
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        replaceFileAtomically(filePath, `content ${index}`)
+      )
+    );
+
+    expect(maxActiveWriteCount).toBe(1);
+    expect(readFileSync(filePath, "utf8")).toMatch(/^content \d+$/);
   });
 
   it("retries replace when rename hits a replace-style error", async () => {

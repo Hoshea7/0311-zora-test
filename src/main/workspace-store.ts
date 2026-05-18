@@ -4,17 +4,14 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename as fsRename,
   rm,
-  unlink,
-  writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { WorkspaceMeta } from "../shared/zora";
+import { isEnoentError, replaceFileAtomically, ZORA_DIR } from "./utils/fs";
 
 export const DEFAULT_WORKSPACE_ID = "default";
-const ZORA_DIR = path.join(homedir(), ".zora");
 const WORKSPACES_FILE = path.join(ZORA_DIR, "workspaces.json");
 const WORKSPACE_DATA_ROOT = path.join(ZORA_DIR, "workspaces");
 const WORKSPACE_SIDECAR_FILE = "workspace.json";
@@ -51,19 +48,6 @@ function isWorkspaceMeta(value: unknown): value is WorkspaceMeta {
   );
 }
 
-function hasErrorCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === code
-  );
-}
-
-function isEnoentError(error: unknown): boolean {
-  return hasErrorCode(error, "ENOENT");
-}
-
 function timestampForFileName(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -98,42 +82,6 @@ async function ensureZoraDir(): Promise<void> {
   await mkdir(WORKSPACE_DATA_ROOT, { recursive: true });
   await mkdir(getWorkspaceDataDir(DEFAULT_WORKSPACE_ID), { recursive: true });
   await mkdir(getWorkspaceFilesDir(DEFAULT_WORKSPACE_ID), { recursive: true });
-}
-
-async function replaceFileAtomically(
-  filePath: string,
-  content: string
-): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, content, "utf8");
-
-  try {
-    await fsRename(tmpPath, filePath);
-  } catch (error: unknown) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code: string }).code
-        : "";
-
-    if (code === "EEXIST" || code === "EPERM") {
-      try {
-        await unlink(filePath);
-      } catch {
-        // Ignore missing destination files.
-      }
-
-      await fsRename(tmpPath, filePath);
-      return;
-    }
-
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Ignore temp cleanup failures.
-    }
-
-    throw error;
-  }
 }
 
 async function backupWorkspaceFile(reason: string): Promise<void> {
@@ -237,6 +185,30 @@ async function persistWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<vo
   for (const result of results) {
     if (result.status === "rejected") {
       console.warn("[workspace-store] Failed to persist workspace sidecar.", result.reason);
+    }
+  }
+}
+
+function isSameWorkspaceMeta(left: WorkspaceMeta | null, right: WorkspaceMeta): boolean {
+  return left !== null && JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function repairMissingWorkspaceSidecars(workspaces: WorkspaceMeta[]): Promise<void> {
+  const results = await Promise.allSettled(
+    workspaces.map(async (workspace) => {
+      const sidecar = await readWorkspaceSidecar(workspace.id);
+
+      if (isSameWorkspaceMeta(sidecar, workspace)) {
+        return;
+      }
+
+      await persistWorkspaceSidecar(workspace);
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("[workspace-store] Failed to repair workspace sidecar.", result.reason);
     }
   }
 }
@@ -353,7 +325,7 @@ export async function listWorkspaces(): Promise<WorkspaceMeta[]> {
   ) {
     await writeWorkspaceFile(normalized);
   } else {
-    await persistWorkspaceSidecars(normalized);
+    await repairMissingWorkspaceSidecars(normalized);
   }
 
   return normalized;
