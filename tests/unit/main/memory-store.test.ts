@@ -227,10 +227,10 @@ describe("main memory-store", () => {
       loadRecentLogs,
     } = await loadMemoryStore(homeDir);
 
-    vi.setSystemTime(new Date("2026-04-23T08:15:00+08:00"));
+    vi.setSystemTime(new Date(2026, 3, 23, 8, 15));
     await appendDailyLog("- planned launch");
 
-    vi.setSystemTime(new Date("2026-04-24T09:45:00+08:00"));
+    vi.setSystemTime(new Date(2026, 3, 24, 9, 45));
     await appendDailyLog("- reviewed feedback");
 
     await expect(loadDailyLog("2026-04-23")).resolves.toContain("### 08:15");
