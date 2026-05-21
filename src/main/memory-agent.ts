@@ -20,6 +20,7 @@ import {
 import { getErrorMessage } from "./system-log";
 
 const MEMORY_PROCESS_DEBOUNCE_MS = 10 * 60 * 1000;
+const MEMORY_DISABLED_REASON = "memory_disabled";
 const BATCH_QUEUE_MAX_SIZE = 8;
 const USER_MESSAGE_MAX_CHARS = 500;
 const ASSISTANT_MESSAGE_MAX_CHARS = 300;
@@ -277,6 +278,12 @@ export class MemoryAgent {
     sessionId: string,
     workspaceId = "default"
   ): Promise<void> {
+    const settings = await loadMemorySettings();
+    if (!settings.enabled) {
+      this.clearSessionWorkForDisabledMemory(sessionId, workspaceId);
+      return;
+    }
+
     const messages = await loadMessages(sessionId, workspaceId);
     if (messages.length < 4) {
       this.clearDebounceTimer(sessionId);
@@ -290,8 +297,6 @@ export class MemoryAgent {
       );
       return;
     }
-
-    const settings = await loadMemorySettings();
 
     switch (settings.mode) {
       case "manual":
@@ -353,6 +358,11 @@ export class MemoryAgent {
   ): void {
     const settings = getMemorySettingsSync();
 
+    if (!settings.enabled) {
+      this.clearSessionWorkForDisabledMemory(sessionId, workspaceId);
+      return;
+    }
+
     if (settings.mode === "manual" || settings.mode === "batch") {
       return;
     }
@@ -402,6 +412,11 @@ export class MemoryAgent {
 
   async flushAll(): Promise<void> {
     const settings = await loadMemorySettings();
+
+    if (!settings.enabled) {
+      this.clearAllWorkForDisabledMemory();
+      return;
+    }
 
     if (settings.mode === "manual") {
       logAgentEvent(
@@ -465,6 +480,19 @@ export class MemoryAgent {
 
     this.clearAllDebounceTimers();
 
+    const settings = await loadMemorySettings();
+    if (!settings.enabled) {
+      const total = this.clearAllWorkForDisabledMemory();
+      logAgentEvent(
+        "pre",
+        "skip",
+        "手动记忆处理跳过",
+        { reason: MEMORY_DISABLED_REASON },
+        { agentType: "memory" }
+      );
+      return { total, processed: 0 };
+    }
+
     const total = this.pendingContexts.size;
     if (total === 0) {
       logAgentEvent(
@@ -489,6 +517,48 @@ export class MemoryAgent {
     this.notifyPendingChanged();
 
     return { total, processed };
+  }
+
+  private clearSessionWorkForDisabledMemory(
+    sessionId: string,
+    workspaceId: string
+  ): void {
+    this.clearDebounceTimer(sessionId);
+    this.deletePendingContext(sessionId);
+    logAgentEvent(
+      "pre",
+      "skip",
+      "记忆任务跳过",
+      { session: sessionId, workspace: workspaceId, reason: MEMORY_DISABLED_REASON },
+      { agentType: "memory", verbose: true }
+    );
+  }
+
+  private clearAllWorkForDisabledMemory(): number {
+    const pending = this.pendingContexts.size;
+    this.clearPending(MEMORY_DISABLED_REASON);
+    return pending;
+  }
+
+  handleMemoryDisabled(): void {
+    this.clearAllWorkForDisabledMemory();
+  }
+
+  private clearPending(reason = "cleared"): void {
+    const pending = this.pendingContexts.size;
+    this.clearBatchIdleTimer();
+    this.clearAllDebounceTimers();
+    this.pendingContexts.clear();
+    if (pending > 0) {
+      this.notifyPendingChanged();
+    }
+    logAgentEvent(
+      "pre",
+      "clear",
+      "记忆待处理队列已清空",
+      { pending, reason },
+      { agentType: "memory", verbose: true }
+    );
   }
 
   setPendingChangeCallback(callback: (count: number) => void): void {
@@ -598,6 +668,19 @@ export class MemoryAgent {
   }
 
   private async processPendingBatch(): Promise<number> {
+    const settings = await loadMemorySettings();
+    if (!settings.enabled) {
+      this.clearAllWorkForDisabledMemory();
+      logAgentEvent(
+        "pre",
+        "skip",
+        "记忆批处理跳过",
+        { reason: MEMORY_DISABLED_REASON },
+        { agentType: "memory", verbose: true }
+      );
+      return 0;
+    }
+
     const pending = this.getEligiblePendingSessions();
 
     if (pending.length === 0) {
@@ -860,7 +943,7 @@ export class MemoryAgent {
       });
   }
 
-  private process(
+  private async process(
     sessionId: string,
     workspaceId = "default"
   ): Promise<boolean> {
@@ -884,6 +967,12 @@ export class MemoryAgent {
         { agentType: "memory", verbose: true }
       );
       return Promise.resolve(false);
+    }
+
+    const settings = await loadMemorySettings();
+    if (!settings.enabled) {
+      this.clearSessionWorkForDisabledMemory(sessionId, workspaceId);
+      return false;
     }
 
     return (async () => {

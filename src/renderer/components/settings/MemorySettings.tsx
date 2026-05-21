@@ -62,6 +62,10 @@ function hasSettingsDifference(
   settings: MemorySettingsValue,
   patch: Partial<MemorySettingsValue>
 ): boolean {
+  if (patch.enabled !== undefined && patch.enabled !== settings.enabled) {
+    return true;
+  }
+
   if (patch.mode !== undefined && patch.mode !== settings.mode) {
     return true;
   }
@@ -259,7 +263,11 @@ export function MemorySettings() {
   }, [saveState]);
 
   const queueSettingsUpdate = (patch: Partial<MemorySettingsValue>) => {
-    setSettings((current) => (current ? { ...current, ...patch } : current));
+    if (!settings || !hasSettingsDifference(settings, patch)) {
+      return;
+    }
+
+    setSettings({ ...settings, ...patch });
     setSaveState("saving");
     setErrorMessage(null);
 
@@ -345,13 +353,17 @@ export function MemorySettings() {
   const memoryModelUiState = settings
     ? buildMemoryModelUiState(settings, providers)
     : null;
+  const currentModeLabel = settings
+    ? MEMORY_MODE_OPTIONS.find((option) => option.value === settings.mode)?.title ??
+      "手动记忆"
+    : null;
 
   return (
     <section className="animate-in fade-in slide-in-from-bottom-4 w-full pb-12 duration-500">
       {/* 保存状态 */}
       <div className="mb-4 flex items-center justify-between">
         <span className="text-[13px] text-stone-400">
-          {settings?.mode === "immediate" ? "即时记忆" : settings?.mode === "batch" ? "批量记忆" : "手动记忆"}
+          {settings?.enabled === false ? "记忆已关闭" : currentModeLabel}
         </span>
         <span className="text-[12px] text-stone-400">
           {saveState === "saving" ? "保存中…" : saveState === "saved" ? "已保存" : null}
@@ -383,8 +395,36 @@ export function MemorySettings() {
         </div>
       ) : (
         <>
+          <label
+            className={cn(
+              "mb-4 flex cursor-pointer items-center justify-between gap-4 rounded-lg px-3 py-3 transition-colors",
+              settings.enabled ? "bg-stone-50/80" : "bg-amber-50/70"
+            )}
+          >
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-stone-700">启用记忆</div>
+              <div className="mt-0.5 text-[12px] leading-5 text-stone-400">
+                {settings.enabled
+                  ? "新会话会读取长期记忆，并按当前模式更新记忆"
+                  : "新会话不读取长期记忆，也不处理新的记忆更新"}
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              role="switch"
+              className="h-4 w-4 shrink-0 rounded border-stone-300 text-stone-700 focus:ring-stone-300"
+              checked={settings.enabled}
+              onChange={(event) => queueSettingsUpdate({ enabled: event.target.checked })}
+            />
+          </label>
+
           {/* 记忆模式选项 */}
-          <div className="space-y-1">
+          <div
+            className={cn(
+              "space-y-1 transition-opacity",
+              settings.enabled ? "opacity-100" : "opacity-45"
+            )}
+          >
             {MEMORY_MODE_OPTIONS.map((option) => {
               const isActive = settings.mode === option.value;
 
@@ -392,8 +432,13 @@ export function MemorySettings() {
                 <label
                   key={option.value}
                   className={cn(
-                    "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-150",
-                    isActive ? "bg-stone-100/60" : "hover:bg-stone-50"
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-150",
+                    settings.enabled ? "cursor-pointer" : "cursor-not-allowed",
+                    isActive
+                      ? "bg-stone-100/60"
+                      : settings.enabled
+                        ? "hover:bg-stone-50"
+                        : ""
                   )}
                 >
                   <input
@@ -401,6 +446,7 @@ export function MemorySettings() {
                     name="memory-mode"
                     className="h-3.5 w-3.5 border-stone-300 text-stone-600 focus:ring-stone-300"
                     checked={isActive}
+                    disabled={!settings.enabled}
                     onChange={() => queueSettingsUpdate({ mode: option.value })}
                   />
                   <div className="min-w-0 flex-1">
@@ -417,7 +463,7 @@ export function MemorySettings() {
           </div>
 
           {/* 批量模式设置 */}
-          {settings.mode === "batch" && (
+          {settings.enabled && settings.mode === "batch" && (
             <div className="mt-3 flex items-center gap-3">
               <span className="w-20 shrink-0 text-[12px] text-stone-500">空闲等待</span>
               <DropdownMenu.Root>
@@ -457,15 +503,22 @@ export function MemorySettings() {
           )}
 
           {/* 记忆模型选择 */}
-          <div className="mt-3 flex items-center gap-3">
+          <div
+            className={cn(
+              "mt-3 flex items-center gap-3 transition-opacity",
+              settings.enabled ? "opacity-100" : "opacity-45"
+            )}
+          >
             <span className="w-20 shrink-0 text-[13px] text-stone-500">记忆模型</span>
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button
+                  disabled={!settings.enabled}
                   className={cn(
                     "flex flex-1 items-center justify-between rounded-lg bg-stone-50/60 px-3 py-1.5",
                     "text-[13px] text-stone-700 transition-all hover:bg-stone-100/80",
-                    "focus:outline-none focus:ring-2 focus:ring-stone-200/40"
+                    "focus:outline-none focus:ring-2 focus:ring-stone-200/40",
+                    "disabled:cursor-not-allowed disabled:hover:bg-stone-50/60"
                   )}
                 >
                   <span className="truncate">
@@ -531,11 +584,15 @@ export function MemorySettings() {
             </DropdownMenu.Root>
           </div>
           <p className="text-[11px] text-stone-400">
-            {memoryModelUiState?.helperText}
+            {settings.enabled
+              ? memoryModelUiState?.helperText
+              : "关闭后会保留现有记忆文件，重新开启后继续使用。"}
           </p>
-          <p className="text-[11px] text-stone-400">
-            记忆处理不需要最强模型，配置低成本模型可大幅节省开支
-          </p>
+          {settings.enabled ? (
+            <p className="text-[11px] text-stone-400">
+              记忆处理不需要最强模型，配置低成本模型可大幅节省开支
+            </p>
+          ) : null}
         </>
       )}
     </section>

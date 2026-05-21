@@ -1,4 +1,7 @@
 export interface MemorySettings {
+  /** 是否启用 Zora 记忆；关闭后不注入长期记忆，也不处理新的记忆提取。 */
+  enabled: boolean;
+
   /** 记忆处理模式 */
   mode: "immediate" | "batch" | "manual";
 
@@ -24,6 +27,7 @@ export interface MemorySettings {
 }
 
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
+  enabled: true,
   mode: "immediate",
   batchIdleMinutes: 30,
   memoryProviderId: null,

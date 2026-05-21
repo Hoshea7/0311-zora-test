@@ -735,6 +735,13 @@ function parseMemorySettingsUpdateInput(input: unknown): Partial<MemorySettings>
 
   const updates: Partial<MemorySettings> = {};
 
+  if ("enabled" in input) {
+    const enabled = assertOptionalBoolean(input.enabled, "memory.enabled");
+    if (enabled !== undefined) {
+      updates.enabled = enabled;
+    }
+  }
+
   if ("mode" in input) {
     if (!isMemoryMode(input.mode)) {
       throw new Error("memory.mode must be immediate, batch, or manual.");
@@ -964,26 +971,29 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await migrateSessionsIfNeeded();
-  try {
-    const migrationResult = await migrateLegacyMemoryIfNeeded();
-    if (migrationResult.migrated.length > 0) {
+  const memorySettings = await loadMemorySettings();
+  if (memorySettings.enabled) {
+    try {
+      const migrationResult = await migrateLegacyMemoryIfNeeded();
+      if (migrationResult.migrated.length > 0) {
+        logSystemEvent(
+          "app",
+          "memory",
+          "legacy:migrate",
+          "已迁移旧版记忆文件",
+          { files: migrationResult.migrated }
+        );
+      }
+    } catch (error) {
       logSystemEvent(
         "app",
         "memory",
-        "legacy:migrate",
-        "已迁移旧版记忆文件",
-        { files: migrationResult.migrated }
+        "legacy:migrate:error",
+        "迁移旧版记忆文件失败",
+        { error: getErrorMessage(error) },
+        { level: "error" }
       );
     }
-  } catch (error) {
-    logSystemEvent(
-      "app",
-      "memory",
-      "legacy:migrate:error",
-      "迁移旧版记忆文件失败",
-      { error: getErrorMessage(error) },
-      { level: "error" }
-    );
   }
   await seedBundledSkills();
   const mcpManager = setSharedMcpManager(new McpManager());
@@ -1199,8 +1209,11 @@ app.whenReady().then(async () => {
       ...current,
       ...parseMemorySettingsUpdateInput(input),
     };
-    await saveMemorySettings(updated);
-    return loadMemorySettings();
+    const savedSettings = await saveMemorySettings(updated);
+    if (current.enabled && !savedSettings.enabled) {
+      memoryAgent.handleMemoryDisabled();
+    }
+    return savedSettings;
   });
 
   ipcMain.handle("default-model:getSettings", async () => {

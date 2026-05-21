@@ -615,6 +615,62 @@ describe("main session-store", () => {
     ]);
   });
 
+  it("remaps assistant turn ids when copying forked transcripts", async () => {
+    const homeDir = createTempHome();
+    const { appendMessageRecord, createForkedSession, createSession, loadMessages } =
+      await loadSessionStoreModule(homeDir);
+
+    const source = await createSession("Source session");
+    await appendMessageRecord(source.id, {
+      kind: "user",
+      message: {
+        id: "user-1",
+        role: "user",
+        text: "Start here.",
+        timestamp: 1,
+      },
+    });
+    await appendMessageRecord(source.id, {
+      kind: "assistant_turn",
+      turn: {
+        id: "source-assistant-1",
+        processSteps: [],
+        bodySegments: [{ id: "segment-1", text: "First part." }],
+        status: "done",
+        startedAt: 2,
+        completedAt: 2,
+      },
+    });
+
+    const fork = await createForkedSession({
+      sourceSessionId: source.id,
+      sourceSdkSessionId: "sdk-source",
+      sdkSessionId: "sdk-fork",
+      transcriptCopyOptions: {
+        assistantTurnIdRewrites: new Map([
+          ["source-assistant-1", "fork-assistant-1"],
+        ]),
+      },
+    });
+
+    await expect(loadMessages(fork.id)).resolves.toEqual([
+      {
+        id: "user-1",
+        role: "user",
+        text: "Start here.",
+        timestamp: 1,
+      },
+      expect.objectContaining({
+        id: "fork-assistant-1",
+        role: "assistant",
+        turn: expect.objectContaining({
+          id: "fork-assistant-1",
+          bodySegments: [{ id: "segment-1", text: "First part." }],
+        }),
+      }),
+    ]);
+  });
+
   it("copies only inherited attachments for message-level forks", async () => {
     const homeDir = createTempHome();
     const {

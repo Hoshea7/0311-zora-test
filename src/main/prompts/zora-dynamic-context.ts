@@ -3,6 +3,7 @@ import {
   loadRecentLogs,
   migrateLegacyMemoryIfNeeded,
 } from "../memory-store";
+import { loadMemorySettings } from "../memory-settings";
 import { getErrorMessage, logSystemEvent } from "../system-log";
 
 function padNumber(value: number) {
@@ -30,8 +31,13 @@ function escapeXmlText(value: string) {
 function buildMemorySection(
   userContent: string | null,
   memoryContent: string | null,
-  recentLogs: string | null
+  recentLogs: string | null,
+  enabled = true
 ) {
+  if (!enabled) {
+    return "    长期记忆已关闭，本次不会注入 USER.md、MEMORY.md 或近期日志。";
+  }
+
   const parts: string[] = [];
 
   if (userContent?.trim()) {
@@ -64,24 +70,32 @@ export async function buildZoraDynamicContext(
   workspaceId?: string,
   workingDirectory?: string
 ): Promise<string> {
-  try {
-    await migrateLegacyMemoryIfNeeded();
-  } catch (error) {
-    logSystemEvent(
-      "agent",
-      "dynamic-context",
-      "memory:migrate:error",
-      "构建动态上下文时迁移旧版记忆失败",
-      { error: getErrorMessage(error) },
-      { level: "error" }
-    );
-  }
+  const settings = await loadMemorySettings();
 
-  const [userContent, memoryContent, recentLogs] = await Promise.all([
-    loadFile("USER.md"),
-    loadFile("MEMORY.md"),
-    loadRecentLogs(2),
-  ]);
+  let userContent: string | null = null;
+  let memoryContent: string | null = null;
+  let recentLogs: string | null = null;
+
+  if (settings.enabled) {
+    try {
+      await migrateLegacyMemoryIfNeeded();
+    } catch (error) {
+      logSystemEvent(
+        "agent",
+        "dynamic-context",
+        "memory:migrate:error",
+        "构建动态上下文时迁移旧版记忆失败",
+        { error: getErrorMessage(error) },
+        { level: "error" }
+      );
+    }
+
+    [userContent, memoryContent, recentLogs] = await Promise.all([
+      loadFile("USER.md"),
+      loadFile("MEMORY.md"),
+      loadRecentLogs(2),
+    ]);
+  }
 
   return [
     "<zora_dynamic_context>",
@@ -96,7 +110,7 @@ export async function buildZoraDynamicContext(
       : "",
     "  </current_context>",
     "  <memory>",
-    buildMemorySection(userContent, memoryContent, recentLogs),
+    buildMemorySection(userContent, memoryContent, recentLogs, settings.enabled),
     "  </memory>",
     "</zora_dynamic_context>",
   ].filter((line) => line.length > 0).join("\n");

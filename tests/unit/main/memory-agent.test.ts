@@ -1,4 +1,8 @@
 import type { ConversationMessage } from "@/shared/zora";
+import {
+  DEFAULT_MEMORY_SETTINGS,
+  type MemorySettings,
+} from "@/shared/types/memory";
 import path from "node:path";
 
 const agentModuleId = path.resolve(process.cwd(), "src/main/agent.ts");
@@ -7,6 +11,11 @@ const memoryStoreModuleId = path.resolve(process.cwd(), "src/main/memory-store.t
 const queryProfilesModuleId = path.resolve(process.cwd(), "src/main/query-profiles/index.ts");
 const sdkRuntimeModuleId = path.resolve(process.cwd(), "src/main/sdk-runtime.ts");
 const sessionStoreModuleId = path.resolve(process.cwd(), "src/main/session-store.ts");
+
+const DEFAULT_TEST_MEMORY_SETTINGS: MemorySettings = {
+  ...DEFAULT_MEMORY_SETTINGS,
+  mode: "batch" as const,
+};
 
 function createMessages(label: string): ConversationMessage[] {
   return [
@@ -51,25 +60,21 @@ function createMessages(label: string): ConversationMessage[] {
   ];
 }
 
-async function loadMemoryAgentRuntime() {
+async function loadMemoryAgentRuntime(
+  settingsOverride: Partial<MemorySettings> = {}
+) {
   vi.resetModules();
 
+  const memorySettings = {
+    ...DEFAULT_TEST_MEMORY_SETTINGS,
+    ...settingsOverride,
+  };
   const runAgentWithProfile = vi.fn(async () => ({
     lateQueuedMessages: [],
     sdkSessionId: undefined,
   }));
-  const loadMemorySettings = vi.fn(async () => ({
-    mode: "batch",
-    batchIdleMinutes: 30,
-    memoryProviderId: null,
-    memoryModelId: null,
-  }));
-  const getMemorySettingsSync = vi.fn(() => ({
-    mode: "batch",
-    batchIdleMinutes: 30,
-    memoryProviderId: null,
-    memoryModelId: null,
-  }));
+  const loadMemorySettings = vi.fn(async () => memorySettings);
+  const getMemorySettingsSync = vi.fn(() => memorySettings);
   const buildMemoryProfile = vi.fn(async ({ prompt }: { prompt: string }) => ({
     name: "memory",
     prompt,
@@ -139,6 +144,23 @@ afterEach(() => {
 });
 
 describe("main memory-agent", () => {
+  it("skips memory queueing and processing when memory is disabled", async () => {
+    const {
+      module: { MemoryAgent },
+      mocks,
+    } = await loadMemoryAgentRuntime({ enabled: false });
+    const agent = new MemoryAgent();
+
+    agent.scheduleProcessing("disabled-session", "workspace-a");
+    await agent.onConversationEnd("disabled-session", "workspace-a");
+    const result = await agent.processNow();
+
+    expect(result).toEqual({ total: 0, processed: 0 });
+    expect(agent.getPendingCount()).toBe(0);
+    expect(mocks.loadMessages).not.toHaveBeenCalled();
+    expect(mocks.runAgentWithProfile).not.toHaveBeenCalled();
+  });
+
   it("keeps batch memory processing scoped to each workspace", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-14T09:30:00+08:00"));

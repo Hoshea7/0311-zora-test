@@ -6,6 +6,7 @@ const createUnsubscribe = () => vi.fn();
 function createZoraMock() {
   return {
     getAppVersion: vi.fn().mockResolvedValue("0.0.0-test"),
+    logClientEvent: vi.fn().mockResolvedValue(undefined),
     openExternal: vi.fn().mockResolvedValue(undefined),
     updater: {
       getStatus: vi.fn(),

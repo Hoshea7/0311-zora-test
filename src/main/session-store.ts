@@ -61,6 +61,11 @@ export interface CreateForkedSessionInput extends SessionForkRequest {
   sourceSdkSessionId: string;
   sdkSessionId: string;
   workingDirectory?: string;
+  transcriptCopyOptions?: ForkTranscriptCopyOptions;
+}
+
+export interface ForkTranscriptCopyOptions {
+  assistantTurnIdRewrites?: ReadonlyMap<string, string>;
 }
 
 export interface ListSessionsOptions {
@@ -488,7 +493,8 @@ async function copySessionTranscript(
   sourceSessionId: string,
   targetSessionId: string,
   workspaceId = "default",
-  upToMessageId?: string
+  upToMessageId?: string,
+  options?: ForkTranscriptCopyOptions
 ): Promise<{
   inheritedMessageCount: number;
   copiedAttachmentFileNames?: Set<string>;
@@ -521,7 +527,8 @@ async function copySessionTranscript(
       continue;
     }
 
-    copiedLines.push(line);
+    let copiedLine = line;
+    let shouldStopAtForkPoint = false;
 
     try {
       const record = JSON.parse(line) as MessageRecord | {
@@ -536,7 +543,6 @@ async function copySessionTranscript(
           record.message.attachments,
           copiedAttachmentFileNames
         );
-        continue;
       }
 
       if (record.kind === "assistant_turn") {
@@ -549,10 +555,20 @@ async function copySessionTranscript(
 
           if (turn.id === forkPointMessageId) {
             foundForkPoint = true;
-            break;
+            shouldStopAtForkPoint = true;
+          }
+
+          const remappedTurn = remapAssistantTurnId(
+            turn,
+            options?.assistantTurnIdRewrites
+          );
+          if (remappedTurn !== turn) {
+            copiedLine = JSON.stringify({
+              ...record,
+              turn: remappedTurn,
+            });
           }
         }
-        continue;
       }
 
       if (record.kind === "assistant_block" && restoreLegacyAssistantBlock(record.message)) {
@@ -561,6 +577,12 @@ async function copySessionTranscript(
       }
     } catch {
       // Preserve malformed historical lines in the copied transcript.
+    }
+
+    copiedLines.push(copiedLine);
+
+    if (shouldStopAtForkPoint) {
+      break;
     }
   }
 
@@ -577,6 +599,25 @@ async function copySessionTranscript(
   return {
     inheritedMessageCount,
     copiedAttachmentFileNames,
+  };
+}
+
+function remapAssistantTurnId(
+  turn: AssistantTurn,
+  assistantTurnIdMap?: ReadonlyMap<string, string>
+): AssistantTurn {
+  if (!assistantTurnIdMap || assistantTurnIdMap.size === 0) {
+    return turn;
+  }
+
+  const remappedId = assistantTurnIdMap.get(turn.id);
+  if (!remappedId || remappedId === turn.id) {
+    return turn;
+  }
+
+  return {
+    ...turn,
+    id: remappedId,
   };
 }
 
@@ -693,7 +734,8 @@ export async function createForkedSession(
       source.id,
       sessionId,
       workspaceId,
-      upToMessageId
+      upToMessageId,
+      input.transcriptCopyOptions
     );
     const meta: SessionMeta = {
       id: sessionId,

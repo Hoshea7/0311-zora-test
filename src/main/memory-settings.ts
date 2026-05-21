@@ -4,21 +4,24 @@ import {
   DEFAULT_MEMORY_SETTINGS,
   type MemorySettings,
 } from "../shared/types/memory";
+import { logSystemEvent } from "./system-log";
 import { ZORA_DIR } from "./utils/fs";
+import { isRecord } from "./utils/guards";
 
 const SETTINGS_PATH = path.join(ZORA_DIR, "memory-settings.json");
 const VALID_BATCH_IDLE_MINUTES = new Set([1, 10, 20, 30, 60, 120]);
 
 let cached: MemorySettings | null = null;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function normalizeMemorySettings(value: unknown): MemorySettings {
   if (!isRecord(value)) {
     return { ...DEFAULT_MEMORY_SETTINGS };
   }
+
+  const enabled =
+    typeof value.enabled === "boolean"
+      ? value.enabled
+      : DEFAULT_MEMORY_SETTINGS.enabled;
 
   const mode =
     value.mode === "immediate" || value.mode === "batch" || value.mode === "manual"
@@ -48,6 +51,7 @@ function normalizeMemorySettings(value: unknown): MemorySettings {
         : DEFAULT_MEMORY_SETTINGS.memoryModelId;
 
   return {
+    enabled,
     mode,
     batchIdleMinutes,
     memoryProviderId,
@@ -55,26 +59,74 @@ function normalizeMemorySettings(value: unknown): MemorySettings {
   };
 }
 
+async function readPersistedMemorySettings(): Promise<MemorySettings> {
+  try {
+    const raw = await readFile(SETTINGS_PATH, "utf8");
+    return normalizeMemorySettings(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_MEMORY_SETTINGS };
+  }
+}
+
+function logMemoryEnabledChange(
+  previous: MemorySettings,
+  next: MemorySettings
+): void {
+  if (previous.enabled === next.enabled) {
+    return;
+  }
+
+  logSystemEvent(
+    "app",
+    "memory",
+    "settings:enabled",
+    next.enabled ? "记忆已开启" : "记忆已关闭",
+    {
+      previousEnabled: previous.enabled,
+      enabled: next.enabled,
+      mode: next.mode,
+    }
+  );
+}
+
+function areMemorySettingsEqual(
+  left: MemorySettings,
+  right: MemorySettings
+): boolean {
+  return (
+    left.enabled === right.enabled &&
+    left.mode === right.mode &&
+    left.batchIdleMinutes === right.batchIdleMinutes &&
+    left.memoryProviderId === right.memoryProviderId &&
+    left.memoryModelId === right.memoryModelId
+  );
+}
+
 export async function loadMemorySettings(): Promise<MemorySettings> {
   if (cached) {
     return { ...cached };
   }
 
-  try {
-    const raw = await readFile(SETTINGS_PATH, "utf8");
-    cached = normalizeMemorySettings(JSON.parse(raw));
-  } catch {
-    cached = { ...DEFAULT_MEMORY_SETTINGS };
-  }
+  cached = await readPersistedMemorySettings();
 
   return { ...cached };
 }
 
-export async function saveMemorySettings(settings: MemorySettings): Promise<void> {
+export async function saveMemorySettings(
+  settings: MemorySettings
+): Promise<MemorySettings> {
+  const previous = cached ?? (await readPersistedMemorySettings());
   const normalized = normalizeMemorySettings(settings);
+
+  if (cached && areMemorySettingsEqual(cached, normalized)) {
+    return { ...cached };
+  }
+
   await mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
   await writeFile(SETTINGS_PATH, JSON.stringify(normalized, null, 2), "utf8");
   cached = normalized;
+  logMemoryEnabledChange(previous, normalized);
+  return { ...cached };
 }
 
 /**

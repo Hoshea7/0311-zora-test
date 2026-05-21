@@ -1,45 +1,53 @@
 import { useSetAtom } from "jotai";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivedSessionEntry } from "../../../shared/zora";
-import { DEFAULT_WORKSPACE_ID, restoreSessionAtom } from "../../store/workspace";
+import { deleteSessionAtom, restoreSessionAtom } from "../../store/workspace";
 import { ARCHIVED_SESSIONS_CHANGED_EVENT } from "../../utils/archived-sessions-event";
 import { cn } from "../../utils/cn";
 import { getErrorMessage } from "../../utils/message";
-import { RefreshIcon, TrashIcon } from "../ui/Icons";
-
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function formatDate(value?: string): string {
-  if (!value) {
-    return "未知时间";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "未知时间";
-  }
-
-  return dateFormatter.format(date);
-}
+import { RefreshIcon } from "../ui/Icons";
+import { ArchivedSessionActionDialog } from "./archived-sessions/ArchivedSessionActionDialog";
+import { ArchivedSessionRow } from "./archived-sessions/ArchivedSessionRow";
+import { ArchivedSessionsToolbar } from "./archived-sessions/ArchivedSessionsToolbar";
+import {
+  collectArchivedEntryResults,
+  formatBatchActionError,
+  getArchivedSessionKey,
+  removeEntriesByKey,
+  removeSelectedKeys,
+} from "./archived-sessions/archived-session-utils";
 
 export function ArchivedSessionsSettings() {
   const restoreSession = useSetAtom(restoreSessionAtom);
+  const deleteSession = useSetAtom(deleteSessionAtom);
   const loadRequestIdRef = useRef(0);
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
   const [entries, setEntries] = useState<ArchivedSessionEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<ArchivedSessionEntry | null>(
-    null
-  );
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [pendingAction, setPendingAction] = useState<
+    "restore" | "delete" | null
+  >(null);
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(() => new Set());
+  const [deleteTargets, setDeleteTargets] = useState<
+    ArchivedSessionEntry[] | null
+  >(null);
+  const [restoreTargets, setRestoreTargets] = useState<
+    ArchivedSessionEntry[] | null
+  >(null);
 
-  const archivedCount = entries.length;
+  const selectedEntries = useMemo(
+    () =>
+      entries.filter((entry) =>
+        selectedKeys.has(getArchivedSessionKey(entry))
+      ),
+    [entries, selectedKeys]
+  );
+  const selectedCount = selectedEntries.length;
+  const isBusy = pendingAction !== null;
+  const allSelected = entries.length > 0 && selectedCount === entries.length;
+  const isSelectionMixed = selectedCount > 0 && selectedCount < entries.length;
 
   const loadEntries = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
@@ -85,54 +93,130 @@ export function ArchivedSessionsSettings() {
     };
   }, [loadEntries]);
 
-  const handleRestore = async (entry: ArchivedSessionEntry) => {
-    setRestoringId(entry.session.id);
-    setError(null);
+  useEffect(() => {
+    setSelectedKeys((current) => {
+      const availableKeys = new Set(entries.map(getArchivedSessionKey));
+      const next = new Set([...current].filter((key) => availableKeys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [entries]);
 
-    try {
-      const restored = await restoreSession({
-        sessionId: entry.session.id,
-        workspaceId: entry.workspaceId,
-      });
-
-      if (restored) {
-        setEntries((current) =>
-          current.filter((item) => item.session.id !== entry.session.id)
-        );
-      } else {
-        await loadEntries();
-      }
-    } catch (restoreError) {
-      setError(getErrorMessage(restoreError));
-    } finally {
-      setRestoringId(null);
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = isSelectionMixed;
     }
+  }, [isSelectionMixed]);
+
+  const toggleEntrySelection = (entry: ArchivedSessionEntry) => {
+    const key = getArchivedSessionKey(entry);
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
   };
 
-  const handleDelete = (entry: ArchivedSessionEntry) => {
-    setDeleteTarget(entry);
+  const toggleSelectAll = () => {
+    setSelectedKeys((current) => {
+      const visibleKeys = entries.map(getArchivedSessionKey);
+      const allVisibleSelected = visibleKeys.every((key) => current.has(key));
+      return allVisibleSelected ? new Set() : new Set(visibleKeys);
+    });
   };
 
-  const handleConfirmDelete = async () => {
-    if (!deleteTarget) {
+  const runEntriesAction = async ({
+    action,
+    actionLabel,
+    targets,
+    run,
+    onFinished,
+  }: {
+    action: "restore" | "delete";
+    actionLabel: string;
+    targets: ArchivedSessionEntry[];
+    run: (entry: ArchivedSessionEntry) => Promise<void>;
+    onFinished?: () => void;
+  }) => {
+    if (targets.length === 0) {
       return;
     }
 
-    const target = deleteTarget;
-    setDeletingId(target.session.id);
+    setPendingAction(action);
+    setPendingKeys(new Set(targets.map(getArchivedSessionKey)));
     setError(null);
 
     try {
-      await window.zora.deleteSession(target.session.id, target.workspaceId);
-      setEntries((current) =>
-        current.filter((item) => item.session.id !== target.session.id)
+      const { successfulKeys, failures } = await collectArchivedEntryResults(
+        targets,
+        run
       );
-      setDeleteTarget(null);
-    } catch (deleteError) {
-      setError(getErrorMessage(deleteError));
+
+      if (successfulKeys.size > 0) {
+        setEntries((current) => removeEntriesByKey(current, successfulKeys));
+        setSelectedKeys((current) =>
+          removeSelectedKeys(current, successfulKeys)
+        );
+      }
+
+      onFinished?.();
+
+      if (failures.length > 0) {
+        setError(
+          formatBatchActionError(
+            actionLabel,
+            failures.length,
+            getErrorMessage(failures[0].reason)
+          )
+        );
+        await loadEntries();
+      }
     } finally {
-      setDeletingId(null);
+      setPendingAction(null);
+      setPendingKeys(new Set());
     }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!restoreTargets || restoreTargets.length === 0) {
+      return;
+    }
+
+    await runEntriesAction({
+      action: "restore",
+      actionLabel: "恢复",
+      targets: restoreTargets,
+      run: async (entry) => {
+        const restored = await restoreSession({
+          sessionId: entry.session.id,
+          workspaceId: entry.workspaceId,
+        });
+
+        if (!restored) {
+          throw new Error("会话不存在或已被恢复。");
+        }
+      },
+      onFinished: () => setRestoreTargets(null),
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTargets || deleteTargets.length === 0) {
+      return;
+    }
+
+    await runEntriesAction({
+      action: "delete",
+      actionLabel: "删除",
+      targets: deleteTargets,
+      run: async (entry) => {
+        await deleteSession(entry.session.id, entry.workspaceId);
+      },
+      onFinished: () => setDeleteTargets(null),
+    });
   };
 
   return (
@@ -144,14 +228,14 @@ export function ArchivedSessionsSettings() {
               已归档会话
             </h2>
             <p className="mt-1 text-[12px] text-stone-500">
-              {archivedCount > 0 ? `${archivedCount} 条会话` : "暂无归档"}
+              {entries.length > 0 ? `${entries.length} 条会话` : "暂无归档"}
             </p>
           </div>
           <button
             type="button"
             onClick={() => void loadEntries()}
             className="flex h-8 w-8 items-center justify-center rounded-md text-stone-400 transition hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isLoading}
+            disabled={isLoading || isBusy}
             aria-label="刷新已归档会话"
             title="刷新"
           >
@@ -166,185 +250,82 @@ export function ArchivedSessionsSettings() {
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+      <div className="overflow-hidden rounded-[18px] border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(35,31,27,0.04)]">
         {isLoading ? (
           <div className="px-4 py-8 text-center text-[13px] text-stone-500">
             加载中...
           </div>
         ) : entries.length === 0 ? (
           <div className="px-4 py-10 text-center">
-            <div className="text-[14px] font-medium text-stone-800">没有已归档会话</div>
+            <div className="text-[14px] font-medium text-stone-800">
+              没有已归档会话
+            </div>
           </div>
         ) : (
-          <div className="divide-y divide-stone-100">
-            {entries.map((entry) => {
-              const isRestoring = restoringId === entry.session.id;
-              const isDeleting = deletingId === entry.session.id;
-              const isBusy = isRestoring || isDeleting;
-              return (
-                <div
-                  key={`${entry.workspaceId}:${entry.session.id}`}
-                  className="flex items-center gap-3 px-4 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px] font-medium text-stone-900">
-                      {entry.session.title}
-                    </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-[12px] text-stone-500">
-                      <span className="truncate">{entry.workspaceName}</span>
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-stone-300" />
-                      <span className="shrink-0">
-                        {formatDate(entry.session.archivedAt)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(entry)}
-                      disabled={isBusy}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium text-red-600 transition",
-                        "hover:bg-red-50 hover:text-red-700",
-                        "disabled:cursor-not-allowed disabled:opacity-40"
-                      )}
-                      aria-label={`永久删除${entry.session.title}`}
-                      title="永久删除"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                      <span>{isDeleting ? "删除中" : "删除"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleRestore(entry)}
-                      disabled={isBusy}
-                      className={cn(
-                        "shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition",
-                        "bg-stone-900 text-white hover:bg-stone-800",
-                        "disabled:cursor-not-allowed disabled:bg-stone-300"
-                      )}
-                    >
-                      {isRestoring ? "恢复中" : "恢复"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <ArchivedSessionsToolbar
+              allSelected={allSelected}
+              indeterminate={isSelectionMixed}
+              isBusy={isBusy}
+              isRestoring={pendingAction === "restore"}
+              selectedCount={selectedCount}
+              selectAllCheckboxRef={selectAllCheckboxRef}
+              onClearSelection={() => setSelectedKeys(new Set())}
+              onDeleteSelected={() => setDeleteTargets(selectedEntries)}
+              onRestoreSelected={() => setRestoreTargets(selectedEntries)}
+              onToggleSelectAll={toggleSelectAll}
+            />
+
+            <div className="space-y-1 p-2">
+              {entries.map((entry) => {
+                const key = getArchivedSessionKey(entry);
+                const isPending = pendingKeys.has(key);
+                return (
+                  <ArchivedSessionRow
+                    key={key}
+                    entry={entry}
+                    isBusy={isBusy}
+                    isDeleting={pendingAction === "delete" && isPending}
+                    isRestoring={pendingAction === "restore" && isPending}
+                    isSelected={selectedKeys.has(key)}
+                    onDelete={() => setDeleteTargets([entry])}
+                    onRestore={() => setRestoreTargets([entry])}
+                    onToggleSelected={() => toggleEntrySelection(entry)}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
-      {deleteTarget ? (
-        <DeleteArchivedSessionDialog
-          entry={deleteTarget}
-          busy={deletingId === deleteTarget.session.id}
+      {deleteTargets ? (
+        <ArchivedSessionActionDialog
+          action="delete"
+          entries={deleteTargets}
+          busy={pendingAction === "delete"}
           onCancel={() => {
-            if (!deletingId) {
-              setDeleteTarget(null);
+            if (pendingAction !== "delete") {
+              setDeleteTargets(null);
             }
           }}
           onConfirm={() => void handleConfirmDelete()}
         />
       ) : null}
+
+      {restoreTargets ? (
+        <ArchivedSessionActionDialog
+          action="restore"
+          entries={restoreTargets}
+          busy={pendingAction === "restore"}
+          onCancel={() => {
+            if (pendingAction !== "restore") {
+              setRestoreTargets(null);
+            }
+          }}
+          onConfirm={() => void handleConfirmRestore()}
+        />
+      ) : null}
     </section>
-  );
-}
-
-function DeleteArchivedSessionDialog({
-  entry,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  entry: ArchivedSessionEntry;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const isDefaultWorkspace = entry.workspaceId === DEFAULT_WORKSPACE_ID;
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) {
-        onCancel();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [busy, onCancel]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[180] flex items-center justify-center bg-stone-900/24 px-4 backdrop-blur-[1px]"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          onCancel();
-        }
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-archived-session-title"
-        className="w-full max-w-[390px] rounded-2xl border border-stone-200 bg-[#fffdf9] p-5 shadow-[0_24px_60px_rgba(35,31,27,0.22)]"
-      >
-        <div
-          id="delete-archived-session-title"
-          className="text-[16px] font-semibold text-stone-950"
-        >
-          永久删除归档会话？
-        </div>
-        <div className="mt-3 rounded-xl bg-stone-50 px-3 py-2">
-          <div className="text-[11px] font-medium text-stone-400">会话</div>
-          <div className="mt-1 line-clamp-2 text-[13px] font-medium leading-relaxed text-stone-900">
-            {entry.session.title}
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-2 text-[13px] leading-relaxed">
-          <div>
-            <div className="font-medium text-stone-900">将删除</div>
-            <div className="mt-0.5 text-stone-500">
-              {isDefaultWorkspace
-                ? "会话记录、附件和这条会话生成的默认区文件。"
-                : "会话记录和附件。"}
-            </div>
-          </div>
-          {!isDefaultWorkspace ? (
-            <div>
-              <div className="font-medium text-stone-900">不会删除</div>
-              <div className="mt-0.5 text-stone-500">项目目录或项目文件。</div>
-            </div>
-          ) : null}
-          <div className="rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700 ring-1 ring-red-100">
-            删除后无法恢复。
-          </div>
-        </div>
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onCancel}
-            className="h-8 rounded-lg border border-stone-200 bg-white px-3 text-[12px] font-medium text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onConfirm}
-            className="h-8 rounded-lg bg-red-600 px-3 text-[12px] font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
-          >
-            {busy ? "删除中" : "永久删除"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

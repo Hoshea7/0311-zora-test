@@ -31,6 +31,7 @@ async function loadMemorySettingsModule(homeDir: string) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.doUnmock("node:os");
   vi.resetModules();
 
@@ -55,6 +56,7 @@ describe("main memory-settings", () => {
       await loadMemorySettingsModule(homeDir);
 
     await saveMemorySettings({
+      enabled: true,
       mode: "batch",
       batchIdleMinutes: 60,
       memoryProviderId: "provider-1",
@@ -62,12 +64,14 @@ describe("main memory-settings", () => {
     });
 
     await expect(loadMemorySettings()).resolves.toEqual({
+      enabled: true,
       mode: "batch",
       batchIdleMinutes: 60,
       memoryProviderId: "provider-1",
       memoryModelId: "claude-haiku",
     });
     expect(getMemorySettingsSync()).toEqual({
+      enabled: true,
       mode: "batch",
       batchIdleMinutes: 60,
       memoryProviderId: "provider-1",
@@ -78,6 +82,7 @@ describe("main memory-settings", () => {
         readFileSync(path.join(homeDir, ".zora", "memory-settings.json"), "utf8")
       )
     ).toEqual({
+      enabled: true,
       mode: "batch",
       batchIdleMinutes: 60,
       memoryProviderId: "provider-1",
@@ -90,6 +95,7 @@ describe("main memory-settings", () => {
       await loadMemorySettingsModule(createTempHome());
 
     await saveMemorySettings({
+      enabled: true,
       mode: "manual",
       batchIdleMinutes: 30,
       memoryProviderId: null,
@@ -97,11 +103,74 @@ describe("main memory-settings", () => {
     });
 
     await expect(loadMemorySettings()).resolves.toEqual({
+      enabled: true,
       mode: "manual",
       batchIdleMinutes: 30,
       memoryProviderId: null,
       memoryModelId: null,
     });
+  });
+
+  it("saves and loads disabled memory settings without deleting model preferences", async () => {
+    const homeDir = createTempHome();
+    const { loadMemorySettings, saveMemorySettings } =
+      await loadMemorySettingsModule(homeDir);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await saveMemorySettings({
+      enabled: false,
+      mode: "batch",
+      batchIdleMinutes: 20,
+      memoryProviderId: "memory-provider",
+      memoryModelId: "low-cost-model",
+    });
+
+    await expect(loadMemorySettings()).resolves.toEqual({
+      enabled: false,
+      mode: "batch",
+      batchIdleMinutes: 20,
+      memoryProviderId: "memory-provider",
+      memoryModelId: "low-cost-model",
+    });
+    expect(
+      JSON.parse(
+        readFileSync(path.join(homeDir, ".zora", "memory-settings.json"), "utf8")
+      )
+    ).toEqual({
+      enabled: false,
+      mode: "batch",
+      batchIdleMinutes: 20,
+      memoryProviderId: "memory-provider",
+      memoryModelId: "low-cost-model",
+    });
+  });
+
+  it("logs when memory is disabled or enabled", async () => {
+    const { saveMemorySettings } =
+      await loadMemorySettingsModule(createTempHome());
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await saveMemorySettings({
+      enabled: false,
+      mode: "manual",
+      batchIdleMinutes: 30,
+      memoryProviderId: null,
+      memoryModelId: null,
+    });
+    await saveMemorySettings({
+      enabled: true,
+      mode: "manual",
+      batchIdleMinutes: 30,
+      memoryProviderId: null,
+      memoryModelId: null,
+    });
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[app][memory][settings:enabled] 记忆已关闭")
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[app][memory][settings:enabled] 记忆已开启")
+    );
   });
 
   it("normalizes invalid persisted values back to safe defaults", async () => {
@@ -114,6 +183,7 @@ describe("main memory-settings", () => {
     writeFileSync(
       filePath,
       JSON.stringify({
+        enabled: "yes",
         mode: "later",
         batchIdleMinutes: 7,
         memoryProviderId: "   ",

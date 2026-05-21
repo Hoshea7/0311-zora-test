@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DEFAULT_MEMORY_SETTINGS } from "@/shared/types/memory";
 
 const tempHomes = new Set<string>();
 
@@ -29,12 +30,14 @@ async function loadModules(homeDir: string) {
   });
 
   return {
+    memorySettings: await import("@/main/memory-settings"),
     memoryStore: await import("@/main/memory-store"),
     dynamicContext: await import("@/main/prompts/zora-dynamic-context"),
   };
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.doUnmock("node:os");
   vi.resetModules();
@@ -108,6 +111,27 @@ describe("zora dynamic context", () => {
     const context = await dynamicContext.buildZoraDynamicContext();
 
     expect(context).toContain("当前没有注入的长期记忆。");
+  });
+
+  it("does not inject stored memory when memory is disabled", async () => {
+    const { dynamicContext, memorySettings, memoryStore } =
+      await loadModules(createTempHome());
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await memorySettings.saveMemorySettings({
+      ...DEFAULT_MEMORY_SETTINGS,
+      enabled: false,
+    });
+    await memoryStore.saveFile("USER.md", "# USER.md\n\n称呼：天");
+    await memoryStore.saveFile("MEMORY.md", "# MEMORY.md\n\n- 只做前端任务");
+    await memoryStore.appendDailyLog("- 不应进入本次上下文");
+
+    const context = await dynamicContext.buildZoraDynamicContext();
+
+    expect(context).toContain("长期记忆已关闭");
+    expect(context).not.toContain("称呼：天");
+    expect(context).not.toContain("只做前端任务");
+    expect(context).not.toContain("不应进入本次上下文");
   });
 
   it("wraps raw prompts without a user_message tag", async () => {

@@ -3,10 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { createPortal } from "react-dom";
 import type { MemorySettings } from "../../../shared/types/memory";
 import { activeMainViewAtom, isSettingsOpenAtom } from "../../store/ui";
-import {
-  emitMemorySettingsUpdated,
-  MEMORY_SETTINGS_UPDATED_EVENT,
-} from "../../utils/memory-settings-event";
+import { MEMORY_SETTINGS_UPDATED_EVENT } from "../../utils/memory-settings-event";
 import { cn } from "../../utils/cn";
 
 function MemoryProcessButton() {
@@ -241,7 +238,10 @@ export function SidebarFooter() {
   const setActiveMainView = useSetAtom(activeMainViewAtom);
   const isSettingsOpen = useAtomValue(isSettingsOpenAtom);
   const setSettingsOpen = useSetAtom(isSettingsOpenAtom);
-  const [memoryMode, setMemoryMode] = useState<MemorySettings["mode"] | null>(null);
+  const [memorySettings, setMemorySettings] = useState<Pick<
+    MemorySettings,
+    "enabled" | "mode"
+  > | null>(null);
   const isScheduleOpen = activeMainView === "schedule";
 
   useEffect(() => {
@@ -253,8 +253,7 @@ export function SidebarFooter() {
         if (!isActive) {
           return;
         }
-        setMemoryMode(settings.mode);
-        emitMemorySettingsUpdated(settings);
+        setMemorySettings({ enabled: settings.enabled, mode: settings.mode });
       } catch (error) {
         console.error("[SidebarFooter] Failed to load memory settings:", error);
       }
@@ -265,7 +264,7 @@ export function SidebarFooter() {
       if (!detail || !isActive) {
         return;
       }
-      setMemoryMode(detail.mode);
+      setMemorySettings({ enabled: detail.enabled, mode: detail.mode });
     };
 
     void loadMemorySettings();
@@ -341,7 +340,7 @@ export function SidebarFooter() {
         </button>
       </div>
 
-      {memoryMode === "manual" ? (
+      {memorySettings?.enabled && memorySettings.mode === "manual" ? (
         <div className="flex justify-end px-1">
           <MemoryProcessButton />
         </div>
