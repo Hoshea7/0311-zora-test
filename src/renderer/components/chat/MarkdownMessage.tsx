@@ -879,8 +879,8 @@ const markdownComponents: Components = {
   ul: ({ children, className, ...props }) => (
     <ul
       className={cn(
-        "ml-5 list-disc space-y-2 marker:text-orange-300",
-        className?.includes("contains-task-list") ? "ml-0 list-none space-y-2.5" : ""
+        "list-outside list-disc space-y-2 pl-6 marker:text-orange-300",
+        className?.includes("contains-task-list") ? "list-none space-y-2.5 pl-0" : ""
       )}
       {...props}
     >
@@ -890,8 +890,8 @@ const markdownComponents: Components = {
   ol: ({ children, className, ...props }) => (
     <ol
       className={cn(
-        "ml-5 list-decimal space-y-2 marker:font-medium marker:text-orange-400",
-        className?.includes("contains-task-list") ? "ml-0 list-none space-y-2.5" : ""
+        "list-outside list-decimal space-y-2 pl-8 marker:font-medium marker:text-orange-400",
+        className?.includes("contains-task-list") ? "list-none space-y-2.5 pl-0" : ""
       )}
       {...props}
     >
