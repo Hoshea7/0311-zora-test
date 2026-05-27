@@ -116,6 +116,7 @@ describe("query profiles", () => {
     expect(profile.options.env.ZORA_TEST_ENV).toBe("from-profile-env");
     expect(profile.options.env.ZORA_RUNTIME_ENV).toBe("from-runtime");
     expect(profile.options.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
+    expect(profile.options.maxTurns).toBe(120);
   });
 
   it("forces Claude Code auto-memory off for memory agent runs", async () => {

@@ -5,6 +5,8 @@ import { resolveSdkEnvForProfile } from "./sdk-env";
 import { getZoraPluginPath } from "../skill-manager";
 import type { ProfileBuildContext, QueryProfile } from "./types";
 
+const PRODUCTIVITY_MAX_TURNS = 120;
+
 export async function buildProductivityProfile(ctx: ProfileBuildContext): Promise<QueryProfile> {
   const systemPrompt = await buildZoraSystemPrompt();
   const env = await resolveSdkEnvForProfile("productivity", {
@@ -18,7 +20,7 @@ export async function buildProductivityProfile(ctx: ProfileBuildContext): Promis
     pathToClaudeCodeExecutable: ctx.sdkRuntime.pathToClaudeCodeExecutable,
     executable: ctx.sdkRuntime.executable,
     executableArgs: ctx.sdkRuntime.executableArgs,
-    maxTurns: 50,
+    maxTurns: PRODUCTIVITY_MAX_TURNS,
     persistSession: true,
     includePartialMessages: true,
     env: {
